@@ -88,16 +88,6 @@ absl::Status SQLTableValuedFunction::Create(
   return absl::OkStatus();
 }
 
-static absl::Status CheckTypesEqual(const Type* type1, const Type* type2) {
-  // TODO: coercions should have ensured we have Equal() types, but
-  // some external test setup set the proto descriptor pools & type factories
-  // inconsistently.
-  GOOGLESQL_RET_CHECK(type1->Equivalent(type2))
-      << "Type mismatch: " << type1->DebugString() << " vs "
-      << type2->DebugString();
-  return absl::OkStatus();
-}
-
 static absl::StatusOr<bool> TableArgHasEqualAnnotationsToDefinition(
     const TVFInputArgumentType& argument,
     const FunctionArgumentType& declaration) {
@@ -116,8 +106,9 @@ static absl::StatusOr<bool> TableArgHasEqualAnnotationsToDefinition(
     GOOGLESQL_RET_CHECK(!argument_column.is_pseudo_column);
     GOOGLESQL_RET_CHECK(!declaration_column.is_pseudo_column);
 
-    GOOGLESQL_RETURN_IF_ERROR(
-        CheckTypesEqual(argument_column.type, declaration_column.type));
+    GOOGLESQL_RET_CHECK(argument_column.type->Equals(declaration_column.type))
+        << "Type mismatch: " << argument_column.type->DebugString() << " vs "
+        << declaration_column.type->DebugString();
     if (!AnnotationMap::Equals(argument_column.annotation_map,
                                declaration_column.annotation_map)) {
       return false;

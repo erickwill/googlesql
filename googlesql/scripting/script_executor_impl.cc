@@ -1167,6 +1167,37 @@ absl::Status ScriptExecutorImpl::ExecuteForInStatement() {
          << "Kind::kForInitial or Kind::kForAdvance";
 }
 
+// Returns an error if <argument> holds one of the non-expression argument
+// forms (TABLE/MODEL/CONNECTION/DESCRIPTOR/GRAPH path), none of which are
+// supported in a CALL statement. Those forms leave ASTTVFArgument::expr()
+// null, so callers must run this before dereferencing expr(). A form added to
+// ASTTVFArgument later is rejected by the default branch without this list
+// having to be updated.
+static absl::Status CheckProcedureArgumentIsExpression(
+    const ASTTVFArgument* argument) {
+  if (argument->expr() != nullptr) {
+    return absl::OkStatus();
+  }
+  // TODO: support table-typed arguments.
+  absl::string_view argument_kind;
+  if (argument->table_clause() != nullptr) {
+    argument_kind = "Table";
+  } else if (argument->model_clause() != nullptr) {
+    argument_kind = "Model";
+  } else if (argument->connection_clause() != nullptr) {
+    argument_kind = "Connection";
+  } else if (argument->descriptor() != nullptr) {
+    argument_kind = "Descriptor";
+  } else if (argument->graph_clause() != nullptr) {
+    argument_kind = "Graph";
+  } else {
+    return MakeScriptExceptionAt(argument)
+           << "Procedure argument is not supported";
+  }
+  return MakeScriptExceptionAt(argument)
+         << argument_kind << " typed procedure argument is not supported";
+}
+
 // Given <call_statement> calling a procedure defined <procedure_definition>,
 // verifies if passed-in OUT/INOUT argument is valid. Returns a map from
 // <passed-in variable name> to <argument_name>.
@@ -1177,12 +1208,7 @@ absl::StatusOr<OutputArgumentMap> VerifyOutputArgumentsAndBuildMap(
   for (int i = 0; i < procedure_definition.signature().NumRequiredArguments();
        i++) {
     const ASTTVFArgument* ast_tvf_argument = call_statement->arguments().at(i);
-    // TODO: support table-typed arguments.
-    if (ast_tvf_argument->table_clause() || ast_tvf_argument->model_clause()) {
-      return MakeScriptExceptionAt(ast_tvf_argument)
-             << (ast_tvf_argument->table_clause() ? "Table" : "Model")
-             << " typed argument is not supported";
-    }
+    GOOGLESQL_RETURN_IF_ERROR(CheckProcedureArgumentIsExpression(ast_tvf_argument));
     const ASTExpression* argument_expr = ast_tvf_argument->expr();
     FunctionEnums::ProcedureArgumentMode argument_mode =
         procedure_definition.signature()
@@ -1321,6 +1347,10 @@ absl::Status ScriptExecutorImpl::CheckAndEvaluateProcedureArguments(
     const FunctionArgumentType& function_argument_type =
         procedure_definition.signature().argument(i);
     const ASTExpression* expr = call_statement->arguments().at(i)->expr();
+    // VerifyOutputArgumentsAndBuildMap() above rejects every non-expression
+    // argument form, so this is unreachable. Fail with a status rather than
+    // dereferencing null if a new form ever slips past that guard.
+    GOOGLESQL_RET_CHECK_NE(expr, nullptr);
     if (expr->Is<ASTNamedArgument>()) {
       allow_positional_args = false;
       GOOGLESQL_RETURN_IF_ERROR(ValidateIsNotIsNamedLambda(expr));
@@ -1402,6 +1432,11 @@ absl::Status ScriptExecutorImpl::ExecuteCallStatement() {
     if (absl::IsInternal(status)) {
       return status;
     }
+    // Add filtering here for unknown errors because engines may leak internal
+    // errors as unknown errors. See b/568318633 for more details.
+    if (absl::IsUnknown(status)) {
+      return absl::InternalError(status.message());
+    }
     // Attach other loading errors with procedure name.
     return MakeScriptExceptionAt(path_node) << status.message();
   }
@@ -1414,6 +1449,7 @@ absl::Status ScriptExecutorImpl::ExecuteCallStatement() {
   if (procedure_definition == nullptr) {
     GOOGLESQL_RET_CHECK(options_.dry_run());
     for (const googlesql::ASTTVFArgument* arg : call_statement->arguments()) {
+      GOOGLESQL_RETURN_IF_ERROR(CheckProcedureArgumentIsExpression(arg));
       GOOGLESQL_RETURN_IF_ERROR(EvaluateExpression(arg->expr(), nullptr).status());
     }
     return AdvancePastCurrentStatement(absl::OkStatus());

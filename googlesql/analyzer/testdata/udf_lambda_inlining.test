@@ -120,6 +120,34 @@ CreateFunctionStmt
               +-Literal(type=INT64, value=1)
 ==
 
+[use_database=udf_db_with_transform]
+[prepare_database=udf_db_with_transform]
+# Defines a UDF that passes a lambda calling its function-typed parameter
+# to PropagateTransform, which in turn passes it to built-in array_transform.
+create function OuterPropagate(arr array<int64>, g function<int64 -> bool>)
+as (PropagateTransform(arr, x -> g(x)));
+--
+CreateFunctionStmt
++-name_path=OuterPropagate
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="PropagateTransform(arr, x -> g(x))"
++-function_expression=
+  +-FunctionCall(Lazy_resolution_function:PropagateTransform(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> f) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-inline_lambda=
+        +-InlineLambda
+          +-argument_list=[$lambda_arg.x#1]
+          +-body=
+            +-FunctionCall(FUNCTION_TYPED_PARAMETER:g(INT64) -> BOOL)
+              +-ColumnRef(type=INT64, column=$lambda_arg.x#1)
+==
+
 [prepare_database=udf_db_with_apply_int]
 CREATE FUNCTION apply_int(f FUNCTION<INT64 -> INT64>, x INT64) AS (f(x));
 --
@@ -4746,3 +4774,820 @@ QueryStmt
         | +-a#1 := Literal(type=INT64, value=1)
         +-input_scan=
           +-SingleRowScan
+==
+
+# Inlines an inner SQL function call even when an outer function-typed parameter
+# cannot be inlined yet because no concrete lambda is bound at function definition time.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS]
+[use_database=udf_db_with_apply_int]
+CREATE FUNCTION call_param_and_inlined_udf(f FUNCTION<INT64 -> INT64>, x INT64)
+AS (f(x) + apply_int(y -> y + 1, x));
+--
+CreateFunctionStmt
++-name_path=call_param_and_inlined_udf
++-return_type=INT64
++-argument_name_list=[f, x]
++-signature=(FUNCTION<INT64->INT64> f, INT64 x) -> INT64
++-language="SQL"
++-code="f(x) + apply_int(y -> y + 1, x)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+    +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+    | +-ArgumentRef(type=INT64, name="x")
+    +-FunctionCall(Lazy_resolution_function:apply_int(FUNCTION<INT64->INT64> f, INT64 x) -> INT64)
+      +-FunctionArgument
+      | +-inline_lambda=
+      |   +-InlineLambda
+      |     +-argument_list=[$lambda_arg.y#1]
+      |     +-body=
+      |       +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+      |         +-ColumnRef(type=INT64, column=$lambda_arg.y#1)
+      |         +-Literal(type=INT64, value=1)
+      +-FunctionArgument
+        +-expr=
+          +-ArgumentRef(type=INT64, name="x")
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=call_param_and_inlined_udf
++-return_type=INT64
++-argument_name_list=[f, x]
++-signature=(FUNCTION<INT64->INT64> f, INT64 x) -> INT64
++-language="SQL"
++-code="f(x) + apply_int(y -> y + 1, x)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+    +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+    | +-ArgumentRef(type=INT64, name="x")
+    +-SubqueryExpr
+      +-type=INT64
+      +-subquery_type=SCALAR
+      +-subquery=
+        +-ProjectScan
+          +-column_list=[$with_expr.injected#4]
+          +-expr_list=
+          | +-injected#4 :=
+          |   +-SubqueryExpr
+          |     +-type=INT64
+          |     +-subquery_type=SCALAR
+          |     +-parameter_list=
+          |     | +-ColumnRef(type=INT64, column=$inlined_apply_int.x#2)
+          |     +-subquery=
+          |       +-ProjectScan
+          |         +-column_list=[$with_expr.injected#5]
+          |         +-expr_list=
+          |         | +-injected#5 :=
+          |         |   +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+          |         |     +-ColumnRef(type=INT64, column=$inlined_lambda.y#3)
+          |         |     +-Literal(type=INT64, value=1)
+          |         +-input_scan=
+          |           +-ProjectScan
+          |             +-column_list=[$inlined_lambda.y#3]
+          |             +-expr_list=
+          |             | +-y#3 := ColumnRef(type=INT64, column=$inlined_apply_int.x#2, is_correlated=TRUE)
+          |             +-input_scan=
+          |               +-SingleRowScan
+          +-input_scan=
+            +-ProjectScan
+              +-column_list=[$inlined_apply_int.x#2]
+              +-expr_list=
+              | +-x#2 := ArgumentRef(type=INT64, name="x")
+              +-input_scan=
+                +-SingleRowScan
+==
+
+# Verifies analyzing a CREATE FUNCTION statement that passes an unbound
+# function-typed parameter reference to an inlinable function call.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS]
+[use_database=udf_db_with_apply_int]
+CREATE FUNCTION propagate_unbound_param(g FUNCTION<INT64 -> INT64>, x INT64)
+AS (apply_int(FUNCTION g, x));
+--
+CreateFunctionStmt
++-name_path=propagate_unbound_param
++-return_type=INT64
++-argument_name_list=[g, x]
++-signature=(FUNCTION<INT64->INT64> g, INT64 x) -> INT64
++-language="SQL"
++-code="apply_int(FUNCTION g, x)"
++-function_expression=
+  +-FunctionCall(Lazy_resolution_function:apply_int(FUNCTION<INT64->INT64> f, INT64 x) -> INT64)
+    +-FunctionArgument
+    | +-function_ref=
+    |   +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> INT64)
+    +-FunctionArgument
+      +-expr=
+        +-ArgumentRef(type=INT64, name="x")
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=propagate_unbound_param
++-return_type=INT64
++-argument_name_list=[g, x]
++-signature=(FUNCTION<INT64->INT64> g, INT64 x) -> INT64
++-language="SQL"
++-code="apply_int(FUNCTION g, x)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=INT64
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$with_expr.injected#2]
+        +-expr_list=
+        | +-injected#2 :=
+        |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:g(INT64) -> INT64)
+        |     +-ColumnRef(type=INT64, column=$inlined_apply_int.x#1)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$inlined_apply_int.x#1]
+            +-expr_list=
+            | +-x#1 := ArgumentRef(type=INT64, name="x")
+            +-input_scan=
+              +-SingleRowScan
+==
+
+# Verifies inlining an inner function call that forwards an unbound parameter
+# alongside an outer direct parameter call in the same UDF body.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS]
+[use_database=udf_db_with_apply_int]
+CREATE FUNCTION call_param_and_inlined_udf2(f FUNCTION<INT64 -> INT64>, x INT64)
+AS (f(x) + apply_int(FUNCTION f, x));
+--
+CreateFunctionStmt
++-name_path=call_param_and_inlined_udf2
++-return_type=INT64
++-argument_name_list=[f, x]
++-signature=(FUNCTION<INT64->INT64> f, INT64 x) -> INT64
++-language="SQL"
++-code="f(x) + apply_int(FUNCTION f, x)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+    +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+    | +-ArgumentRef(type=INT64, name="x")
+    +-FunctionCall(Lazy_resolution_function:apply_int(FUNCTION<INT64->INT64> f, INT64 x) -> INT64)
+      +-FunctionArgument
+      | +-function_ref=
+      |   +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:f, signature=(INT64) -> INT64)
+      +-FunctionArgument
+        +-expr=
+          +-ArgumentRef(type=INT64, name="x")
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=call_param_and_inlined_udf2
++-return_type=INT64
++-argument_name_list=[f, x]
++-signature=(FUNCTION<INT64->INT64> f, INT64 x) -> INT64
++-language="SQL"
++-code="f(x) + apply_int(FUNCTION f, x)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:$add(INT64, INT64) -> INT64)
+    +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+    | +-ArgumentRef(type=INT64, name="x")
+    +-SubqueryExpr
+      +-type=INT64
+      +-subquery_type=SCALAR
+      +-subquery=
+        +-ProjectScan
+          +-column_list=[$with_expr.injected#2]
+          +-expr_list=
+          | +-injected#2 :=
+          |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+          |     +-ColumnRef(type=INT64, column=$inlined_apply_int.x#1)
+          +-input_scan=
+            +-ProjectScan
+              +-column_list=[$inlined_apply_int.x#1]
+              +-expr_list=
+              | +-x#1 := ArgumentRef(type=INT64, name="x")
+              +-input_scan=
+                +-SingleRowScan
+==
+
+# Verifies inlining an inner function (PropagateTransform) that forwards an
+# unbound function-typed parameter reference to a built-in (ARRAY_TRANSFORM),
+# both with and without built-in function inlining enabled.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS{{|,-BUILTIN_FUNCTION_INLINER}}]
+[use_database=udf_db_with_transform]
+CREATE FUNCTION call_propagate_transform(arr ARRAY<INT64>, g FUNCTION<INT64 -> BOOL>)
+AS (PropagateTransform(arr, FUNCTION g));
+--
+ALTERNATION GROUP: <empty>
+--
+CreateFunctionStmt
++-name_path=call_propagate_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="PropagateTransform(arr, FUNCTION g)"
++-function_expression=
+  +-FunctionCall(Lazy_resolution_function:PropagateTransform(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> f) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> BOOL)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=call_propagate_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="PropagateTransform(arr, FUNCTION g)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=ARRAY<BOOL>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$with_expr.injected#8]
+        +-expr_list=
+        | +-injected#8 :=
+        |   +-SubqueryExpr
+        |     +-type=ARRAY<BOOL>
+        |     +-subquery_type=SCALAR
+        |     +-parameter_list=
+        |     | +-ColumnRef(type=ARRAY<INT64>, column=$inlined_PropagateTransform.arr#1)
+        |     +-subquery=
+        |       +-ProjectScan
+        |         +-column_list=[$expr_subquery.$col1#7]
+        |         +-expr_list=
+        |         | +-$col1#7 :=
+        |         |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<BOOL>, ARRAY<BOOL>) -> ARRAY<BOOL>)
+        |         |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<INT64>) -> BOOL)
+        |         |     | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3)
+        |         |     +-Literal(type=ARRAY<BOOL>, value=NULL)
+        |         |     +-SubqueryExpr
+        |         |       +-type=ARRAY<BOOL>
+        |         |       +-subquery_type=ARRAY
+        |         |       +-parameter_list=
+        |         |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3)
+        |         |       +-subquery=
+        |         |         +-OrderByScan
+        |         |           +-column_list=[$expr_subquery.$col1#6]
+        |         |           +-is_ordered=TRUE
+        |         |           +-input_scan=
+        |         |           | +-ProjectScan
+        |         |           |   +-column_list=[$array.element#4, $array_offset.off#5, $expr_subquery.$col1#6]
+        |         |           |   +-expr_list=
+        |         |           |   | +-$col1#6 :=
+        |         |           |   |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:g(INT64) -> BOOL)
+        |         |           |   |     +-ColumnRef(type=INT64, column=$array.element#4)
+        |         |           |   +-input_scan=
+        |         |           |     +-ArrayScan
+        |         |           |       +-column_list=[$array.element#4, $array_offset.off#5]
+        |         |           |       +-array_expr_list=
+        |         |           |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3, is_correlated=TRUE)
+        |         |           |       +-element_column_list=[$array.element#4]
+        |         |           |       +-array_offset_column=
+        |         |           |         +-ColumnHolder(column=$array_offset.off#5)
+        |         |           +-order_by_item_list=
+        |         |             +-OrderByItem
+        |         |               +-column_ref=
+        |         |                 +-ColumnRef(type=INT64, column=$array_offset.off#5)
+        |         +-input_scan=
+        |           +-ProjectScan
+        |             +-column_list=[$subquery1.array_to_transform#3]
+        |             +-expr_list=
+        |             | +-array_to_transform#3 := ColumnRef(type=ARRAY<INT64>, column=$inlined_PropagateTransform.arr#1, is_correlated=TRUE)
+        |             +-input_scan=
+        |               +-SingleRowScan
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$inlined_PropagateTransform.arr#1]
+            +-expr_list=
+            | +-arr#1 := ArgumentRef(type=ARRAY<INT64>, name="arr")
+            +-input_scan=
+              +-SingleRowScan
+--
+ALTERNATION GROUP: ,-BUILTIN_FUNCTION_INLINER
+--
+CreateFunctionStmt
++-name_path=call_propagate_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="PropagateTransform(arr, FUNCTION g)"
++-function_expression=
+  +-FunctionCall(Lazy_resolution_function:PropagateTransform(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> f) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> BOOL)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=call_propagate_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="PropagateTransform(arr, FUNCTION g)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=ARRAY<BOOL>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$with_expr.injected#2]
+        +-expr_list=
+        | +-injected#2 :=
+        |   +-FunctionCall(GoogleSQL:array_transform(ARRAY<INT64> array_to_transform, FUNCTION<INT64->BOOL> transformation) -> ARRAY<BOOL>)
+        |     +-FunctionArgument
+        |     | +-expr=
+        |     |   +-ColumnRef(type=ARRAY<INT64>, column=$inlined_PropagateTransform.arr#1)
+        |     +-FunctionArgument
+        |       +-function_ref=
+        |         +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> BOOL)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$inlined_PropagateTransform.arr#1]
+            +-expr_list=
+            | +-arr#1 := ArgumentRef(type=ARRAY<INT64>, name="arr")
+            +-input_scan=
+              +-SingleRowScan
+==
+
+# Verifies an unbound function-typed parameter reference (FUNCTION g) passed
+# directly to a built-in (array_transform), both with and without built-in
+# function inlining enabled.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS{{|,-BUILTIN_FUNCTION_INLINER}}]
+[use_database=udf_db_with_transform]
+CREATE FUNCTION direct_unbound_transform(arr ARRAY<INT64>, g FUNCTION<INT64 -> BOOL>)
+AS (array_transform(arr, FUNCTION g));
+--
+ALTERNATION GROUP: <empty>
+--
+CreateFunctionStmt
++-name_path=direct_unbound_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="array_transform(arr, FUNCTION g)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:array_transform(ARRAY<INT64> array_to_transform, FUNCTION<INT64->BOOL> transformation) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> BOOL)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=direct_unbound_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="array_transform(arr, FUNCTION g)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=ARRAY<BOOL>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$expr_subquery.$col1#6]
+        +-expr_list=
+        | +-$col1#6 :=
+        |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<BOOL>, ARRAY<BOOL>) -> ARRAY<BOOL>)
+        |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<INT64>) -> BOOL)
+        |     | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2)
+        |     +-Literal(type=ARRAY<BOOL>, value=NULL)
+        |     +-SubqueryExpr
+        |       +-type=ARRAY<BOOL>
+        |       +-subquery_type=ARRAY
+        |       +-parameter_list=
+        |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2)
+        |       +-subquery=
+        |         +-OrderByScan
+        |           +-column_list=[$expr_subquery.$col1#5]
+        |           +-is_ordered=TRUE
+        |           +-input_scan=
+        |           | +-ProjectScan
+        |           |   +-column_list=[$array.element#3, $array_offset.off#4, $expr_subquery.$col1#5]
+        |           |   +-expr_list=
+        |           |   | +-$col1#5 :=
+        |           |   |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:g(INT64) -> BOOL)
+        |           |   |     +-ColumnRef(type=INT64, column=$array.element#3)
+        |           |   +-input_scan=
+        |           |     +-ArrayScan
+        |           |       +-column_list=[$array.element#3, $array_offset.off#4]
+        |           |       +-array_expr_list=
+        |           |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2, is_correlated=TRUE)
+        |           |       +-element_column_list=[$array.element#3]
+        |           |       +-array_offset_column=
+        |           |         +-ColumnHolder(column=$array_offset.off#4)
+        |           +-order_by_item_list=
+        |             +-OrderByItem
+        |               +-column_ref=
+        |                 +-ColumnRef(type=INT64, column=$array_offset.off#4)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$subquery1.array_to_transform#2]
+            +-expr_list=
+            | +-array_to_transform#2 := ArgumentRef(type=ARRAY<INT64>, name="arr")
+            +-input_scan=
+              +-SingleRowScan
+--
+ALTERNATION GROUP: ,-BUILTIN_FUNCTION_INLINER
+--
+CreateFunctionStmt
++-name_path=direct_unbound_transform
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, g]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>
++-language="SQL"
++-code="array_transform(arr, FUNCTION g)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:array_transform(ARRAY<INT64> array_to_transform, FUNCTION<INT64->BOOL> transformation) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:g, signature=(INT64) -> BOOL)
+==
+
+# Transitive lambda inlining through a built-in higher-order function.
+# Tests that when an outer UDF passes a lambda that references the outer UDF's
+# function-typed parameter into another UDF (PropagateTransform) that delegates
+# to a built-in function (array_transform), the function-typed parameter
+# reference inside the lambda body is correctly inlined.
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS]
+[use_database=udf_db_with_transform]
+SELECT OuterPropagate([1, 2, 3], y -> y > 1);
+--
+
+QueryStmt
++-output_column_list=
+| +-$query.$col1#2 AS `$col1` [ARRAY<BOOL>]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#2]
+    +-expr_list=
+    | +-$col1#2 :=
+    |   +-FunctionCall(Lazy_resolution_function:OuterPropagate(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> g) -> ARRAY<BOOL>)
+    |     +-FunctionArgument
+    |     | +-expr=
+    |     |   +-Literal(type=ARRAY<INT64>, value=[1, 2, 3])
+    |     +-FunctionArgument
+    |       +-inline_lambda=
+    |         +-InlineLambda
+    |           +-argument_list=[$lambda_arg.y#1]
+    |           +-body=
+    |             +-FunctionCall(GoogleSQL:$greater(INT64, INT64) -> BOOL)
+    |               +-ColumnRef(type=INT64, column=$lambda_arg.y#1)
+    |               +-Literal(type=INT64, value=1)
+    +-input_scan=
+      +-SingleRowScan
+
+[REWRITTEN AST]
+QueryStmt
++-output_column_list=
+| +-$query.$col1#2 AS `$col1` [ARRAY<BOOL>]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#2]
+    +-expr_list=
+    | +-$col1#2 :=
+    |   +-SubqueryExpr
+    |     +-type=ARRAY<BOOL>
+    |     +-subquery_type=SCALAR
+    |     +-subquery=
+    |       +-ProjectScan
+    |         +-column_list=[$with_expr.injected#13]
+    |         +-expr_list=
+    |         | +-injected#13 :=
+    |         |   +-SubqueryExpr
+    |         |     +-type=ARRAY<BOOL>
+    |         |     +-subquery_type=SCALAR
+    |         |     +-parameter_list=
+    |         |     | +-ColumnRef(type=ARRAY<INT64>, column=$inlined_OuterPropagate.arr#4)
+    |         |     +-subquery=
+    |         |       +-ProjectScan
+    |         |         +-column_list=[$with_expr.injected#14]
+    |         |         +-expr_list=
+    |         |         | +-injected#14 :=
+    |         |         |   +-SubqueryExpr
+    |         |         |     +-type=ARRAY<BOOL>
+    |         |         |     +-subquery_type=SCALAR
+    |         |         |     +-parameter_list=
+    |         |         |     | +-ColumnRef(type=ARRAY<INT64>, column=$inlined_PropagateTransform.arr#5)
+    |         |         |     +-subquery=
+    |         |         |       +-ProjectScan
+    |         |         |         +-column_list=[$expr_subquery.$col1#11]
+    |         |         |         +-expr_list=
+    |         |         |         | +-$col1#11 :=
+    |         |         |         |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<BOOL>, ARRAY<BOOL>) -> ARRAY<BOOL>)
+    |         |         |         |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<INT64>) -> BOOL)
+    |         |         |         |     | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#7)
+    |         |         |         |     +-Literal(type=ARRAY<BOOL>, value=NULL)
+    |         |         |         |     +-SubqueryExpr
+    |         |         |         |       +-type=ARRAY<BOOL>
+    |         |         |         |       +-subquery_type=ARRAY
+    |         |         |         |       +-parameter_list=
+    |         |         |         |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#7)
+    |         |         |         |       +-subquery=
+    |         |         |         |         +-OrderByScan
+    |         |         |         |           +-column_list=[$expr_subquery.$col1#10]
+    |         |         |         |           +-is_ordered=TRUE
+    |         |         |         |           +-input_scan=
+    |         |         |         |           | +-ProjectScan
+    |         |         |         |           |   +-column_list=[$array.element#8, $array_offset.off#9, $expr_subquery.$col1#10]
+    |         |         |         |           |   +-expr_list=
+    |         |         |         |           |   | +-$col1#10 :=
+    |         |         |         |           |   |   +-SubqueryExpr
+    |         |         |         |           |   |     +-type=BOOL
+    |         |         |         |           |   |     +-subquery_type=SCALAR
+    |         |         |         |           |   |     +-parameter_list=
+    |         |         |         |           |   |     | +-ColumnRef(type=INT64, column=$array.element#8)
+    |         |         |         |           |   |     +-subquery=
+    |         |         |         |           |   |       +-ProjectScan
+    |         |         |         |           |   |         +-column_list=[$with_expr.injected#15]
+    |         |         |         |           |   |         +-expr_list=
+    |         |         |         |           |   |         | +-injected#15 :=
+    |         |         |         |           |   |         |   +-FunctionCall(GoogleSQL:$greater(INT64, INT64) -> BOOL)
+    |         |         |         |           |   |         |     +-ColumnRef(type=INT64, column=$inlined_lambda.y#12)
+    |         |         |         |           |   |         |     +-Literal(type=INT64, value=1)
+    |         |         |         |           |   |         +-input_scan=
+    |         |         |         |           |   |           +-ProjectScan
+    |         |         |         |           |   |             +-column_list=[$inlined_lambda.y#12]
+    |         |         |         |           |   |             +-expr_list=
+    |         |         |         |           |   |             | +-y#12 := ColumnRef(type=INT64, column=$array.element#8, is_correlated=TRUE)
+    |         |         |         |           |   |             +-input_scan=
+    |         |         |         |           |   |               +-SingleRowScan
+    |         |         |         |           |   +-input_scan=
+    |         |         |         |           |     +-ArrayScan
+    |         |         |         |           |       +-column_list=[$array.element#8, $array_offset.off#9]
+    |         |         |         |           |       +-array_expr_list=
+    |         |         |         |           |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#7, is_correlated=TRUE)
+    |         |         |         |           |       +-element_column_list=[$array.element#8]
+    |         |         |         |           |       +-array_offset_column=
+    |         |         |         |           |         +-ColumnHolder(column=$array_offset.off#9)
+    |         |         |         |           +-order_by_item_list=
+    |         |         |         |             +-OrderByItem
+    |         |         |         |               +-column_ref=
+    |         |         |         |                 +-ColumnRef(type=INT64, column=$array_offset.off#9)
+    |         |         |         +-input_scan=
+    |         |         |           +-ProjectScan
+    |         |         |             +-column_list=[$subquery1.array_to_transform#7]
+    |         |         |             +-expr_list=
+    |         |         |             | +-array_to_transform#7 := ColumnRef(type=ARRAY<INT64>, column=$inlined_PropagateTransform.arr#5, is_correlated=TRUE)
+    |         |         |             +-input_scan=
+    |         |         |               +-SingleRowScan
+    |         |         +-input_scan=
+    |         |           +-ProjectScan
+    |         |             +-column_list=[$inlined_PropagateTransform.arr#5]
+    |         |             +-expr_list=
+    |         |             | +-arr#5 := ColumnRef(type=ARRAY<INT64>, column=$inlined_OuterPropagate.arr#4, is_correlated=TRUE)
+    |         |             +-input_scan=
+    |         |               +-SingleRowScan
+    |         +-input_scan=
+    |           +-ProjectScan
+    |             +-column_list=[$inlined_OuterPropagate.arr#4]
+    |             +-expr_list=
+    |             | +-arr#4 := Literal(type=ARRAY<INT64>, value=[1, 2, 3])
+    |             +-input_scan=
+    |               +-SingleRowScan
+    +-input_scan=
+      +-SingleRowScan
+==
+
+# Verifies inlining an inner built-in higher-order function (APPLY) that
+# receives a function-typed parameter reference inside a lambda passed to
+# another built-in function (MAP_REPLACE).
+[language_features=NONE,+INLINE_LAMBDA_ARGUMENT,+UDF_LAMBDA_ARGUMENTS,+WITH_EXPRESSION,+MAP_TYPE,+HAVING_IN_AGGREGATE,+CHAINED_FUNCTION_CALLS]
+[enabled_ast_rewrites=DEFAULTS,+INLINE_SQL_FUNCTIONS]
+CREATE FUNCTION CustomReplaceMap(mp MAP<STRING, INT64>, f FUNCTION<INT64 -> INT64>)
+AS (MAP_REPLACE(mp, 'a', 'b', 'c', (v) -> APPLY(v, FUNCTION f)));
+--
+CreateFunctionStmt
++-name_path=CustomReplaceMap
++-return_type=MAP<STRING, INT64>
++-argument_name_list=[mp, f]
++-signature=(MAP<STRING, INT64> mp, FUNCTION<INT64->INT64> f) -> MAP<STRING, INT64>
++-language="SQL"
++-code="MAP_REPLACE(mp, 'a', 'b', 'c', (v) -> APPLY(v, FUNCTION f))"
++-function_expression=
+  +-FunctionCall(GoogleSQL:map_replace(MAP<STRING, INT64> input_map, STRING key, repeated(2) STRING repeated_key, FUNCTION<INT64->INT64> updater_lambda) -> MAP<STRING, INT64>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=MAP<STRING, INT64>, name="mp")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="a")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="b")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="c")
+    +-FunctionArgument
+      +-inline_lambda=
+        +-InlineLambda
+          +-argument_list=[$lambda_arg.v#1]
+          +-body=
+            +-FunctionCall(GoogleSQL:apply(INT64 value, FUNCTION<INT64->INT64> transform) -> INT64)
+              +-FunctionArgument
+              | +-expr=
+              |   +-ColumnRef(type=INT64, column=$lambda_arg.v#1)
+              +-FunctionArgument
+                +-function_ref=
+                  +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:f, signature=(INT64) -> INT64)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=CustomReplaceMap
++-return_type=MAP<STRING, INT64>
++-argument_name_list=[mp, f]
++-signature=(MAP<STRING, INT64> mp, FUNCTION<INT64->INT64> f) -> MAP<STRING, INT64>
++-language="SQL"
++-code="MAP_REPLACE(mp, 'a', 'b', 'c', (v) -> APPLY(v, FUNCTION f))"
++-function_expression=
+  +-SubqueryExpr
+    +-type=MAP<STRING, INT64>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$expr_subquery.$col1#29]
+        +-expr_list=
+        | +-$col1#29 :=
+        |   +-FunctionCall(GoogleSQL:if(BOOL, MAP<STRING, INT64>, MAP<STRING, INT64>) -> MAP<STRING, INT64>)
+        |     +-FunctionCall(GoogleSQL:$is_null(MAP<STRING, INT64>) -> BOOL)
+        |     | +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#5)
+        |     +-Literal(type=MAP<STRING, INT64>, value=NULL)
+        |     +-FunctionCall(GoogleSQL:map_from_array(ARRAY<STRUCT<key STRING, INT64>>) -> MAP<STRING, INT64>)
+        |       +-SubqueryExpr
+        |         +-type=ARRAY<STRUCT<key STRING, INT64>>
+        |         +-subquery_type=ARRAY
+        |         +-parameter_list=
+        |         | +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#5)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.key#6)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.repeated_key_1#7)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.repeated_key_2#8)
+        |         +-subquery=
+        |           +-ProjectScan
+        |             +-column_list=[$expr_subquery.$col1#28]
+        |             +-expr_list=
+        |             | +-$col1#28 :=
+        |             |   +-FunctionCall(GoogleSQL:$case_no_value(repeated(2) BOOL, repeated(2) STRUCT<key STRING, INT64>, STRUCT<key STRING, INT64>) -> STRUCT<key STRING, INT64>)
+        |             |     +-FunctionCall(GoogleSQL:$greater(INT64, INT64) -> BOOL)
+        |             |     | +-ColumnRef(type=INT64, column=$aggregate.$agg1#22)
+        |             |     | +-Literal(type=INT64, value=1)
+        |             |     +-Cast(STRUCT<key STRING, INT64> -> STRUCT<key STRING, INT64>)
+        |             |     | +-FunctionCall(GoogleSQL:error(STRING) -> STRUCT<key STRING, INT64>)
+        |             |     |   +-FunctionCall(GoogleSQL:format(STRING, repeated(1) STRING) -> STRING)
+        |             |     |     +-Literal(type=STRING, value="Key provided more than once as argument: %T")
+        |             |     |     +-ColumnRef(type=STRING, column=$groupby.key#27)
+        |             |     +-FunctionCall(GoogleSQL:$equal(INT64, INT64) -> BOOL)
+        |             |     | +-ColumnRef(type=INT64, column=$aggregate.$agg2#23)
+        |             |     | +-Literal(type=INT64, value=1)
+        |             |     +-Cast(STRUCT<key STRING, INT64> -> STRUCT<key STRING, INT64>)
+        |             |     | +-FunctionCall(GoogleSQL:error(STRING) -> STRUCT<key STRING, INT64>)
+        |             |     |   +-FunctionCall(GoogleSQL:format(STRING, repeated(1) STRING) -> STRING)
+        |             |     |     +-Literal(type=STRING, value="Key does not exist in map: %T")
+        |             |     |     +-ColumnRef(type=STRING, column=$groupby.key#27)
+        |             |     +-MakeStruct
+        |             |       +-type=STRUCT<key STRING, INT64>
+        |             |       +-field_list=
+        |             |         +-ColumnRef(type=STRING, column=$groupby.key#27)
+        |             |         +-FunctionCall(GoogleSQL:if(BOOL, INT64, INT64) -> INT64)
+        |             |           +-FunctionCall(GoogleSQL:$equal(INT64, INT64) -> BOOL)
+        |             |           | +-ColumnRef(type=INT64, column=$aggregate.$agg3#24)
+        |             |           | +-Literal(type=INT64, value=1)
+        |             |           +-SubqueryExpr
+        |             |           | +-type=INT64
+        |             |           | +-subquery_type=SCALAR
+        |             |           | +-parameter_list=
+        |             |           | | +-ColumnRef(type=INT64, column=$aggregate.$agg4#25)
+        |             |           | +-subquery=
+        |             |           |   +-ProjectScan
+        |             |           |     +-column_list=[$expr_subquery.$col1#30]
+        |             |           |     +-expr_list=
+        |             |           |     | +-$col1#30 :=
+        |             |           |     |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+        |             |           |     |     +-ColumnRef(type=INT64, column=$subquery1.value#31)
+        |             |           |     +-input_scan=
+        |             |           |       +-ProjectScan
+        |             |           |         +-column_list=[$subquery1.value#31]
+        |             |           |         +-expr_list=
+        |             |           |         | +-value#31 := ColumnRef(type=INT64, column=$aggregate.$agg4#25, is_correlated=TRUE)
+        |             |           |         +-input_scan=
+        |             |           |           +-SingleRowScan
+        |             |           +-ColumnRef(type=INT64, column=$aggregate.$agg5#26)
+        |             +-input_scan=
+        |               +-AggregateScan
+        |                 +-column_list=[$groupby.key#27, $aggregate.$agg1#22, $aggregate.$agg2#23, $aggregate.$agg3#24, $aggregate.$agg4#25, $aggregate.$agg5#26]
+        |                 +-input_scan=
+        |                 | +-SetOperationScan
+        |                 |   +-column_list=$union_all.[key#19, value#20, is_new#21]
+        |                 |   +-op_type=UNION_ALL
+        |                 |   +-input_item_list=
+        |                 |     +-SetOperationItem
+        |                 |     | +-scan=
+        |                 |     | | +-ProjectScan
+        |                 |     | |   +-column_list=$union_all1.[key#10, value#11, is_new#12]
+        |                 |     | |   +-expr_list=
+        |                 |     | |   | +-key#10 :=
+        |                 |     | |   | | +-GetStructField
+        |                 |     | |   | |   +-type=STRING
+        |                 |     | |   | |   +-expr=
+        |                 |     | |   | |   | +-ColumnRef(type=STRUCT<key STRING, value INT64>, column=$array.t#9)
+        |                 |     | |   | |   +-field_idx=0
+        |                 |     | |   | +-value#11 :=
+        |                 |     | |   | | +-GetStructField
+        |                 |     | |   | |   +-type=INT64
+        |                 |     | |   | |   +-expr=
+        |                 |     | |   | |   | +-ColumnRef(type=STRUCT<key STRING, value INT64>, column=$array.t#9)
+        |                 |     | |   | |   +-field_idx=1
+        |                 |     | |   | +-is_new#12 := Literal(type=INT64, value=0)
+        |                 |     | |   +-input_scan=
+        |                 |     | |     +-ArrayScan
+        |                 |     | |       +-column_list=[$array.t#9]
+        |                 |     | |       +-array_expr_list=
+        |                 |     | |       | +-FunctionCall(GoogleSQL:map_entries_unsorted(MAP<STRING, INT64>) -> ARRAY<STRUCT<key STRING, value INT64>>)
+        |                 |     | |       |   +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#5, is_correlated=TRUE)
+        |                 |     | |       +-element_column_list=[$array.t#9]
+        |                 |     | +-output_column_list=$union_all1.[key#10, value#11, is_new#12]
+        |                 |     +-SetOperationItem
+        |                 |       +-scan=
+        |                 |       | +-ProjectScan
+        |                 |       |   +-column_list=[$union_all.key#16, $union_all2.value#17, $union_all2.is_new#18]
+        |                 |       |   +-expr_list=
+        |                 |       |   | +-value#17 := Literal(type=INT64, value=NULL)
+        |                 |       |   | +-is_new#18 := Literal(type=INT64, value=1)
+        |                 |       |   +-input_scan=
+        |                 |       |     +-SetOperationScan
+        |                 |       |       +-column_list=[$union_all.key#16]
+        |                 |       |       +-op_type=UNION_ALL
+        |                 |       |       +-input_item_list=
+        |                 |       |         +-SetOperationItem
+        |                 |       |         | +-scan=
+        |                 |       |         | | +-ProjectScan
+        |                 |       |         | |   +-column_list=[$union_all1.key#13]
+        |                 |       |         | |   +-expr_list=
+        |                 |       |         | |   | +-key#13 := ColumnRef(type=STRING, column=$subquery1.key#6, is_correlated=TRUE)
+        |                 |       |         | |   +-input_scan=
+        |                 |       |         | |     +-SingleRowScan
+        |                 |       |         | +-output_column_list=[$union_all1.key#13]
+        |                 |       |         +-SetOperationItem
+        |                 |       |         | +-scan=
+        |                 |       |         | | +-ProjectScan
+        |                 |       |         | |   +-column_list=[$union_all2.key#14]
+        |                 |       |         | |   +-expr_list=
+        |                 |       |         | |   | +-key#14 := ColumnRef(type=STRING, column=$subquery1.repeated_key_1#7, is_correlated=TRUE)
+        |                 |       |         | |   +-input_scan=
+        |                 |       |         | |     +-SingleRowScan
+        |                 |       |         | +-output_column_list=[$union_all2.key#14]
+        |                 |       |         +-SetOperationItem
+        |                 |       |           +-scan=
+        |                 |       |           | +-ProjectScan
+        |                 |       |           |   +-column_list=[$union_all3.key#15]
+        |                 |       |           |   +-expr_list=
+        |                 |       |           |   | +-key#15 := ColumnRef(type=STRING, column=$subquery1.repeated_key_2#8, is_correlated=TRUE)
+        |                 |       |           |   +-input_scan=
+        |                 |       |           |     +-SingleRowScan
+        |                 |       |           +-output_column_list=[$union_all3.key#15]
+        |                 |       +-output_column_list=[$union_all.key#16, $union_all2.value#17, $union_all2.is_new#18]
+        |                 +-group_by_list=
+        |                 | +-key#27 := ColumnRef(type=STRING, column=$union_all.key#19)
+        |                 +-aggregate_list=
+        |                   +-$agg1#22 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:sum(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#21)
+        |                   +-$agg2#23 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:min(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#21)
+        |                   +-$agg3#24 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:max(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#21)
+        |                   +-$agg4#25 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.value#20)
+        |                   |   +-having_modifier=
+        |                   |     +-AggregateHavingModifier
+        |                   |       +-kind=MIN
+        |                   |       +-having_expr=
+        |                   |         +-ColumnRef(type=INT64, column=$union_all.is_new#21)
+        |                   +-$agg5#26 :=
+        |                     +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
+        |                       +-ColumnRef(type=INT64, column=$union_all.value#20)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=$subquery1.[input_map#5, key#6, repeated_key_1#7, repeated_key_2#8]
+            +-expr_list=
+            | +-input_map#5 := ArgumentRef(type=MAP<STRING, INT64>, name="mp")
+            | +-key#6 := Literal(type=STRING, value="a")
+            | +-repeated_key_1#7 := Literal(type=STRING, value="b")
+            | +-repeated_key_2#8 := Literal(type=STRING, value="c")
+            +-input_scan=
+              +-SingleRowScan

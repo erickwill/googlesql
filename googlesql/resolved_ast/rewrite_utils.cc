@@ -2870,6 +2870,41 @@ absl::StatusOr<bool> ContainsWithScan(const googlesql::ResolvedNode& node) {
   return visitor.contains_with_scan();
 }
 
+bool HasNonTerminalInsertScan(const ResolvedNode* node) {
+  if (node == nullptr) {
+    return false;
+  }
+  std::vector<const ResolvedNode*> insert_scans;
+  node->GetDescendantsSatisfying(
+      &ResolvedNode::Is<googlesql::ResolvedInsertScan>, &insert_scans);
+  if (insert_scans.empty()) {
+    return false;
+  }
+  std::vector<const ResolvedNode*> finish_scans;
+  node->GetDescendantsSatisfying(&ResolvedNode::Is<ResolvedFinishScan>,
+                                 &finish_scans);
+
+  // Terminal insert scans are insert scans directly followed by a finish scan.
+  absl::flat_hash_set<const ResolvedInsertScan*> terminal_insert_scans;
+  for (const ResolvedNode* finish_scan_node : finish_scans) {
+    const auto* finish_scan = finish_scan_node->GetAs<ResolvedFinishScan>();
+    if (finish_scan->input_scan() != nullptr &&
+        finish_scan->input_scan()->Is<ResolvedInsertScan>()) {
+      terminal_insert_scans.insert(
+          finish_scan->input_scan()->GetAs<ResolvedInsertScan>());
+    }
+  }
+
+  // If any insert scan is not directly followed by a finish scan, then this
+  // plan contains non-terminal insert scan.
+  return (absl::c_any_of(
+      insert_scans,
+      [&terminal_insert_scans](const ResolvedNode* insert_scan_node) {
+        return !terminal_insert_scans.contains(
+            insert_scan_node->GetAs<ResolvedInsertScan>());
+      }));
+}
+
 absl::Status FunctionCallBuilder::GetBuiltinFunctionFromCatalog(
     absl::string_view function_name, const Function** fn_out) {
   GOOGLESQL_RET_CHECK_NE(fn_out, nullptr);

@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "googlesql/resolved_ast/resolved_node.h"
+#include "googlesql/resolved_ast/resolved_node_kind.pb.h"
 #include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 

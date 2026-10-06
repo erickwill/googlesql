@@ -1416,6 +1416,8 @@ public final class AnnotationMapTest {
         .isEqualTo("IsVersioned");
     assertThat(AnnotationMap.getAnnotationKindName(AnnotationMap.AnnotationKind.VECTOR_LENGTH))
         .isEqualTo("VectorLength");
+    assertThat(AnnotationMap.getAnnotationKindName(AnnotationMap.AnnotationKind.VECTOR_ENCODING))
+        .isEqualTo("VectorEncoding");
     assertThat(
             AnnotationMap.getAnnotationKindName(
                 AnnotationMap.AnnotationKind.MAX_BUILTIN_ANNOTATION_KIND))
@@ -1434,9 +1436,12 @@ public final class AnnotationMapTest {
         .isEqualTo(AnnotationMap.AnnotationKind.IS_VERSIONED);
     assertThat(AnnotationMap.AnnotationKind.fromId(5))
         .isEqualTo(AnnotationMap.AnnotationKind.VECTOR_LENGTH);
+    assertThat(AnnotationMap.AnnotationKind.fromId(6))
+        .isEqualTo(AnnotationMap.AnnotationKind.VECTOR_ENCODING);
     assertThat(AnnotationMap.AnnotationKind.fromId(10000))
         .isEqualTo(AnnotationMap.AnnotationKind.MAX_BUILTIN_ANNOTATION_KIND);
 
     assertThat(AnnotationMap.AnnotationKind.VECTOR_LENGTH.getValue()).isEqualTo(5);
+    assertThat(AnnotationMap.AnnotationKind.VECTOR_ENCODING.getValue()).isEqualTo(6);
   }
 }

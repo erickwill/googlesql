@@ -31,21 +31,22 @@
 #include <variant>
 #include <vector>
 
-#include "googlesql/base/logging.h"
 #include "googlesql/base/path.h"
 #include "googlesql/common/measure_analysis_utils.h"
 #include "googlesql/common/testing/testing_proto_util.h"
-#include "googlesql/common/type_visitors.h"
 #include "googlesql/compliance/test_driver.pb.h"
 #include "googlesql/public/functions/date_time_util.h"  
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/options.pb.h"
+#include "googlesql/public/simple_catalog.h"
 #include "googlesql/public/type.h"
 #include "googlesql/public/types/annotation.h"
 #include "googlesql/public/value.h"
 #include "absl/base/attributes.h"
 #include "absl/base/macros.h"
 #include "absl/flags/declare.h"
+#include "googlesql/base/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
@@ -170,6 +171,24 @@ class TestTableOptions {
     pseudo_columns_ = std::move(pseudo_columns);
   }
 
+  const std::vector<Value>& column_default_values() const {
+    return column_default_values_;
+  }
+  void set_column_default_values(std::vector<Value> column_default_values) {
+    column_default_values_ = std::move(column_default_values);
+  }
+
+  bool has_column_default_value(int column_index) const {
+    return !column_default_values_.empty() &&
+           column_index < column_default_values_.size() &&
+           column_default_values_[column_index].is_valid();
+  }
+
+  const Value& get_column_default_value(int column_index) const {
+    ABSL_DCHECK(has_column_default_value(column_index));
+    return column_default_values_[column_index];
+  }
+
  private:
   // LINT.IfChange
   // Defines expected table size after populating it with random data. The
@@ -208,6 +227,14 @@ class TestTableOptions {
   //
   // Pseudo-columns can be selected explicitly but do not show up in SELECT *.
   std::vector<bool> pseudo_columns_;
+
+  // Default values for each column of the table. `column_default_values_` is
+  // either empty or has the same number of elements as the number of the
+  // columns in the table.
+  //
+  // An invalid Value indicates that the corresponding table column does not
+  // have a default value.
+  std::vector<Value> column_default_values_;
 };
 
 // This describes a table that should be present in the created database.
@@ -271,7 +298,7 @@ struct TestDatabase {
   // LINT.IfChange
   // File paths (*.proto) relative to the build workspace
   std::set<std::string> proto_files;
-  bool runs_as_test = true;       // When true, looks for files in test_srcdir.
+  bool runs_as_test = true;  // When true, looks for files in test_srcdir.
   std::set<std::string> proto_names;        // Set of proto type names.
   std::set<std::string> enum_names;         // Set of enum type names.
   std::map<std::string, TestTable> tables;  // Keyed on table name.
@@ -547,7 +574,7 @@ class TestDriver {
   // materialized views information because the views are generated in the test
   // engine now. A better solution is to move the view creation logic to
   // reference engine and print out the debug information in one place.
-  virtual std::string DebugContext() { return "";}
+  virtual std::string DebugContext() { return ""; }
 
   // Classes for use with the proto2 Importer, which can be used to import the
   // proto files included in a test database. The source tree is responsible for
@@ -563,8 +590,7 @@ class TestDriver {
               .ok()) {
         contents_.push_back(contents);
         return new google::protobuf::io::ArrayInputStream(
-            contents_.back().data(),
-            static_cast<int>(contents_.back().size()));
+            contents_.back().data(), static_cast<int>(contents_.back().size()));
       }
       return nullptr;
     }

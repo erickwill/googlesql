@@ -73,6 +73,22 @@ absl::Status SampleAnnotation::CheckAndPropagateForColumnRef(
   return absl::OkStatus();
 }
 
+absl::Status SampleAnnotation::CheckAndPropagateForParameter(
+    const ResolvedParameter& parameter, AnnotationMap* result_annotation_map) {
+  if (result_annotation_map == nullptr) {
+    return absl::OkStatus();
+  }
+  if (parameter.type_annotation_map() != nullptr) {
+    GOOGLESQL_RETURN_IF_ERROR(CopyAnnotationRecursively(
+        GetId(), parameter.type_annotation_map(), result_annotation_map));
+  } else if (absl::StartsWith(parameter.name(), "test_param_") ||
+             parameter.name() == "p" || parameter.position() != 0) {
+    result_annotation_map->SetAnnotation<SampleAnnotation>(SimpleValue::Int64(
+        parameter.position() != 0 ? parameter.position() : 0));
+  }
+  return absl::OkStatus();
+}
+
 absl::Status SampleAnnotation::CheckAndPropagateForGetStructField(
     const ResolvedGetStructField& get_struct_field,
     AnnotationMap* result_annotation_map) {

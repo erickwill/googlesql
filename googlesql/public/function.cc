@@ -155,9 +155,9 @@ Function::Function(std::vector<std::string> name_path, absl::string_view group,
                    FunctionOptions function_options)
     : function_name_path_(std::move(name_path)),
       group_(std::move(group)),
-      mode_(mode),
       function_signatures_(std::move(function_signatures)),
-      function_options_(std::move(function_options)) {
+      function_options_(std::move(function_options)),
+      mode_(mode) {
   GOOGLESQL_CHECK_OK(CheckWindowSupportOptions());
   for (const FunctionSignature& signature : function_signatures_) {
     GOOGLESQL_CHECK_OK(signature.IsValidForFunction())
@@ -693,6 +693,16 @@ bool Function::SupportsOverClause() const {
 }
 
 bool Function::SupportsWithinClause() const {
+  // Currently, the WITHIN clause is restricted to built-in functions because
+  // supporting user-defined aggregates (UDAs) requires further design.
+  // In particular, GoogleSQL UDAs can contain multi-level aggregation (MLA),
+  // for which WITHIN clause support has not yet been designed. While this
+  // limitation stems primarily from the inliner and reference implementation
+  // rather than the resolver, we disallow it here until the requirements
+  // and complexity are fully understood.
+  if (!IsGoogleSQLBuiltin()) {
+    return false;
+  }
   // Currently, aggregate functions and analytic functions with the
   // `supports_within_clause` option enabled support the WITHIN clause.
   // This will change in the future when we add support for estimator functions

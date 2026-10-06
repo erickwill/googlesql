@@ -24,7 +24,6 @@
 #include "googlesql/parser/token_with_location.h"
 #include "googlesql/public/parse_location.h"
 #include "gtest/gtest.h"
-#include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"

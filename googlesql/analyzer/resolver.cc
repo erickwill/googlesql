@@ -561,6 +561,9 @@ absl::StatusOr<bool> Resolver::MaybeAssignTypeToUndeclaredParameter(
   GOOGLESQL_RETURN_IF_ERROR(AssignTypeToUndeclaredParameter(location->start(), type));
   auto coerced_parameter = MakeResolvedParameter(type, parameter->name(),
                                                  parameter->position(), false);
+  GOOGLESQL_RETURN_IF_ERROR(CheckAndPropagateAnnotations(/*error_node=*/nullptr,
+                                               coerced_parameter.get()));
+
   if (parameter->GetParseLocationRangeOrNULL() != nullptr) {
     coerced_parameter->SetParseLocationRange(
         *parameter->GetParseLocationRangeOrNULL());

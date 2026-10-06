@@ -37,6 +37,7 @@
 #include "googlesql/public/proto/vector_encoding_id.pb.h"
 #include "googlesql/public/simple_catalog.h"
 #include "googlesql/public/simple_property_graph.h"
+#include "googlesql/public/sql_tvf.h"
 #include "googlesql/public/table_valued_function.h"
 #include "googlesql/public/templated_sql_function.h"
 #include "googlesql/public/templated_sql_tvf.h"
@@ -580,8 +581,7 @@ TEST(ValidateTest, CreateFunctionStmtWithRemoteAndInvalidLanguage) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/true,
-          /*connection=*/nullptr);
+          /*is_remote=*/true, /*connection_list=*/nullptr);
 
   Validator validator;
   ASSERT_THAT(
@@ -608,8 +608,7 @@ TEST(ValidateTest, CreateFunctionStmtWithRemoteAndRemoteLanguage) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/true,
-          /*connection=*/nullptr);
+          /*is_remote=*/true, /*connection_list=*/nullptr);
 
   Validator validator;
   GOOGLESQL_ASSERT_OK(validator.ValidateResolvedStatement(create_function_stmt.get()));
@@ -636,8 +635,7 @@ TEST(ValidateTest, CreateFunctionStmtWithRemoteAndTemplatedArg) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/true,
-          /*connection=*/nullptr);
+          /*is_remote=*/true, /*connection_list=*/nullptr);
 
   Validator validator;
   GOOGLESQL_ASSERT_OK(validator.ValidateResolvedStatement(create_function_stmt.get()));
@@ -662,8 +660,7 @@ TEST(ValidateTest,
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/true,
-          /*connection=*/nullptr);
+          /*is_remote=*/true, /*connection_list=*/nullptr);
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_REMOTE_FUNCTION);
   Validator validator(language_options);
@@ -691,8 +688,7 @@ TEST(ValidateTest,
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/true,
-          /*connection=*/nullptr);
+          /*is_remote=*/true, /*connection_list=*/nullptr);
 
   Validator validator;
   GOOGLESQL_ASSERT_OK(validator.ValidateResolvedStatement(create_function_stmt.get()));
@@ -717,7 +713,8 @@ TEST(ValidateTest, CreateFunctionStmtWithConnectionButNotRemote) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/false, MakeResolvedConnection(&connection));
+          /*is_remote=*/false,
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   Validator validator;
   ASSERT_THAT(
@@ -743,8 +740,7 @@ TEST(ValidateTest, CreateFunctionStmtWithRemoteLanguageButNotRemote) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/false,
-          /*connection=*/nullptr);
+          /*is_remote=*/false, /*connection_list=*/nullptr);
 
   Validator validator;
   ASSERT_THAT(
@@ -806,8 +802,7 @@ TEST(ValidateTest, CreateFunctionStmtWithInvalidResolvedArgumentRef) {
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
           /*determinism_level=*/
           ResolvedCreateStatement::DETERMINISM_UNSPECIFIED,
-          /*is_remote=*/false,
-          /*connection=*/nullptr);
+          /*is_remote=*/false, /*connection_list=*/nullptr);
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_MULTILEVEL_AGGREGATION);
@@ -830,8 +825,7 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureNotEnabled) {
           /*signature=*/
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
-          /*procedure_body=*/"",
-          /*connection=*/nullptr,
+          /*procedure_body=*/"", /*connection_list=*/nullptr,
           /*language=*/"PYTHON",
           /*code=*/"",
           /*external_security=*/
@@ -855,16 +849,17 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLConnectionFeatureNotEnabled) {
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
           /*procedure_body=*/"",
-          /*connection=*/MakeResolvedConnection(&connection),
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)),
           /*language=*/"PYTHON",
           /*code=*/"",
           /*external_security=*/
           ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED);
 
   Validator validator;
-  ASSERT_THAT(
-      validator.ValidateResolvedStatement(create_procedure_stmt.get()),
-      StatusIs(absl::StatusCode::kInternal, HasSubstr("stmt->connection()")));
+  ASSERT_THAT(validator.ValidateResolvedStatement(create_procedure_stmt.get()),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("stmt->connection_list()")));
 }
 
 TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabledMissingLanguage) {
@@ -877,8 +872,7 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabledMissingLanguage) {
           /*signature=*/
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
-          /*procedure_body=*/"sql",
-          /*connection=*/nullptr,
+          /*procedure_body=*/"sql", /*connection_list=*/nullptr,
           /*language=*/"",
           /*code=*/"code",
           /*external_security=*/
@@ -901,8 +895,7 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabledHasBodyAndLanguage) {
           /*signature=*/
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
-          /*procedure_body=*/"body",
-          /*connection=*/nullptr,
+          /*procedure_body=*/"body", /*connection_list=*/nullptr,
           /*language=*/"python",
           /*code=*/"",
           /*external_security=*/
@@ -925,8 +918,7 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabledHasLanguage) {
           /*signature=*/
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
-          /*procedure_body=*/"",
-          /*connection=*/nullptr,
+          /*procedure_body=*/"", /*connection_list=*/nullptr,
           /*language=*/"PYTHON",
           /*code=*/"",
           /*external_security=*/
@@ -948,8 +940,7 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabledHasLanguageAndCode) {
           /*signature=*/
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
-          /*procedure_body=*/"",
-          /*connection=*/nullptr,
+          /*procedure_body=*/"", /*connection_list=*/nullptr,
           /*language=*/"PYTHON",
           /*code=*/"code",
           /*external_security=*/
@@ -973,7 +964,8 @@ TEST(ValidateTest, CreateProcedureStmtNonSQLFeatureEnabled) {
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
           /*procedure_body=*/"",
-          /*connection=*/MakeResolvedConnection(&connection),
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)),
           /*language=*/"PYTHON",
           /*code=*/"code",
           /*external_security=*/
@@ -997,7 +989,8 @@ TEST(ValidateTest, CreateProcedureStmtExternalSecurityFeatureNotEnabled) {
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
           /*procedure_body=*/"",
-          /*connection=*/MakeResolvedConnection(&connection),
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)),
           /*language=*/"PYTHON",
           /*code=*/"code",
           /*external_security=*/
@@ -1021,7 +1014,8 @@ TEST(ValidateTest, CreateProcedureStmtExternalSecurityFeatureEnabled) {
           FunctionSignature(FunctionArgumentType(ARG_KIND_VOID), {}, nullptr),
           /*option_list=*/{},
           /*procedure_body=*/"",
-          /*connection=*/MakeResolvedConnection(&connection),
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)),
           /*language=*/"PYTHON",
           /*code=*/"code",
           /*external_security=*/
@@ -1111,8 +1105,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_Local) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   Validator validator;
   GOOGLESQL_EXPECT_OK(validator.ValidateResolvedStatement(statement.get()));
@@ -1148,8 +1141,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_AliasedQueryList) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(
@@ -1200,8 +1192,7 @@ TEST(ValidatorTest, CreateModelStatement_DuplicateAliasedQueryList) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(
@@ -1249,8 +1240,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_AliasedQueryListDisabled) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   Validator validator;
   EXPECT_THAT(validator.ValidateResolvedStatement(statement.get()),
@@ -1296,8 +1286,7 @@ TEST(ValidatorTest,
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(
@@ -1346,8 +1335,7 @@ TEST(ValidatorTest, InvalidCreateModelStatement_AliasedQueryListWithTransform) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(
@@ -1400,8 +1388,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_Imported) {
                                                   /*column=*/o1,
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_REMOTE_MODEL);
@@ -1450,8 +1437,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_ImportedV13_Invalid) {
                                                   /*column=*/o1,
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   Validator validator;
   EXPECT_THAT(validator.ValidateResolvedStatement(statement.get()),
@@ -1505,7 +1491,8 @@ TEST(ValidatorTest, ValidCreateModelStatement_Remote) {
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
       /*is_remote=*/true,
-      /*connection=*/MakeResolvedConnection(&connection));
+      /*connection_list=*/
+      MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_REMOTE_MODEL);
@@ -1559,7 +1546,8 @@ TEST(ValidatorTest, ValidCreateModelStatement_RemoteV13_Invalid) {
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
       /*is_remote=*/true,
-      /*connection=*/MakeResolvedConnection(&connection));
+      /*connection_list=*/
+      MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   Validator validator;
   EXPECT_THAT(validator.ValidateResolvedStatement(statement.get()),
@@ -1616,8 +1604,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_SchemaAndQuery_Invalid) {
                                                   /*column=*/o1,
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_REMOTE_MODEL);
@@ -1671,14 +1658,15 @@ TEST(ValidatorTest, ValidCreateModelStatement_ConnectionNoRemote_Invalid) {
                                                   /*generated_column_info=*/{},
                                                   /*default_value=*/{})),
       /*is_remote=*/false,
-      /*connection=*/MakeResolvedConnection(&connection));
+      /*connection_list=*/
+      MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_REMOTE_MODEL);
   Validator validator(language_options);
-  EXPECT_THAT(
-      validator.ValidateResolvedStatement(statement.get()),
-      StatusIs(absl::StatusCode::kInternal, HasSubstr("stmt->connection()")));
+  EXPECT_THAT(validator.ValidateResolvedStatement(statement.get()),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("stmt->connection_list()")));
 }
 
 TEST(ValidatorTest, ValidCreateModelStatement_EmptyV13_Invalid) {
@@ -1696,8 +1684,7 @@ TEST(ValidatorTest, ValidCreateModelStatement_EmptyV13_Invalid) {
       /*transform_analytic_function_group_list=*/{},
       /*input_column_definition_list=*/{},
       /*output_column_definition_list=*/{},
-      /*is_remote=*/false,
-      /*connection=*/{});
+      /*is_remote=*/false, /*connection_list=*/{});
 
   Validator validator;
   EXPECT_THAT(validator.ValidateResolvedStatement(statement.get()),
@@ -3084,8 +3071,9 @@ TEST(ValidateTest, EstimatorFunctionCall) {
 
   auto scalar_function_no_within = std::make_unique<Function>(
       "count_no_within", "test_group", Function::SCALAR);
-  auto agg_function =
-      std::make_unique<Function>("count", "test_group", Function::AGGREGATE);
+  auto agg_function = std::make_unique<Function>(
+      "custom_count", Function::kGoogleSQLFunctionGroupName,
+      Function::AGGREGATE);
   FunctionSignature sig(FunctionArgumentType(types::Int64Type(), 1), {},
                         static_cast<int64_t>(-1));
 
@@ -4002,8 +3990,9 @@ TEST_P(AlignScanWithinBoundsExplicitTimestampTest, InvalidWithinClause) {
 
   auto estimator_lower_expr = create_expr_for_kind(param.lower_kind);
   auto estimator_upper_expr = create_expr_for_kind(param.upper_kind);
-  auto agg_function =
-      std::make_unique<Function>("count", "test_group", Function::AGGREGATE);
+  auto agg_function = std::make_unique<Function>(
+      "custom_count", Function::kGoogleSQLFunctionGroupName,
+      Function::AGGREGATE);
   FunctionSignature sig(FunctionArgumentType(types::Int64Type(), 1), {},
                         static_cast<int64_t>(-1));
   GOOGLESQL_ASSERT_OK_AND_ASSIGN(
@@ -4208,8 +4197,9 @@ TEST_P(AlignScanWithinBoundsValidBoundTest, ValidWithinClause) {
 
   auto estimator_lower_expr = create_expr_for_kind(param.lower_kind);
   auto estimator_upper_expr = create_expr_for_kind(param.upper_kind);
-  auto agg_function =
-      std::make_unique<Function>("count", "test_group", Function::AGGREGATE);
+  auto agg_function = std::make_unique<Function>(
+      "custom_count", Function::kGoogleSQLFunctionGroupName,
+      Function::AGGREGATE);
   FunctionSignature sig(FunctionArgumentType(types::Int64Type(), 1), {},
                         static_cast<int64_t>(-1));
   GOOGLESQL_ASSERT_OK_AND_ASSIGN(
@@ -5823,6 +5813,247 @@ TEST(ValidatorTest, TVFArgumentInputRelationCannotHaveTypeModifiers) {
           HasSubstr("input relation column must not have type modifiers")));
 }
 
+TEST(ValidatorTest, TVFArgumentWithPartitionAndOrderValid) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(
+      FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER);
+  Validator validator(language_options);
+  IdStringPool pool;
+  TVFRelation output_relation({{"out_col", types::StringType()}});
+  FunctionArgumentType output_arg = FunctionArgumentType::RelationWithSchema(
+      output_relation, /*extra_relation_input_columns_allowed=*/false);
+  TVFRelation input_relation(
+      {{"a", types::StringType()}, {"b", types::Int64Type()}});
+  FunctionArgumentType relation_arg = FunctionArgumentType::RelationWithSchema(
+      input_relation, /*extra_relation_input_columns_allowed=*/false);
+  relation_arg.set_num_occurrences(1);
+  FunctionSignature signature(output_arg, {relation_arg}, nullptr);
+  FixedOutputSchemaTVF tvf({"tvf_test"}, {signature}, output_relation);
+
+  auto tvf_signature = std::make_shared<TVFSignature>(
+      std::vector<TVFInputArgumentType>{TVFInputArgumentType(input_relation)},
+      output_relation);
+  auto concrete_signature = std::make_shared<FunctionSignature>(
+      output_arg, FunctionArgumentTypeList{relation_arg}, nullptr);
+
+  ResolvedColumn input_col_a(1, pool.Make("t"), pool.Make("a"),
+                             types::StringType());
+  ResolvedColumn input_col_b(2, pool.Make("t"), pool.Make("b"),
+                             types::Int64Type());
+  const SimpleTable input_table(
+      "input_table", {{"a", types::StringType()}, {"b", types::Int64Type()}});
+  ResolvedColumn resolved_col_out(3, pool.Make("t"), pool.Make("out_col"),
+                                  types::StringType());
+
+  auto query_stmt_builder =
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("out_col", resolved_col_out))
+          .set_query(ResolvedTVFScanBuilder()
+                         .add_column_list(resolved_col_out)
+                         .set_tvf(&tvf)
+                         .set_signature(tvf_signature)
+                         .set_alias("")
+                         .add_argument_list(
+                             ResolvedFunctionArgumentBuilder()
+                                 .set_scan(ResolvedTableScanBuilder()
+                                               .set_table(&input_table)
+                                               .add_column_list(input_col_a)
+                                               .add_column_list(input_col_b))
+                                 .add_argument_column_list(input_col_a)
+                                 .add_argument_column_list(input_col_b)
+                                 .add_partition_by_list(
+                                     ResolvedColumnRefBuilder()
+                                         .set_column(input_col_a)
+                                         .set_type(types::StringType())
+                                         .set_is_correlated(false))
+                                 .add_order_by_list(
+                                     ResolvedOrderByItemBuilder()
+                                         .set_column_ref(
+                                             ResolvedColumnRefBuilder()
+                                                 .set_column(input_col_b)
+                                                 .set_type(types::Int64Type())
+                                                 .set_is_correlated(false))
+                                         .set_is_descending(false)))
+                         .set_function_call_signature(concrete_signature));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt, std::move(query_stmt_builder).Build());
+  GOOGLESQL_EXPECT_OK(validator.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST(ValidatorTest, TVFArgumentWithPartitionAndOrderFeatureDisabledFails) {
+  LanguageOptions language_options;
+  Validator validator(language_options);
+  IdStringPool pool;
+  TVFRelation output_relation({{"out_col", types::StringType()}});
+  FunctionArgumentType output_arg = FunctionArgumentType::RelationWithSchema(
+      output_relation, /*extra_relation_input_columns_allowed=*/false);
+  TVFRelation input_relation({{"a", types::StringType()}});
+  FunctionArgumentType relation_arg = FunctionArgumentType::RelationWithSchema(
+      input_relation, /*extra_relation_input_columns_allowed=*/false);
+  relation_arg.set_num_occurrences(1);
+  FunctionSignature signature(output_arg, {relation_arg}, nullptr);
+  FixedOutputSchemaTVF tvf({"tvf_test"}, {signature}, output_relation);
+
+  auto tvf_signature = std::make_shared<TVFSignature>(
+      std::vector<TVFInputArgumentType>{TVFInputArgumentType(input_relation)},
+      output_relation);
+  auto concrete_signature = std::make_shared<FunctionSignature>(
+      output_arg, FunctionArgumentTypeList{relation_arg}, nullptr);
+
+  ResolvedColumn input_col_a(1, pool.Make("t"), pool.Make("a"),
+                             types::StringType());
+  const SimpleTable input_table("input_table", {{"a", types::StringType()}});
+  ResolvedColumn resolved_col_out(2, pool.Make("t"), pool.Make("out_col"),
+                                  types::StringType());
+
+  auto query_stmt_builder =
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("out_col", resolved_col_out))
+          .set_query(ResolvedTVFScanBuilder()
+                         .add_column_list(resolved_col_out)
+                         .set_tvf(&tvf)
+                         .set_signature(tvf_signature)
+                         .set_alias("")
+                         .add_argument_list(
+                             ResolvedFunctionArgumentBuilder()
+                                 .set_scan(ResolvedTableScanBuilder()
+                                               .set_table(&input_table)
+                                               .add_column_list(input_col_a))
+                                 .add_argument_column_list(input_col_a)
+                                 .add_partition_by_list(
+                                     ResolvedColumnRefBuilder()
+                                         .set_column(input_col_a)
+                                         .set_type(types::StringType())
+                                         .set_is_correlated(false)))
+                         .set_function_call_signature(concrete_signature));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt, std::move(query_stmt_builder).Build());
+  EXPECT_THAT(validator.ValidateResolvedStatement(query_stmt.get()),
+              StatusIs(absl::StatusCode::kInternal));
+}
+
+TEST(ValidatorTest, TVFArgumentWithNonPartitionableTypeFails) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(
+      FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER);
+  Validator validator(language_options);
+  IdStringPool pool;
+  TVFRelation output_relation({{"out_col", types::StringType()}});
+  FunctionArgumentType output_arg = FunctionArgumentType::RelationWithSchema(
+      output_relation, /*extra_relation_input_columns_allowed=*/false);
+  TVFRelation input_relation({{"geo", types::GeographyType()}});
+  FunctionArgumentType relation_arg = FunctionArgumentType::RelationWithSchema(
+      input_relation, /*extra_relation_input_columns_allowed=*/false);
+  relation_arg.set_num_occurrences(1);
+  FunctionSignature signature(output_arg, {relation_arg}, nullptr);
+  FixedOutputSchemaTVF tvf({"tvf_test"}, {signature}, output_relation);
+
+  auto tvf_signature = std::make_shared<TVFSignature>(
+      std::vector<TVFInputArgumentType>{TVFInputArgumentType(input_relation)},
+      output_relation);
+  auto concrete_signature = std::make_shared<FunctionSignature>(
+      output_arg, FunctionArgumentTypeList{relation_arg}, nullptr);
+
+  ResolvedColumn input_col_geo(1, pool.Make("t"), pool.Make("geo"),
+                               types::GeographyType());
+  const SimpleTable input_table("input_table",
+                                {{"geo", types::GeographyType()}});
+  ResolvedColumn resolved_col_out(2, pool.Make("t"), pool.Make("out_col"),
+                                  types::StringType());
+
+  auto query_stmt_builder =
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("out_col", resolved_col_out))
+          .set_query(ResolvedTVFScanBuilder()
+                         .add_column_list(resolved_col_out)
+                         .add_column_index_list(0)
+                         .set_tvf(&tvf)
+                         .set_signature(tvf_signature)
+                         .set_alias("")
+                         .add_argument_list(
+                             ResolvedFunctionArgumentBuilder()
+                                 .set_scan(ResolvedTableScanBuilder()
+                                               .set_table(&input_table)
+                                               .add_column_list(input_col_geo))
+                                 .add_argument_column_list(input_col_geo)
+                                 .add_partition_by_list(
+                                     ResolvedColumnRefBuilder()
+                                         .set_column(input_col_geo)
+                                         .set_type(types::GeographyType())
+                                         .set_is_correlated(false)))
+                         .set_function_call_signature(concrete_signature));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt, std::move(query_stmt_builder).Build());
+  EXPECT_THAT(validator.ValidateResolvedStatement(query_stmt.get()),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("does not support partitioning")));
+}
+
+TEST(ValidatorTest, TVFArgumentWithNonOrderableTypeFails) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(
+      FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER);
+  Validator validator(language_options);
+  IdStringPool pool;
+  TVFRelation output_relation({{"out_col", types::StringType()}});
+  FunctionArgumentType output_arg = FunctionArgumentType::RelationWithSchema(
+      output_relation, /*extra_relation_input_columns_allowed=*/false);
+  TVFRelation input_relation({{"geo", types::GeographyType()}});
+  FunctionArgumentType relation_arg = FunctionArgumentType::RelationWithSchema(
+      input_relation, /*extra_relation_input_columns_allowed=*/false);
+  relation_arg.set_num_occurrences(1);
+  FunctionSignature signature(output_arg, {relation_arg}, nullptr);
+  FixedOutputSchemaTVF tvf({"tvf_test"}, {signature}, output_relation);
+
+  auto tvf_signature = std::make_shared<TVFSignature>(
+      std::vector<TVFInputArgumentType>{TVFInputArgumentType(input_relation)},
+      output_relation);
+  auto concrete_signature = std::make_shared<FunctionSignature>(
+      output_arg, FunctionArgumentTypeList{relation_arg}, nullptr);
+
+  ResolvedColumn input_col_geo(1, pool.Make("t"), pool.Make("geo"),
+                               types::GeographyType());
+  const SimpleTable input_table("input_table",
+                                {{"geo", types::GeographyType()}});
+  ResolvedColumn resolved_col_out(2, pool.Make("t"), pool.Make("out_col"),
+                                  types::StringType());
+
+  auto query_stmt_builder =
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("out_col", resolved_col_out))
+          .set_query(
+              ResolvedTVFScanBuilder()
+                  .add_column_list(resolved_col_out)
+                  .add_column_index_list(0)
+                  .set_tvf(&tvf)
+                  .set_signature(tvf_signature)
+                  .set_alias("")
+                  .add_argument_list(
+                      ResolvedFunctionArgumentBuilder()
+                          .set_scan(ResolvedTableScanBuilder()
+                                        .set_table(&input_table)
+                                        .add_column_list(input_col_geo))
+                          .add_argument_column_list(input_col_geo)
+                          .add_order_by_list(
+                              ResolvedOrderByItemBuilder()
+                                  .set_column_ref(
+                                      ResolvedColumnRefBuilder()
+                                          .set_column(input_col_geo)
+                                          .set_type(types::GeographyType())
+                                          .set_is_correlated(false))
+                                  .set_is_descending(false)))
+                  .set_function_call_signature(concrete_signature));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt, std::move(query_stmt_builder).Build());
+  EXPECT_THAT(validator.ValidateResolvedStatement(query_stmt.get()),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("does not support ordering")));
+}
+
 }  // namespace
 }  // namespace testing
 
@@ -5934,7 +6165,8 @@ TEST(ValidatorTest, CaseInsensitiveDynamicGraphGetElementProperty) {
 class ValidatorGraphTest : public ::testing::Test {
  protected:
   ValidatorGraphTest()
-      : table_("tbl", {{"id", factory_.get_int64()},
+      : dynamic_validator_(MakeDynamicLanguageOptions()),
+        table_("tbl", {{"id", factory_.get_int64()},
                        {"name", factory_.get_string()}}) {
     name_property_dcl_ = std::make_unique<SimpleGraphPropertyDeclaration>(
         "name", std::vector<std::string>{"graph_name"}, factory_.get_string());
@@ -5971,6 +6203,12 @@ class ValidatorGraphTest : public ::testing::Test {
             node_table_.get(), std::vector<int>{0}, std::vector<int>{0}));
   }
 
+  static LanguageOptions MakeDynamicLanguageOptions() {
+    LanguageOptions options;
+    options.EnableLanguageFeature(FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE);
+    return options;
+  }
+
   void SetUp() override {
     GOOGLESQL_ASSERT_OK(factory_.MakeGraphElementType(
         {"graph_name"}, GraphElementType::ElementKind::kNode, {},
@@ -5978,11 +6216,71 @@ class ValidatorGraphTest : public ::testing::Test {
     GOOGLESQL_ASSERT_OK(factory_.MakeGraphElementType(
         {"graph_name"}, GraphElementType::ElementKind::kEdge, {},
         &graph_edge_type_));
+    graph_table_ = std::make_unique<SimpleTable>(
+        "graph_table", std::vector<SimpleTable::NameAndType>{
+                           {"x", graph_node_type_}, {"y", graph_node_type_}});
+    element_col1_ = ResolvedColumn(1, pool_.Make("graph_table"),
+                                   pool_.Make("x"), graph_node_type_);
+    element_col2_ = ResolvedColumn(2, pool_.Make("graph_table"),
+                                   pool_.Make("y"), graph_node_type_);
+    updated_element_col1_ = ResolvedColumn(10, pool_.Make("graph_table"),
+                                           pool_.Make("x"), graph_node_type_);
+    updated_element_col2_ = ResolvedColumn(11, pool_.Make("graph_table"),
+                                           pool_.Make("y"), graph_node_type_);
+  }
+
+  std::unique_ptr<const ResolvedGraphLabel> MakeDynamicLabel(
+      const std::string& label_name = "Vip") {
+    return MakeResolvedGraphLabel(
+        /*label=*/nullptr,
+        MakeResolvedLiteral(types::StringType(), Value::String(label_name),
+                            /*has_explicit_type=*/true));
+  }
+
+  std::unique_ptr<const ResolvedGraphLabel> MakeStaticLabel(
+      const std::string& label_name = "Person") {
+    return MakeResolvedGraphLabel(
+        person_label_.get(),
+        MakeResolvedLiteral(types::StringType(), Value::String(label_name),
+                            /*has_explicit_type=*/true));
+  }
+
+  std::unique_ptr<const ResolvedGraphDMLPropertyItem> MakePropertyItemWithValue(
+      const std::string& val = "Alice") {
+    return MakeResolvedGraphDMLPropertyItem(
+        "name", name_property_dcl_.get(),
+        MakeResolvedLiteral(Value::String(val)));
+  }
+
+  std::unique_ptr<const ResolvedGraphDMLPropertyItem>
+  MakePropertyItemWithoutValue() {
+    return MakeResolvedGraphDMLPropertyItem("name", name_property_dcl_.get(),
+                                            /*property_value=*/nullptr);
+  }
+
+  std::unique_ptr<const ResolvedGraphDMLPropertyItem>
+  MakeDynamicPropertyItemWithoutValue(const std::string& name = "name") {
+    return MakeResolvedGraphDMLPropertyItem(name, /*property=*/nullptr,
+                                            /*property_value=*/nullptr);
+  }
+
+  std::unique_ptr<const ResolvedGraphDMLPropertyItem>
+  MakeDynamicPropertyItemWithValue(const std::string& name = "name",
+                                   const std::string& val = "Alice") {
+    return MakeResolvedGraphDMLPropertyItem(
+        name, /*property=*/nullptr, MakeResolvedLiteral(Value::String(val)));
+  }
+
+  std::unique_ptr<const ResolvedTableScan> MakeInputScan() {
+    return MakeResolvedTableScan({element_col1_, element_col2_},
+                                 graph_table_.get(),
+                                 /*for_system_time_expr=*/nullptr);
   }
 
   TypeFactory factory_;
   IdStringPool pool_;
   Validator validator_;
+  Validator dynamic_validator_;
   SimpleTable table_;
   std::unique_ptr<SimpleGraphNodeTable> node_table_;
   std::unique_ptr<SimpleGraphEdgeTable> edge_table_;
@@ -5991,6 +6289,11 @@ class ValidatorGraphTest : public ::testing::Test {
   std::unique_ptr<SimpleGraphPropertyDeclaration> name_property_dcl_;
   std::unique_ptr<SimpleGraphElementLabel> person_label_;
   std::unique_ptr<SimpleGraphElementLabel> knows_label_;
+  std::unique_ptr<SimpleTable> graph_table_;
+  ResolvedColumn element_col1_;
+  ResolvedColumn element_col2_;
+  ResolvedColumn updated_element_col1_;
+  ResolvedColumn updated_element_col2_;
 };
 
 TEST_F(ValidatorGraphTest, ValidGraphInsertScan) {
@@ -7658,6 +7961,1117 @@ TEST_F(ValidatorGraphTest,
                   testing::HasSubstr("references undefined node type")));
 }
 
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanSet) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanSetStaticLabel) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  // Setting an existing static label is allowed and idempotent.
+  label_list.push_back(MakeStaticLabel("Person"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanRemove) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakeDynamicPropertyItemWithoutValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel("Vip"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REMOVE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_REMOVE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(dynamic_validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanReplace) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REPLACE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanReplaceEmptyPropertyList) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REPLACE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanCombined) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col2_,
+                            /*is_correlated=*/false),
+      updated_element_col2_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {updated_element_col1_, updated_element_col2_}, MakeInputScan(),
+      std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt,
+                       ResolvedQueryStmtBuilder()
+                           .add_output_column_list(MakeResolvedOutputColumn(
+                               "x", updated_element_col1_))
+                           .add_output_column_list(MakeResolvedOutputColumn(
+                               "y", updated_element_col2_))
+                           .set_query(std::move(graph_update_scan))
+                           .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, ValidFinishScanWithGraphUpdateSideEffects) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  // Input scan with side effects.
+  std::unique_ptr<const ResolvedGraphUpdateScan> graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(std::unique_ptr<const ResolvedFinishScan> finish_scan,
+                       ResolvedFinishScanBuilder()
+                           .set_input_scan(std::move(graph_update_scan))
+                           .Build());
+
+  std::unique_ptr<const ResolvedGeneralizedQueryStmt> query_stmt =
+      MakeResolvedGeneralizedQueryStmt(
+          /*output_schema=*/nullptr, std::move(finish_scan));
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanMissingInputScan) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {updated_element_col1_}, /*input_scan=*/nullptr,
+      std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt,
+                       ResolvedQueryStmtBuilder()
+                           .add_output_column_list(MakeResolvedOutputColumn(
+                               "x", updated_element_col1_))
+                           .set_query(std::move(graph_update_scan))
+                           .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("scan->input_scan() != nullptr")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanEmptyUpdateElementList) {
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {element_col1_, element_col2_}, MakeInputScan(),
+      /*update_element_list=*/{});
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(MakeResolvedOutputColumn("x", element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "UPDATE scan must modify at least one element")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanNonGraphElementTarget) {
+  ResolvedColumn int_col(3, pool_.Make("tbl"), pool_.Make("z"),
+                         factory_.get_int64());
+  ResolvedColumn updated_int_col(12, pool_.Make("tbl"), pool_.Make("z"),
+                                 factory_.get_int64());
+  SimpleTable table("tbl", {{"x", graph_node_type_},
+                            {"y", graph_node_type_},
+                            {"z", factory_.get_int64()}});
+  auto input_scan = ResolvedTableScanBuilder()
+                        .set_table(&table)
+                        .add_column_list(element_col1_)
+                        .add_column_list(element_col2_)
+                        .add_column_list(int_col)
+                        .Build();
+  GOOGLESQL_ASSERT_OK(input_scan);
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(factory_.get_int64(), int_col,
+                            /*is_correlated=*/false),
+      updated_int_col, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {element_col1_, element_col2_, updated_int_col}, std::move(*input_scan),
+      std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(MakeResolvedOutputColumn("x", element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .add_output_column_list(
+              MakeResolvedOutputColumn("z", updated_int_col))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Target of UPDATE element must be a graph node or edge")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanConflictingSetAndRemove) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_REMOVE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "UPDATE element cannot specify both SET/REPLACE and "
+                      "REMOVE update modes")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanSimultaneousNoUpdate) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "UPDATE element cannot have NO_UPDATE for both property "
+                      "and label")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanEmptyPropertyListOnSet) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "property_list must not be empty when property_update_mode is")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanEmptyPropertyListOnRemove) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REMOVE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "property_list must not be empty when property_update_mode is")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanEmptyLabelListOnSet) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "label_list must not be empty when label_update_mode is")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanEmptyLabelListOnRemove) {
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_REMOVE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "label_list must not be empty when label_update_mode is")));
+}
+
+TEST_F(ValidatorGraphTest,
+       InvalidGraphUpdateScanPopulatedPropertyListOnNoUpdate) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue("Alice"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("property_list must be empty when "
+                               "property_update_mode is PROPERTY_NO_UPDATE")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanPopulatedLabelListOnNoUpdate) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithValue("Alice"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("label_list must be empty when "
+                               "label_update_mode is LABEL_NO_UPDATE")));
+}
+
+TEST_F(ValidatorGraphTest,
+       InvalidGraphUpdateScanPropertyValuePopulatedOnRemove) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakeDynamicPropertyItemWithValue("name", "Alice"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REMOVE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("REMOVE property item must not have a value")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanPropertyValueMissingOnSet) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakePropertyItemWithoutValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_SET,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("SET/REPLACE property item must have a value")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanRemoveStaticProperty) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  // Static property cannot be removed.
+  prop_list.push_back(MakePropertyItemWithoutValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REMOVE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Static properties cannot be removed; property() must be null")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanRemoveStaticLabel) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  // Static label cannot be removed.
+  label_list.push_back(MakeStaticLabel("Person"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_REMOVE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Static labels cannot be removed; label() must be null")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanSetLabelMismatch) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  // Static label with mismatched label_name literal.
+  label_list.push_back(MakeResolvedGraphLabel(
+      person_label_.get(),
+      MakeResolvedLiteral(types::StringType(), Value::String("MismatchName"),
+                          /*has_explicit_type=*/true)));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "label_name and label must match case-insensitively")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanDynamicLabelMissingName) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  // Dynamic label with missing label_name in SET.
+  label_list.push_back(MakeResolvedGraphLabel(/*label=*/nullptr,
+                                              /*label_name=*/nullptr));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("label_name must be set for dynamic label")));
+}
+
+TEST_F(ValidatorGraphTest,
+       InvalidGraphUpdateScanRemoveDynamicLabelMissingName) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  // Dynamic label with missing label_name in REMOVE.
+  label_list.push_back(MakeResolvedGraphLabel(/*label=*/nullptr,
+                                              /*label_name=*/nullptr));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_REMOVE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(dynamic_validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "label_name must be set for dynamic label removal")));
+}
+
+TEST_F(ValidatorGraphTest,
+       InvalidGraphUpdateScanRemovePropertyFeatureDisabled) {
+  std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>> prop_list;
+  prop_list.push_back(MakeDynamicPropertyItemWithoutValue());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_REMOVE,
+      std::move(prop_list), ResolvedGraphUpdateElement::LABEL_NO_UPDATE,
+      /*label_list=*/{}));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Feature SQL_GRAPH_DYNAMIC_ELEMENT_TYPE is required for REMOVE "
+              "property")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanRemoveLabelFeatureDisabled) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel("Vip"));
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_REMOVE,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({updated_element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Feature SQL_GRAPH_DYNAMIC_ELEMENT_TYPE is required for REMOVE "
+              "label")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanDuplicateTargetElement) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list1;
+  label_list1.push_back(MakeDynamicLabel());
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list2;
+  label_list2.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list1)));
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col2_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list2)));
+
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {updated_element_col1_, updated_element_col2_}, MakeInputScan(),
+      std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt,
+                       ResolvedQueryStmtBuilder()
+                           .add_output_column_list(MakeResolvedOutputColumn(
+                               "x", updated_element_col1_))
+                           .add_output_column_list(MakeResolvedOutputColumn(
+                               "y", updated_element_col2_))
+                           .set_query(std::move(graph_update_scan))
+                           .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("Target element column in "
+                                       "update_element_list must be unique")));
+}
+
+TEST_F(ValidatorGraphTest,
+       ValidGraphUpdateScanUpdatedColumnOmittedFromColumnList) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  // Output column_list omits updated_element_col1_ (e.g., due to column
+  // pruning when updated_element_col1_ is not referenced downstream).
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {element_col2_}, MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanUnproducedColumnInColumnList) {
+  ResolvedColumn extra_unproduced_col(
+      99, pool_.Make("tbl"), pool_.Make("unproduced"), factory_.get_int64());
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  // Output column_list includes an unproduced column not present in input_scan.
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {updated_element_col1_, element_col2_, extra_unproduced_col},
+      MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .add_output_column_list(
+              MakeResolvedOutputColumn("extra", extra_unproduced_col))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("not visible in scan node")));
+}
+
+TEST_F(ValidatorGraphTest, ValidGraphUpdateScanKeepBothOldAndNewColumns) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      updated_element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  // Output column_list includes both old pre-update element_col1_ and
+  // new post-update updated_element_col1_, allowing unambiguous reference.
+  auto graph_update_scan = MakeResolvedGraphUpdateScan(
+      {element_col1_, updated_element_col1_, element_col2_}, MakeInputScan(),
+      std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x_old", element_col1_))
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x_new", updated_element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  GOOGLESQL_EXPECT_OK(validator_.ValidateResolvedStatement(query_stmt.get()));
+}
+
+TEST_F(ValidatorGraphTest,
+       InvalidGraphUpdateScanOutputColumnReusesInputColumnId) {
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  // Reusing element_col1_ as output_column violates SSA / unique column ID.
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      element_col1_, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({element_col1_, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(MakeResolvedOutputColumn("x", element_col1_))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(validator_.ValidateResolvedStatement(query_stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("Duplicate column id 1")));
+}
+
+TEST_F(ValidatorGraphTest, InvalidGraphUpdateScanOutputColumnTypeMismatch) {
+  ResolvedColumn mismatched_output_col(10, pool_.Make("graph_table"),
+                                       pool_.Make("x"), graph_edge_type_);
+
+  std::vector<std::unique_ptr<const ResolvedGraphLabel>> label_list;
+  label_list.push_back(MakeDynamicLabel());
+
+  std::vector<std::unique_ptr<const ResolvedGraphUpdateElement>>
+      update_elements;
+  update_elements.push_back(MakeResolvedGraphUpdateElement(
+      MakeResolvedColumnRef(graph_node_type_, element_col1_,
+                            /*is_correlated=*/false),
+      mismatched_output_col, ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE,
+      /*property_list=*/{}, ResolvedGraphUpdateElement::LABEL_SET,
+      std::move(label_list)));
+
+  auto graph_update_scan =
+      MakeResolvedGraphUpdateScan({mismatched_output_col, element_col2_},
+                                  MakeInputScan(), std::move(update_elements));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto query_stmt,
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("x", mismatched_output_col))
+          .add_output_column_list(MakeResolvedOutputColumn("y", element_col2_))
+          .set_query(std::move(graph_update_scan))
+          .Build());
+
+  EXPECT_THAT(
+      validator_.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("output_column type must match target_element "
+                               "type")));
+}
+
 TEST(ValidateTest, CreateTableFunctionStmtWithConnectionAndFeatureEnabled) {
   SimpleConnection connection("connection_id");
   std::unique_ptr<ResolvedCreateTableFunctionStmt> stmt =
@@ -7675,7 +9089,8 @@ TEST(ValidateTest, CreateTableFunctionStmtWithConnectionAndFeatureEnabled) {
           /*output_column_list=*/{},
           /*is_value_table=*/false,
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
-          /*connection=*/MakeResolvedConnection(&connection));
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
@@ -7702,7 +9117,8 @@ TEST(ValidateTest, CreateTableFunctionStmtWithConnectionAndFeatureDisabled) {
           /*output_column_list=*/{},
           /*is_value_table=*/false,
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
-          /*connection=*/MakeResolvedConnection(&connection));
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
@@ -7732,7 +9148,8 @@ TEST(ValidateTest, CreateTableFunctionStmtWithConnectionAndEmptyLanguage) {
           /*output_column_list=*/{},
           /*is_value_table=*/false,
           /*sql_security=*/ResolvedCreateStatement::SQL_SECURITY_UNSPECIFIED,
-          /*connection=*/MakeResolvedConnection(&connection));
+          /*connection_list=*/
+          MakeResolvedConnectionList(MakeResolvedConnection(&connection)));
 
   LanguageOptions language_options;
   language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
@@ -7743,6 +9160,228 @@ TEST(ValidateTest, CreateTableFunctionStmtWithConnectionAndEmptyLanguage) {
               ::absl_testing::StatusIs(
                   absl::StatusCode::kInternal,
                   ::testing::HasSubstr("!stmt->language().empty()")));
+}
+
+TEST(ValidateTest, CreateTableFunctionStmtWithMultiConnections) {
+  SimpleConnection connection1("connection1");
+  SimpleConnection connection2("connection2");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<const ResolvedCreateTableFunctionStmt> stmt,
+      ResolvedCreateTableFunctionStmtBuilder()
+          .set_name_path({"foo"})
+          .set_create_scope(ResolvedCreateStatement::CREATE_DEFAULT_SCOPE)
+          .set_create_mode(ResolvedCreateStatement::CREATE_DEFAULT)
+          .set_signature({FunctionArgumentType::AnyRelation(), {}, nullptr})
+          .set_has_explicit_return_schema(false)
+          .set_language("PYTHON")
+          .set_code("return 1;")
+          .set_connection_list(
+              ResolvedConnectionListBuilder()
+                  .add_connection_kv_list(MakeResolvedConnectionKeyValuePair(
+                      "key1", MakeResolvedConnection(&connection1)))
+                  .add_connection_kv_list(MakeResolvedConnectionKeyValuePair(
+                      "key2", MakeResolvedConnection(&connection2))))
+          .Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
+  language_options.EnableLanguageFeature(
+      FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION);
+  language_options.EnableLanguageFeature(FEATURE_MULTI_CONNECTIONS);
+  Validator validator(language_options);
+  GOOGLESQL_ASSERT_OK(validator.ValidateResolvedStatement(stmt.get()));
+}
+
+TEST(ValidateTest,
+     CreateTableFunctionStmtWithMultiConnectionsAndFeatureDisabled) {
+  SimpleConnection connection1("connection1");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<const ResolvedCreateTableFunctionStmt> stmt,
+      ResolvedCreateTableFunctionStmtBuilder()
+          .set_name_path({"foo"})
+          .set_create_scope(ResolvedCreateStatement::CREATE_DEFAULT_SCOPE)
+          .set_create_mode(ResolvedCreateStatement::CREATE_DEFAULT)
+          .set_signature({FunctionArgumentType::AnyRelation(), {}, nullptr})
+          .set_has_explicit_return_schema(false)
+          .set_language("PYTHON")
+          .set_code("return 1;")
+          .set_connection_list(
+              ResolvedConnectionListBuilder().add_connection_kv_list(
+                  MakeResolvedConnectionKeyValuePair(
+                      "key1", MakeResolvedConnection(&connection1))))
+          .Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
+  language_options.EnableLanguageFeature(
+      FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION);
+  // FEATURE_MULTI_CONNECTIONS is NOT enabled.
+  Validator validator(language_options);
+  ASSERT_THAT(
+      validator.ValidateResolvedStatement(stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Multiple connections in CONNECTION clause is not supported")));
+}
+
+TEST(ValidateTest,
+     CreateTableFunctionStmtWithBothConnectionAndMultiConnections) {
+  SimpleConnection connection1("connection1");
+  SimpleConnection connection2("connection2");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<const ResolvedCreateTableFunctionStmt> stmt,
+      ResolvedCreateTableFunctionStmtBuilder()
+          .set_name_path({"foo"})
+          .set_create_scope(ResolvedCreateStatement::CREATE_DEFAULT_SCOPE)
+          .set_create_mode(ResolvedCreateStatement::CREATE_DEFAULT)
+          .set_signature({FunctionArgumentType::AnyRelation(), {}, nullptr})
+          .set_has_explicit_return_schema(false)
+          .set_language("PYTHON")
+          .set_code("return 1;")
+          .set_connection_list(
+              ResolvedConnectionListBuilder()
+                  .set_connection(MakeResolvedConnection(&connection2))
+                  .add_connection_kv_list(MakeResolvedConnectionKeyValuePair(
+                      "key1", MakeResolvedConnection(&connection1))))
+          .Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
+  language_options.EnableLanguageFeature(
+      FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION);
+  language_options.EnableLanguageFeature(FEATURE_MULTI_CONNECTIONS);
+  Validator validator(language_options);
+  ASSERT_THAT(validator.ValidateResolvedStatement(stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "Both connection and connection_kv_list are set")));
+}
+
+TEST(ValidateTest, CreateTableFunctionStmtWithEmptyConnectionList) {
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<const ResolvedCreateTableFunctionStmt> stmt,
+      ResolvedCreateTableFunctionStmtBuilder()
+          .set_name_path({"foo"})
+          .set_create_scope(ResolvedCreateStatement::CREATE_DEFAULT_SCOPE)
+          .set_create_mode(ResolvedCreateStatement::CREATE_DEFAULT)
+          .set_signature({FunctionArgumentType::AnyRelation(), {}, nullptr})
+          .set_has_explicit_return_schema(false)
+          .set_language("PYTHON")
+          .set_code("return 1;")
+          .set_connection_list(ResolvedConnectionListBuilder())
+          .Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
+  language_options.EnableLanguageFeature(
+      FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION);
+  language_options.EnableLanguageFeature(FEATURE_MULTI_CONNECTIONS);
+  Validator validator(language_options);
+  ASSERT_THAT(
+      validator.ValidateResolvedStatement(stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "At least one of connection or connection_kv_list must be set")));
+}
+
+TEST(ValidateTest, CreateTableFunctionStmtWithEmptyKeyInMultiConnections) {
+  SimpleConnection connection1("connection1");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<const ResolvedCreateTableFunctionStmt> stmt,
+      ResolvedCreateTableFunctionStmtBuilder()
+          .set_name_path({"foo"})
+          .set_create_scope(ResolvedCreateStatement::CREATE_DEFAULT_SCOPE)
+          .set_create_mode(ResolvedCreateStatement::CREATE_DEFAULT)
+          .set_signature({FunctionArgumentType::AnyRelation(), {}, nullptr})
+          .set_has_explicit_return_schema(false)
+          .set_language("PYTHON")
+          .set_code("return 1;")
+          .set_connection_list(
+              ResolvedConnectionListBuilder().add_connection_kv_list(
+                  MakeResolvedConnectionKeyValuePair(
+                      "", MakeResolvedConnection(&connection1))))
+          .Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_CREATE_TABLE_FUNCTION);
+  language_options.EnableLanguageFeature(
+      FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION);
+  language_options.EnableLanguageFeature(FEATURE_MULTI_CONNECTIONS);
+  Validator validator(language_options);
+  ASSERT_THAT(validator.ValidateResolvedStatement(stmt.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("!kv_pair->key().empty()")));
+}
+
+TEST(ValidateTest, ResolvedFunctionArgumentWithMultiConnections) {
+  SimpleConnection connection1("connection1");
+  SimpleConnection connection2("connection2");
+
+  TVFRelation output_relation({{"out_col", types::StringType()}});
+  FunctionArgumentType concrete_conn_arg_type(ARG_KIND_CONNECTION,
+                                              FunctionArgumentType::REQUIRED,
+                                              /*num_occurrences=*/1);
+  auto concrete_signature = std::make_shared<FunctionSignature>(
+      FunctionArgumentType::RelationWithSchema(
+          output_relation, /*extra_relation_input_columns_allowed=*/false),
+      FunctionArgumentTypeList{concrete_conn_arg_type},
+      /*context_ptr=*/nullptr);
+
+  FixedOutputSchemaTVF tvf({"conn_tvf"}, {*concrete_signature},
+                           output_relation);
+
+  auto tvf_signature = std::make_shared<TVFSignature>(
+      std::vector<TVFInputArgumentType>{
+          TVFInputArgumentType(TVFConnectionArgument(nullptr))},
+      output_relation);
+
+  IdStringPool pool;
+  ResolvedColumn resolved_col_out(1, pool.Make("t"), pool.Make("out_col"),
+                                  types::StringType());
+
+  auto query_stmt_builder =
+      ResolvedQueryStmtBuilder()
+          .add_output_column_list(
+              MakeResolvedOutputColumn("out_col", resolved_col_out))
+          .set_query(
+              ResolvedTVFScanBuilder()
+                  .add_column_list(resolved_col_out)
+                  .set_tvf(&tvf)
+                  .set_signature(tvf_signature)
+                  .set_alias("")
+                  .add_argument_list(
+                      ResolvedFunctionArgumentBuilder().set_connection_list(
+                          ResolvedConnectionListBuilder()
+                              .add_connection_kv_list(
+                                  MakeResolvedConnectionKeyValuePair(
+                                      "key1",
+                                      MakeResolvedConnection(&connection1)))
+                              .add_connection_kv_list(
+                                  MakeResolvedConnectionKeyValuePair(
+                                      "key2",
+                                      MakeResolvedConnection(&connection2)))))
+                  .set_function_call_signature(concrete_signature));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_stmt, std::move(query_stmt_builder).Build());
+
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_MULTI_CONNECTIONS);
+  Validator validator(language_options);
+  GOOGLESQL_ASSERT_OK(validator.ValidateResolvedStatement(query_stmt.get()));
+
+  // Test failure when FEATURE_MULTI_CONNECTIONS is disabled
+  LanguageOptions options_no_multi_conn;
+  Validator validator_disabled(options_no_multi_conn);
+  EXPECT_THAT(
+      validator_disabled.ValidateResolvedStatement(query_stmt.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr(
+              "Multiple connections in CONNECTION clause is not supported")));
 }
 
 TEST(ValidatorTest, ValidVectorTypeParametersInCastExpr) {
@@ -7788,8 +9427,9 @@ TEST(ValidatorTest, VectorTypeParametersForNonVectorTypeInCastExpr) {
       /*return_null_on_error=*/false);
   cast_expr->set_type_modifiers(type_modifiers);
   EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(cast_expr.get()),
-              ::absl_testing::StatusIs(absl::StatusCode::kInternal,
-                       ::testing::HasSubstr("vector_params != nullptr")));
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("vector_params != nullptr")));
 }
 
 TEST(ValidatorTest, InvalidVectorTypeParameters) {
@@ -8031,6 +9671,193 @@ TEST(ValidatorTest, InvalidNestedDeleteStmtWithUsingScan) {
               ::absl_testing::StatusIs(
                   absl::StatusCode::kInternal,
                   ::testing::HasSubstr("stmt->using_scan() == nullptr")));
+}
+
+TEST(ValidatorTest, ValidGetVariantField) {
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedGetVariantField(
+      types::VariantType(), MakeResolvedParameter(types::VariantType(), "v"),
+      "foo");
+  Validator validator;
+  GOOGLESQL_EXPECT_OK(validator.ValidateStandaloneResolvedExpr(expr.get()));
+}
+
+TEST(ValidatorTest, InvalidGetVariantFieldExprNotVariant) {
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedGetVariantField(
+      types::VariantType(), MakeResolvedLiteral(Value::Int64(1)), "foo");
+  Validator validator;
+  EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(expr.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "get_variant_field->expr()->type()->IsVariant()")));
+}
+
+TEST(ValidatorTest, InvalidGetVariantFieldReturnTypeNotVariant) {
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedGetVariantField(
+      types::Int64Type(), MakeResolvedParameter(types::VariantType(), "v"),
+      "foo");
+  Validator validator;
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("get_variant_field->type()->IsVariant()")));
+}
+
+// ResolvedGetVariantField represents dot-notation access (v.field_name), where
+// SQL identifiers cannot be empty (matching ResolvedGetJsonField). Empty keys
+// in Variant objects are queried via subscript syntax (v[""]).
+TEST(ValidatorTest, InvalidGetVariantFieldEmptyFieldName) {
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedGetVariantField(
+      types::VariantType(), MakeResolvedParameter(types::VariantType(), "v"),
+      "");
+  Validator validator;
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("!get_variant_field->field_name().empty()")));
+}
+
+TEST(ValidatorTest, ValidColumnListSpec) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(values::StringArray({"a", "b"})));
+  GOOGLESQL_EXPECT_OK(validator.ValidateStandaloneResolvedExpr(expr.get()));
+}
+
+TEST(ValidatorTest, ValidEmptyColumnListSpec) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(values::EmptyArray(types::StringArrayType())));
+  GOOGLESQL_EXPECT_OK(validator.ValidateStandaloneResolvedExpr(expr.get()));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecFeatureDisabled) {
+  LanguageOptions language_options;
+  language_options.DisableAllLanguageFeatures();
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(values::StringArray({"a", "b"})));
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("language_options_.LanguageFeatureEnabled("
+                               "FEATURE_COLUMN_LIST_SPEC)")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecWrongReturnType) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::StringArrayType(),
+      MakeResolvedLiteral(values::StringArray({"a", "b"})));
+  EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(expr.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr(
+                      "column_list_spec->type()->IsColumnListSpec()")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecNullColumnNameList) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr =
+      MakeResolvedMakeColumnListSpec(types::ColumnListSpecType(), nullptr);
+  EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(expr.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("column_name_list != nullptr")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecNotStringArray) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(values::Int64Array({1, 2})));
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("IsStringArray(column_name_list->type())")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecNotAnalysisConstant) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedParameter(types::StringArrayType(), "p"));
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInternal,
+          ::testing::HasSubstr("IsAnalysisConstant(column_name_list)")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecNullArrayValue) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(Value::Null(types::StringArrayType())));
+  EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(expr.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("!array_value->is_null()")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecNullElement) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_with_null,
+      Value::MakeArray(types::StringArrayType(),
+                       {Value::String("a"), Value::NullString()}));
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(), MakeResolvedLiteral(array_with_null));
+  EXPECT_THAT(
+      validator.ValidateStandaloneResolvedExpr(expr.get()),
+      ::absl_testing::StatusIs(absl::StatusCode::kInternal,
+                                  ::testing::HasSubstr("!element.is_null()")));
+}
+
+TEST(ValidatorTest, InvalidColumnListSpecEmptyStringElement) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_COLUMN_LIST_SPEC);
+  Validator validator(language_options);
+
+  std::unique_ptr<ResolvedExpr> expr = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(),
+      MakeResolvedLiteral(values::StringArray({"a", ""})));
+  EXPECT_THAT(validator.ValidateStandaloneResolvedExpr(expr.get()),
+              ::absl_testing::StatusIs(
+                  absl::StatusCode::kInternal,
+                  ::testing::HasSubstr("!element.string_value().empty()")));
 }
 
 }  // namespace googlesql

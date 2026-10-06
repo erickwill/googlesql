@@ -759,15 +759,15 @@ SELECT TIMESTAMP(DATE "2008-12-25") AS timestamp_date;
 ## `TIMESTAMP_ADD`
 
 ```googlesql
-TIMESTAMP_ADD(timestamp_expression, INTERVAL int64_expression date_part)
+TIMESTAMP_ADD(timestamp_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds `int64_expression` units of `date_part` to the timestamp, independent of
+Adds `step_size` units of `step_unit` to the `TIMESTAMP` object, independent of
 any time zone.
 
-`TIMESTAMP_ADD` supports the following values for `date_part`:
+`TIMESTAMP_ADD` supports the following values for `step_unit`:
 
 + `PICOSECOND`
 + `NANOSECOND`
@@ -828,10 +828,13 @@ Gets the number of unit boundaries between two `TIMESTAMP` values
 
 **Details**
 
-If `end_timestamp` is earlier than `start_timestamp`, the output is negative.
-Produces an error if the computation overflows, such as if the difference
-in nanoseconds
-between the two `TIMESTAMP` values overflows.
+If `end_timestamp` is earlier than `start_timestamp`, the output is 0 or
+negative. Decimals are always truncated rather than rounded. For example, both
+3.9 and 3.1 become 3, while -3.9 and -3.1 become -3 (instead of -4).
+
+Produces an error if the computation overflows, such as if the difference in
+nanoseconds between
+the two `TIMESTAMP` values overflows.
 
 Note: The behavior of the this function follows the type of arguments passed in.
 For example, `TIMESTAMP_DIFF(DATE, DATE, PART)`
@@ -841,7 +844,7 @@ behaves like `DATE_DIFF(DATE, DATE, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT
@@ -881,6 +884,29 @@ SELECT TIMESTAMP_DIFF("2001-02-01 01:00:00", "2001-02-01 00:00:01", HOUR) AS dif
  +---------------+
  | 0             |
  +---------------*/
+```
+
+In the following example, `TIMESTAMP_DIFF` truncates the output rather than
+rounding it. Both 3 hours 54 minutes (3.9 hours) and 3 hours 6 minutes (3.1
+hours) truncate to 3 hours, and their negative counterparts truncate to -3
+hours:
+
+```googlesql
+SELECT
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 04:54:00+00',
+    TIMESTAMP '2021-05-01 01:00:00+00', HOUR) AS diff_3_9,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 04:06:00+00',
+    TIMESTAMP '2021-05-01 01:00:00+00', HOUR) AS diff_3_1,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 01:00:00+00',
+    TIMESTAMP '2021-05-01 04:54:00+00', HOUR) AS diff_negative_3_9,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 01:00:00+00',
+    TIMESTAMP '2021-05-01 04:06:00+00', HOUR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ## `TIMESTAMP_FROM_UNIX_MICROS`
@@ -1069,15 +1095,15 @@ SELECT TIMESTAMP_SECONDS(1230219000) AS timestamp_value;
 ## `TIMESTAMP_SUB`
 
 ```googlesql
-TIMESTAMP_SUB(timestamp_expression, INTERVAL int64_expression date_part)
+TIMESTAMP_SUB(timestamp_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts `int64_expression` units of `date_part` from the timestamp,
+Subtracts `step_size` units of `step_unit` from the `TIMESTAMP` object,
 independent of any time zone.
 
-`TIMESTAMP_SUB` supports the following values for `date_part`:
+`TIMESTAMP_SUB` supports the following values for `step_unit`:
 
 + `PICOSECOND`
 + `NANOSECOND`

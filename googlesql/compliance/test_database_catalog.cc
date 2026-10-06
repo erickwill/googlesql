@@ -38,6 +38,7 @@
 #include "googlesql/public/type.h"
 #include "googlesql/public/types/struct_type.h"
 #include "googlesql/public/types/type_factory.h"
+#include "googlesql/resolved_ast/resolved_ast.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
@@ -256,7 +257,8 @@ absl::Status TestDatabaseCatalog::LoadProtoEnumTypes(
 }
 
 static std::unique_ptr<SimpleTable> MakeSimpleTable(
-    const std::string& table_name, const TestTable& table) {
+    const std::string& table_name, const TestTable& table,
+    std::vector<std::unique_ptr<const ResolvedExpr>>& owned_resolved_exprs) {
   const Value& array_value = table.table_as_value;
   ABSL_CHECK(array_value.type()->IsArray())
       << table_name << " " << array_value.DebugString(true);
@@ -273,6 +275,9 @@ static std::unique_ptr<SimpleTable> MakeSimpleTable(
     std::vector<bool> pseudo_columns = table.options.pseudo_columns();
     ABSL_CHECK(pseudo_columns.empty() ||
           pseudo_columns.size() == row_type->num_fields());
+    ABSL_CHECK(table.options.column_default_values().empty() ||
+          table.options.column_default_values().size() ==
+              row_type->num_fields());
     columns.reserve(row_type->num_fields());
     for (int i = 0; i < row_type->num_fields(); i++) {
       const std::string& col_name = row_type->field(i).name;
@@ -283,6 +288,20 @@ static std::unique_ptr<SimpleTable> MakeSimpleTable(
       SimpleColumn::Attributes attrs;
       attrs.is_pseudo_column =
           pseudo_columns.empty() ? false : pseudo_columns[i];
+
+      if (table.options.has_column_default_value(i)) {
+        const Value& default_val = table.options.get_column_default_value(i);
+        std::unique_ptr<ResolvedLiteral> resolved_literal =
+            MakeResolvedLiteral(default_val.type(), default_val);
+        const ResolvedExpr* expr_ptr = resolved_literal.get();
+        owned_resolved_exprs.push_back(std::move(resolved_literal));
+        auto expr_attrs_status = SimpleColumn::ExpressionAttributes::Create(
+            SimpleColumn::ExpressionAttributes::ExpressionKind::DEFAULT,
+            default_val.Format(), expr_ptr);
+        if (expr_attrs_status.ok()) {
+          attrs.column_expression = *expr_attrs_status;
+        }
+      }
 
       columns.push_back(std::make_unique<SimpleColumn>(
           table_name, col_name, AnnotatedType(col_type, col_annot), attrs));
@@ -311,7 +330,7 @@ void TestDatabaseCatalog::AddTable(const std::string& table_name,
     return;
   }
   std::unique_ptr<SimpleTable> simple_table =
-      MakeSimpleTable(table_name, table);
+      MakeSimpleTable(table_name, table, owned_resolved_exprs_);
   catalog_->AddOwnedTable(simple_table.release());
 }
 
@@ -320,7 +339,7 @@ absl::Status TestDatabaseCatalog::AddTableWithStatus(
     const LanguageOptions& language_options) {
   if (table.measure_column_defs.empty()) {
     std::unique_ptr<SimpleTable> simple_table =
-        MakeSimpleTable(table_name, table);
+        MakeSimpleTable(table_name, table, owned_resolved_exprs_);
     catalog_->AddOwnedTable(simple_table.release());
     return absl::OkStatus();
   }
@@ -342,7 +361,7 @@ absl::Status TestDatabaseCatalog::AddTableWithStatus(
   GOOGLESQL_RET_CHECK(array_value.type()->IsArray())
       << table_name << " " << array_value.DebugString(true);
   std::unique_ptr<SimpleTable> simple_table =
-      MakeSimpleTable(table_name, table);
+      MakeSimpleTable(table_name, table, owned_resolved_exprs_);
   if (!table.row_identity_columns.empty()) {
     GOOGLESQL_RET_CHECK_OK(
         simple_table->SetRowIdentityColumns(table.row_identity_columns));

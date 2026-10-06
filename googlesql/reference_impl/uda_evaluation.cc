@@ -89,7 +89,7 @@ class UserDefinedAggregateFunctionEvaluator
     // accumulated rows.
     std::unique_ptr<EvaluationContext> local_context =
         eval_context_->MakeChildContext();
-    local_context->set_active_group_rows(inputs_.get());
+    local_context->set_uda_input_rows(inputs_.get());
 
     std::shared_ptr<TupleSlot::SharedProtoState> shared_state =
         std::make_shared<TupleSlot::SharedProtoState>();

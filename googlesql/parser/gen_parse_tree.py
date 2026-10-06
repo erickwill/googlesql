@@ -42,7 +42,7 @@ from googlesql.parser.generator_utils import UpperCamelCase
 
 # You can use `tag_id=GetTempTagId()` until doing the final submit.
 # That will avoid merge conflicts when syncing in other changes.
-NEXT_NODE_TAG_ID = 603
+NEXT_NODE_TAG_ID = 605
 
 
 def GetTempTagId():
@@ -8527,6 +8527,56 @@ def main(argv):
       extra_public_defs="""
   std::string GetSQLForAlterAction() const override;
       """)
+
+  gen.AddNode(
+      name='ASTAddStoredColumnAction',
+      tag_id=603,
+      parent='ASTAlterAction',
+      use_custom_debug_string=True,
+      comment="""
+      ALTER index action for "ADD STORED COLUMN" clause.
+      """,
+      fields=[
+          Field(
+              'column_name',
+              'ASTIdentifier',
+              tag_id=2,
+              field_loader=FieldLoaderMethod.REQUIRED,
+              comment="""
+              The column name to add as a stored column.
+              """,
+          ),
+          Field('is_if_not_exists', SCALAR_BOOL, tag_id=3),
+      ],
+      extra_public_defs="""
+  std::string GetSQLForAlterAction() const override;
+      """,
+  )
+
+  gen.AddNode(
+      name='ASTDropStoredColumnAction',
+      tag_id=604,
+      parent='ASTAlterAction',
+      use_custom_debug_string=True,
+      comment="""
+      ALTER index action for "DROP STORED COLUMN" clause.
+      """,
+      fields=[
+          Field(
+              'column_name',
+              'ASTIdentifier',
+              tag_id=2,
+              field_loader=FieldLoaderMethod.REQUIRED,
+              comment="""
+              The column name to drop from stored columns.
+              """,
+          ),
+          Field('is_if_exists', SCALAR_BOOL, tag_id=3),
+      ],
+      extra_public_defs="""
+  std::string GetSQLForAlterAction() const override;
+      """,
+  )
 
   gen.AddNode(
       name='ASTDropColumnAction',

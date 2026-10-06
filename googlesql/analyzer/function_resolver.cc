@@ -1151,10 +1151,8 @@ absl::StatusOr<TypeModifiers> FunctionResolver::AdjustTypeModifiersForCast(
   if (source_type_modifiers.IsEmpty()) {
     return source_type_modifiers;
   }
-  std::vector<const Type*> source_component_types =
-      source_type->ComponentTypes();
-  std::vector<const Type*> target_component_types =
-      target_type->ComponentTypes();
+  TypeListView source_component_types = source_type->ComponentTypes();
+  TypeListView target_component_types = target_type->ComponentTypes();
 
   if (source_type->IsGraphElement() || target_type->IsGraphElement()) {
     GOOGLESQL_RET_CHECK(source_type->IsGraphElement() && target_type->IsGraphElement());
@@ -1279,10 +1277,8 @@ FunctionResolver::AdjustTypeAnnotationsForCast(
   if (AnnotationMap::IsNullOrEmpty(source_annotation_map)) {
     return source_annotation_map;
   }
-  std::vector<const Type*> source_component_types =
-      source_type->ComponentTypes();
-  std::vector<const Type*> target_component_types =
-      target_type->ComponentTypes();
+  TypeListView source_component_types = source_type->ComponentTypes();
+  TypeListView target_component_types = target_type->ComponentTypes();
 
   if (source_type->IsGraphElement() || target_type->IsGraphElement()) {
     GOOGLESQL_RET_CHECK(source_type->IsGraphElement() && target_type->IsGraphElement());
@@ -1605,7 +1601,22 @@ absl::Status FunctionResolver::ConvertLiteralToType(
 
   const AnnotationMap* annotation_map = nullptr;
 
-  if (argument_value->is_null()) {
+  // If the argument value is NULL, we return a simple NULL literal of the
+  // target type.
+  // However, when the target type is VARIANT and the argument is a typed NULL
+  // (e.g. CAST(NULL AS INT64)), we bypass this block and fall through to
+  // CastValue below, which correctly wraps the typed NULL in a VARIANT scalar
+  // container: Value::Variant(v).
+  //
+  // If the source is already a typed VARIANT (e.g. CAST(NULL AS VARIANT)),
+  // is_variant_with_explicit_type evaluates to true. Falling through to
+  // CastValue is safe because CastValue has an upfront identity check
+  // (v.type()->Equals(to_type)) which returns the original NULL VARIANT
+  // directly, preventing any accidental double-wrapping or corruption.
+  const bool is_variant_with_explicit_type =
+      target_type->IsVariant() && argument_literal->has_explicit_type();
+
+  if (argument_value->is_null() && !is_variant_with_explicit_type) {
     coerced_literal_value = Value::Null(target_type);
   } else if (argument_value->is_empty_array() &&
              !argument_literal->has_explicit_type() && target_type->IsArray()) {
@@ -1617,7 +1628,22 @@ absl::Status FunctionResolver::ConvertLiteralToType(
     }
     coerced_literal_value =
         Value::Array(target_type->AsArray(), {} /* values */);
-  } else if (argument_value->type()->IsStruct()) {
+  } else if (argument_value->is_empty_array() &&
+             !argument_literal->has_explicit_type() &&
+             target_type->IsVariant()) {
+    if (!resolver_->language().LanguageFeatureEnabled(FEATURE_VARIANT_TYPE)) {
+      return MakeSqlErrorAt(ast_location) << "VARIANT type is not supported";
+    }
+    coerced_literal_value =
+        Value::Variant(Value::EmptyArray(types::VariantArrayType()));
+  } else if (argument_value->type()->IsStruct() && !target_type->IsVariant()) {
+    // Coerce Struct literals field-by-field to match the target type (e.g.,
+    // another Struct or compatible Proto).
+    //
+    // We EXCLUDE Variant targets here because we want to treat the entire
+    // Struct as a single payload to be stored in the Variant, Variant targets
+    // fall through to CastValue below, which handles the VARIANT case.
+    //
     // TODO: Make this clearer by factoring it out to a helper function
     // that returns an absl::StatusOr<Value>, making 'success' unnecessary and
     // allowing for a more detailed error message (like for string -> proto

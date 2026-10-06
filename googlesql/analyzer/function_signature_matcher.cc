@@ -19,6 +19,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -51,6 +52,7 @@
 #include "googlesql/base/case.h"
 #include "absl/base/attributes.h"
 #include "googlesql/base/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
@@ -63,7 +65,58 @@
 #include "googlesql/base/ret_check.h"
 
 namespace googlesql {
+namespace internal {
+
+// Gives FunctionSignatureMatcher access to FunctionArgumentType's shared
+// options, so concrete arguments can share options with the catalog signature
+// instead of copying them. FunctionArgumentTypeOptions are immutable once owned
+// by a FunctionArgumentType, so sharing them is safe.
+class ConcreteArgumentBuilder {
+ public:
+  // Returns `argument`'s shared options.
+  static const std::shared_ptr<const FunctionArgumentTypeOptions>& GetOptions(
+      const FunctionArgumentType& argument) {
+    return argument.options_;
+  }
+
+  // Returns `argument`'s shared options if it has no default value, or else a
+  // copy of them with the default value cleared.
+  static std::shared_ptr<const FunctionArgumentTypeOptions>
+  GetOptionsWithoutDefault(const FunctionArgumentType& argument) {
+    if (!argument.HasDefault()) {
+      return argument.options_;
+    }
+    auto options =
+        std::make_shared<FunctionArgumentTypeOptions>(argument.options());
+    options->clear_default();
+    return options;
+  }
+
+  static FunctionArgumentType Make(
+      SignatureArgumentKind kind, const Type* type,
+      std::shared_ptr<const FunctionArgumentTypeOptions> options,
+      int num_occurrences,
+      std::optional<TypeModifiers> type_modifiers = std::nullopt) {
+    return FunctionArgumentType(type, std::move(options),
+                                std::move(type_modifiers), num_occurrences,
+                                kind);
+  }
+
+  static FunctionArgumentType Lambda(
+      FunctionArgumentTypeList lambda_argument_types,
+      FunctionArgumentType lambda_body_type,
+      std::shared_ptr<const FunctionArgumentTypeOptions> options) {
+    return FunctionArgumentType::Lambda(std::move(lambda_argument_types),
+                                        std::move(lambda_body_type),
+                                        std::move(options));
+  }
+};
+
+}  // namespace internal
+
 namespace {
+
+using internal::ConcreteArgumentBuilder;
 
 // Some methods in this class have very large huge stack frames already.
 #define NOINLINE_PREVENT_HUGE_STACK_FRAMES ABSL_ATTRIBUTE_NOINLINE
@@ -461,20 +514,16 @@ absl::StatusOr<bool> FunctionSignatureMatcher::GetConcreteArgument(
   GOOGLESQL_RET_CHECK_NE(argument.kind(), ARG_KIND_EXPR_ARBITRARY);
   output_argument->reset();
 
-  // Make a copy of the arg type options, so that we can clear the default
-  // argument value. This is necessary because we will later construct a
-  // FunctionSignature using this argument, and FunctionSignature construction
-  // will fail its validity check if the default argument value is set for this
-  // concrete argument.
+  // Scalar concrete arguments below share the arg type options, copying them
+  // only if we need to clear the default argument value. This is necessary
+  // because we will later construct a FunctionSignature using this argument,
+  // and FunctionSignature construction will fail its validity check if the
+  // default argument value is set for this concrete argument.
   // It is assumed that in GetConcreteArguments the element in <input_arguments>
   // corresponding to <argument> here either has an explicitly provided value,
   // or already carries the default value as a literal which can be referenced
   // later. So in both cases it is safe to remove the default from the argument
   // options.
-  FunctionArgumentTypeOptions options(argument.options());
-  if (options.has_default()) {
-    options.clear_default();
-  }
   if (argument.IsTemplated() && !argument.IsRelation() && !argument.IsModel() &&
       !argument.IsConnection() && !argument.IsLambda() &&
       !argument.IsSequence() && !argument.IsGraph()) {
@@ -485,26 +534,39 @@ absl::StatusOr<bool> FunctionSignatureMatcher::GetConcreteArgument(
     }
     GOOGLESQL_RET_CHECK_NE(*found_type, nullptr);
 
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        *found_type, std::move(options), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_EXPR_FIXED, *found_type,
+            ConcreteArgumentBuilder::GetOptionsWithoutDefault(argument),
+            num_occurrences, TypeModifiers()));
   } else if (argument.IsRelation()) {
     // Table-valued functions should return ARG_KIND_RELATION. There is no Type
     // object in this case, so return a new FunctionArgumentType with
     // ARG_KIND_RELATION and the specified number of occurrences.
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        ARG_KIND_RELATION, argument.options(), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_RELATION, /*type=*/nullptr,
+            ConcreteArgumentBuilder::GetOptions(argument), num_occurrences));
   } else if (argument.IsModel()) {
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        ARG_KIND_MODEL, argument.options(), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_MODEL, /*type=*/nullptr,
+            ConcreteArgumentBuilder::GetOptions(argument), num_occurrences));
   } else if (argument.IsConnection()) {
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        ARG_KIND_CONNECTION, argument.options(), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_CONNECTION, /*type=*/nullptr,
+            ConcreteArgumentBuilder::GetOptions(argument), num_occurrences));
   } else if (argument.IsSequence()) {
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        ARG_KIND_SEQUENCE, argument.options(), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_SEQUENCE, /*type=*/nullptr,
+            ConcreteArgumentBuilder::GetOptions(argument), num_occurrences));
   } else if (argument.IsGraph()) {
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        ARG_KIND_GRAPH, argument.options(), num_occurrences);
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_GRAPH, /*type=*/nullptr,
+            ConcreteArgumentBuilder::GetOptions(argument), num_occurrences));
   } else if (argument.IsLambda()) {
     std::vector<FunctionArgumentType> concrete_arg_types;
     for (const FunctionArgumentType& arg_type :
@@ -533,8 +595,9 @@ absl::StatusOr<bool> FunctionSignatureMatcher::GetConcreteArgument(
     GOOGLESQL_RET_CHECK_NE(concrete_expr_arg->type(), nullptr);
 
     *output_argument =
-        std::make_unique<FunctionArgumentType>(FunctionArgumentType::Lambda(
-            concrete_arg_types, *concrete_expr_arg, argument.options()));
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Lambda(
+            std::move(concrete_arg_types), *concrete_expr_arg,
+            ConcreteArgumentBuilder::GetOptions(argument)));
   } else if (argument.IsVoid()) {
     // This function is used to process both arguments and return types.
     // Procedures can have a VOID return type, which does not have an associated
@@ -543,9 +606,11 @@ absl::StatusOr<bool> FunctionSignatureMatcher::GetConcreteArgument(
     *output_argument =
         std::make_unique<FunctionArgumentType>(ARG_KIND_VOID, num_occurrences);
   } else {
-    *output_argument = std::make_unique<FunctionArgumentType>(
-        argument.type(), std::move(options), num_occurrences,
-        argument.type_modifiers());
+    *output_argument =
+        std::make_unique<FunctionArgumentType>(ConcreteArgumentBuilder::Make(
+            ARG_KIND_EXPR_FIXED, argument.type(),
+            ConcreteArgumentBuilder::GetOptionsWithoutDefault(argument),
+            num_occurrences, argument.type_modifiers()));
   }
 
   // Set the original templated kind for the concrete argument.
@@ -574,8 +639,10 @@ FunctionSignatureMatcher::GetConcreteArguments(
       const FunctionArgumentType& signature_argument = signature.argument(i);
       if (signature_argument.kind() == ARG_KIND_EXPR_ARBITRARY) {
         // For arbitrary type arguments the type is derived from the input.
-        resolved_argument_list.emplace_back(input_arguments[i].type(),
-                                            signature_argument.options(), 1);
+        resolved_argument_list.push_back(ConcreteArgumentBuilder::Make(
+            ARG_KIND_EXPR_FIXED, input_arguments[i].type(),
+            ConcreteArgumentBuilder::GetOptions(signature_argument), 1,
+            TypeModifiers()));
         resolved_argument_list.back().set_original_kind(
             signature_argument.kind());
       } else {
@@ -655,20 +722,22 @@ FunctionSignatureMatcher::GetConcreteArguments(
       }
     }
     if (signature_argument.kind() == ARG_KIND_EXPR_ARBITRARY) {
-      // Make a copy of the arg type options, so that we can clear the default
-      // signature_argument value to avoid conflicting with the concrete type
-      // which is a fatal error FunctionSignature::IsValid(). It is assumed that
-      // the <signature_argument> already carries the default value as a literal
-      // which can be referenced later. So it is safe to remove the default from
-      // the signature_argument options.
-      FunctionArgumentTypeOptions options(signature_argument.options());
-      options.clear_default();
+      // Share the arg type options, copying them only if we need to clear the
+      // default signature_argument value to avoid conflicting with the concrete
+      // type which is a fatal error FunctionSignature::IsValid(). It is assumed
+      // that the <signature_argument> already carries the default value as a
+      // literal which can be referenced later. So it is safe to remove the
+      // default from the signature_argument options.
+      std::shared_ptr<const FunctionArgumentTypeOptions> options =
+          ConcreteArgumentBuilder::GetOptionsWithoutDefault(signature_argument);
       if (num_occurrences > 0) {
-        resolved_argument_list.emplace_back(
-            input_arguments[input_position].type(), options, 1);
+        resolved_argument_list.push_back(ConcreteArgumentBuilder::Make(
+            ARG_KIND_EXPR_FIXED, input_arguments[input_position].type(),
+            std::move(options), 1, TypeModifiers()));
       } else {
-        resolved_argument_list.emplace_back(signature_argument.kind(), options,
-                                            num_occurrences);
+        resolved_argument_list.push_back(ConcreteArgumentBuilder::Make(
+            signature_argument.kind(), /*type=*/nullptr, std::move(options),
+            num_occurrences));
       }
     } else {
       std::unique_ptr<FunctionArgumentType> argument_type;
@@ -680,12 +749,12 @@ FunctionSignatureMatcher::GetConcreteArguments(
                               templated_argument_map, &argument_type));
       if (!matches) {
         GOOGLESQL_RET_CHECK_EQ(0, num_occurrences);
-        FunctionArgumentTypeOptions options(signature_argument.options());
-        if (options.has_default()) {
-          options.clear_default();
-        }
         argument_type = std::make_unique<FunctionArgumentType>(
-            signature_argument.kind(), std::move(options), 0);
+            ConcreteArgumentBuilder::Make(
+                signature_argument.kind(), /*type=*/nullptr,
+                ConcreteArgumentBuilder::GetOptionsWithoutDefault(
+                    signature_argument),
+                /*num_occurrences=*/0));
       }
       resolved_argument_list.push_back(std::move(*argument_type));
     }
@@ -1283,16 +1352,22 @@ absl::StatusOr<bool> FunctionSignatureMatcher::
   } else if (!signature_argument.IsTemplated()) {
     // Input argument type must either be equivalent or (if coercion is
     // allowed) coercible to signature argument type.
-    if (!input_argument.type()->Equivalent(signature_argument.type()) &&
-        (!allow_argument_coercion_ ||
-         (!coercer_.CoercesTo(input_argument, signature_argument.type(),
-                              /*is_explicit=*/false, signature_match_result) &&
-          !signature_argument.AllowCoercionFrom(input_argument.type())))) {
-      SET_MISMATCH_ERROR_WITH_INDEX(
-          absl::StrFormat("Unable to coerce type %s to expected type %s",
-                          ShortTypeName(input_argument.type()),
-                          ShortTypeName(signature_argument.type())));
-      return false;
+    if (!input_argument.type()->Equivalent(signature_argument.type())) {
+      bool coerces_to =
+          allow_argument_coercion_ &&
+          coercer_.CoercesTo(input_argument, signature_argument.type(),
+                             /*is_explicit=*/false, signature_match_result);
+      bool signature_allows_coercion =
+          allow_argument_coercion_ &&
+          signature_argument.AllowCoercionFrom(input_argument.type());
+      bool can_coerce = coerces_to || signature_allows_coercion;
+      if (!can_coerce) {
+        SET_MISMATCH_ERROR_WITH_INDEX(
+            absl::StrFormat("Unable to coerce type %s to expected type %s",
+                            ShortTypeName(input_argument.type()),
+                            ShortTypeName(signature_argument.type())));
+        return false;
+      }
     }
   } else if (input_argument.is_untyped()) {
     // Templated argument, input is an untyped NULL, empty array or empty map.

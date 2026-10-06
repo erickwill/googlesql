@@ -28,10 +28,10 @@
 #include "googlesql/parser/parser.h"
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/options.pb.h"
+#include "googlesql/public/parse_helpers.h"
 #include "googlesql/public/parse_resume_location.h"
 #include "googlesql/base/check.h"
 #include "absl/status/status.h"
-#include "googlesql/base/status_macros.h"
 #include "absl/types/span.h"
 #include "googlesql/base/status_builder.h"
 #include "google/protobuf/descriptor.h"
@@ -46,10 +46,14 @@ absl::Status ModuleContentsFetcher::FetchProtoFileDescriptor(
          << "The IMPORT PROTO statement is not supported inside of modules";
 }
 
-// Parses the <module_contents>, looking for IMPORT MODULE statements.
+// Scans the <module_contents>, looking for IMPORT MODULE statements.
+// Non-IMPORT statements are skipped so dependencies can be gathered before
+// further analysis occurs.
+//
 // When finding an IMPORT MODULE statement, the imported module name path
-// is appended to <module_name_paths>.  Adds an error status to <errors>
-// if <module_contents> fails to parse.
+// is appended to <module_name_paths>. Adds an error status to <errors>
+// if an IMPORT statement fails to parse or if statement skipping fails
+// (e.g. due to a lexical error).
 //
 // For example, when parsing a module and finding the statement
 // 'IMPORT MODULE a.b.c AS d', the vector <a, b, c> is appended to
@@ -71,25 +75,39 @@ static void AppendImportedModuleNamePaths(
   bool is_end_of_input = false;
   while (!is_end_of_input) {
     std::unique_ptr<ParserOutput> parser_output;
-    const ParseResumeLocation this_parse_resume_location =
-        parse_resume_location;
-    // TODO: Skip parsing on non-IMPORT statements.
+    bool unused_next_statement_is_ctas = false;
+    ASTNodeKind statement_kind =
+        ParseNextStatementKind(parse_resume_location, language_options,
+                               &unused_next_statement_is_ctas);
+    // We only need to collect top-level IMPORT statements here, so skip other
+    // statements. Note that for procedural blocks (such as CREATE PROCEDURE ...
+    // BEGIN ... END;), SkipNextStatement stops at each semicolon inside the
+    // BEGIN ... END; block rather than at the end of the entire procedure. This
+    // is safe here because IMPORT statements are only supported at the module
+    // top level (not inside procedure bodies), so each inner statement and the
+    // closing END; will also have `statement_kind != AST_IMPORT_STATEMENT` and
+    // be skipped in subsequent loop iterations.
+    if (statement_kind != AST_IMPORT_STATEMENT) {
+      const absl::Status skip_status =
+          SkipNextStatement(&parse_resume_location, &is_end_of_input);
+      if (!skip_status.ok()) {
+        errors->push_back(ConvertInternalErrorLocationAndAdjustErrorString(
+            parser_options.error_message_options(), module_contents,
+            skip_status));
+        break;
+      }
+      if (is_end_of_input) {
+        break;
+      }
+      continue;
+    }
+
     const absl::Status parse_status =
         ParseNextStatement(&parse_resume_location, parser_options,
                            &parser_output, &is_end_of_input);
     if (!parse_status.ok()) {
-      // If we hit a parse error, then we add it to <errors> and stop parsing
-      // these module file contents.
-      // TODO: If we hit a parse error, we should try to find
-      // the beginning of the next statement and continue (just like we'd
-      // like to do this when building the catalog). Fixing this is lower
-      // priority than for catalog building.
       errors->push_back(parse_status);
       break;
-    }
-
-    if (parser_output->statement()->node_kind() != AST_IMPORT_STATEMENT) {
-      continue;
     }
     const ASTImportStatement* ast_import_statement =
         parser_output->statement()->GetAs<ASTImportStatement>();

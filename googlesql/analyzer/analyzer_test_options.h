@@ -296,8 +296,8 @@ void RegisterAnalyzerTestOptions(
     file_based_test_driver::TestCaseOptions* test_case_options);
 
 // Return a set of known parameters used in the analyzer tests.
-std::vector<std::pair<std::string, const googlesql::Type*>> GetQueryParameters(
-    TypeFactory* type_factory);
+absl::StatusOr<std::vector<std::pair<std::string, const googlesql::Type*>>>
+GetQueryParameters(TypeFactory* type_factory);
 
 // A map-like type where keys are a canonicalized version of the string that
 // apperas in the kEnabledASTRewewrites and ASTRewriteSet is the set of rewrites

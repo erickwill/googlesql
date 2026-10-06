@@ -266,6 +266,7 @@ TEST(SimpleBuiltinFunctionTests, SanityTests) {
   // possible.
   LanguageOptions language_options;
   language_options.EnableMaximumLanguageFeaturesForDevelopment();
+  // Enable relevant ideally_enabled=false features.
   language_options.set_product_mode(PRODUCT_INTERNAL);
   GoogleSQLBuiltinFunctionOptions options(language_options);
   // Get all the relevant functions for this 'language_options'.

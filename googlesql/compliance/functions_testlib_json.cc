@@ -3441,4 +3441,142 @@ std::vector<FunctionTestCall> GetFunctionTestsJsonFlatten() {
   }
   return tests;
 }
+std::vector<FunctionTestCall> GetFunctionTestsJsonExists() {
+  std::vector<FunctionTestCall> tests;
+
+  const Value json_val =
+      ParseJson(R"({"a": 1, "b": null, "c": [1, 2], "d": "foo"})");
+  const Value json_null = ParseJson("null");
+
+  const Value json_int = ParseJson("123");
+  const Value json_bool = ParseJson("true");
+  const Value json_str = ParseJson(R"("hello")");
+  const Value json_empty_obj = ParseJson("{}");
+  const Value json_empty_arr = ParseJson("[]");
+
+  // --- JSON_EXISTS ---
+  tests.push_back(
+      {"json_exists", {json_val, String("$.a")}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.c[0]")}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.e")}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.c[2]")}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.b")}, Value::Bool(true)});
+  tests.push_back({"json_exists", {json_null, String("$")}, Value::Bool(true)});
+  tests.push_back({"json_exists", {NullJson(), String("$.a")}, NullBool()});
+  tests.push_back({"json_exists", {json_val, NullString()}, NullBool()});
+  tests.push_back({"json_exists", {NullJson(), NullString()}, NullBool()});
+  // Scalar and empty JSON documents
+  tests.push_back({"json_exists", {json_int, String("$")}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists", {json_int, String("$.a")}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists", {json_int, String("$[0]")}, Value::Bool(false)});
+  tests.push_back({"json_exists", {json_bool, String("$")}, Value::Bool(true)});
+  tests.push_back({"json_exists", {json_str, String("$")}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists", {json_empty_obj, String("$")}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists", {json_empty_obj, String("$.a")}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists", {json_empty_arr, String("$[0]")}, Value::Bool(false)});
+  // Invalid JSONPath syntax returns OUT_OF_RANGE error
+  tests.push_back(
+      {"json_exists", {json_val, String("")}, NullBool(), OUT_OF_RANGE});
+  tests.push_back(
+      {"json_exists", {json_val, String("invalid")}, NullBool(), OUT_OF_RANGE});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.*")}, NullBool(), OUT_OF_RANGE});
+  tests.push_back(
+      {"json_exists", {json_val, String("$.a..b")}, NullBool(), OUT_OF_RANGE});
+
+  // --- JSON_EXISTS_ANY ---
+  const Value paths_existing = StringArray({"$.a", "$.b"});
+  const Value paths_mixed = StringArray({"$.a", "$.e"});
+  const Value paths_non_existing = StringArray({"$.e", "$.f"});
+  const Value paths_empty = StringArray(std::vector<std::string>{});
+  const Value paths_any_true_with_null =
+      values::Array(StringArrayType(), {String("$.a"), NullString()});
+  const Value paths_any_null_with_null =
+      values::Array(StringArrayType(), {String("$.e"), NullString()});
+  const Value paths_only_null =
+      values::Array(StringArrayType(), {NullString()});
+  const Value paths_multiple_nulls =
+      values::Array(StringArrayType(), {NullString(), NullString()});
+  const Value paths_invalid = StringArray({"invalid"});
+  const Value paths_with_invalid = StringArray({"$.a", "invalid"});
+
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_existing}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_mixed}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_non_existing}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_empty}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists_any", {NullJson(), paths_existing}, NullBool()});
+  tests.push_back({"json_exists_any",
+                   {json_val, Value::Null(types::StringArrayType())},
+                   NullBool()});
+  tests.push_back({"json_exists_any",
+                   {json_val, paths_any_true_with_null},
+                   Value::Bool(true)});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_any_null_with_null}, NullBool()});
+  tests.push_back({"json_exists_any", {json_val, paths_only_null}, NullBool()});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_multiple_nulls}, NullBool()});
+  tests.push_back(
+      {"json_exists_any", {json_val, paths_invalid}, NullBool(), OUT_OF_RANGE});
+  tests.push_back({"json_exists_any",
+                   {json_val, paths_with_invalid},
+                   NullBool(),
+                   OUT_OF_RANGE});
+
+  // --- JSON_EXISTS_ALL ---
+  const Value paths_all_null_with_null =
+      values::Array(StringArrayType(), {String("$.a"), NullString()});
+  const Value paths_all_false_with_null =
+      values::Array(StringArrayType(), {String("$.e"), NullString()});
+
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_existing}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_mixed}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_non_existing}, Value::Bool(false)});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_empty}, Value::Bool(true)});
+  tests.push_back(
+      {"json_exists_all", {NullJson(), paths_existing}, NullBool()});
+  tests.push_back({"json_exists_all",
+                   {json_val, Value::Null(types::StringArrayType())},
+                   NullBool()});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_all_null_with_null}, NullBool()});
+  tests.push_back({"json_exists_all",
+                   {json_val, paths_all_false_with_null},
+                   Value::Bool(false)});
+  tests.push_back({"json_exists_all", {json_val, paths_only_null}, NullBool()});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_multiple_nulls}, NullBool()});
+  tests.push_back(
+      {"json_exists_all", {json_val, paths_invalid}, NullBool(), OUT_OF_RANGE});
+  tests.push_back({"json_exists_all",
+                   {json_val, paths_with_invalid},
+                   NullBool(),
+                   OUT_OF_RANGE});
+
+  for (FunctionTestCall& test : tests) {
+    test.params.AddRequiredFeature(FEATURE_JSON_TYPE);
+    test.params.AddRequiredFeature(FEATURE_JSON_EXISTS_FUNCTIONS);
+  }
+
+  return tests;
+}
+
 }  // namespace googlesql

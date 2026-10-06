@@ -55,6 +55,7 @@
 #include "googlesql/public/types/value_equality_check_options.h"
 #include "googlesql/public/types/value_representations.h"
 #include "googlesql/public/value_content.h"
+#include "googlesql/public/variant_value.h"
 #include "googlesql/base/case.h"
 #include "absl/algorithm/container.h"
 #include "absl/base/nullability.h"
@@ -215,6 +216,29 @@ absl::Status ValidateGraphPathElements(const GraphPathType* graph_path_type,
   }
   return absl::OkStatus();
 }
+
+absl::Status ValidateTypeForVariant(const Type* type,
+                                    const Type* root_type = nullptr) {
+  GOOGLESQL_RET_CHECK(type != nullptr);
+  if (root_type == nullptr) {
+    root_type = type;
+  }
+  // At the root level, direct nesting of a VARIANT is disallowed (nested
+  // variants are flattened). VARIANT is permitted inside container types (e.g.
+  // ARRAY<VARIANT>). MEASURE, ROW, and TABLE types are disallowed both at the
+  // root level and recursively within any container types.
+  if ((type == root_type && type->IsVariant()) || type->IsMeasureType() ||
+      type->IsRow() || type->IsTable()) {
+    return absl::InternalError(
+        absl::StrCat("Variant cannot be constructed using type: ",
+                     root_type->ShortTypeName(PRODUCT_INTERNAL)));
+  }
+  for (const Type* component_type : type->ComponentTypes()) {
+    GOOGLESQL_RETURN_IF_ERROR(ValidateTypeForVariant(component_type, root_type));
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace
 
 // -------------------------------------------------------
@@ -1441,8 +1465,8 @@ std::string Value::DebugString(bool verbose) const {
   if (is_null()) {
     result = "NULL";
   } else {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_INTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_INTERNAL);
     options.mode = Type::FormatValueContentOptions::Mode::kDebug;
     options.verbose = verbose;
 
@@ -1732,7 +1756,7 @@ std::string FormatType(const Type* type, ArrayElemFormat elem_format,
 }
 
 std::string Value::FormatInternal(
-    Type::FormatValueContentOptions options) const {
+    const Type::FormatValueContentOptions& options) const {
   if (type()->IsArray()) {
     // If the array is null or empty, print the whole type because there
     // are no printed elements that provide type information of nested arrays.
@@ -2455,5 +2479,65 @@ const StructType* Value::TypedMeasure::GetCapturedValuesStructType() const {
 const std::vector<int>& Value::TypedMeasure::KeyIndices() const {
   return key_indices_;
 };
+
+absl::StatusOr<VariantValueView> Value::variant_value() const {
+  GOOGLESQL_RET_CHECK_EQ(TYPE_VARIANT, metadata_.type_kind()) << "Not a variant type";
+  GOOGLESQL_RET_CHECK(!metadata_.is_null()) << "Null value";
+  return VariantValueView(variant_ptr_->inner_value());
+}
+
+namespace internal {
+
+class VariantRefImpl final
+    : public internal::VariantRef,
+      public googlesql_base::refcount::CompactReferenceCounted<VariantRefImpl, int64_t> {
+ public:
+  explicit VariantRefImpl(const Value& inner_value)
+      : inner_value_(inner_value) {}
+
+  void Ref() const override {
+    googlesql_base::refcount::CompactReferenceCounted<VariantRefImpl, int64_t>::Ref();
+  }
+
+  void Unref() const override {
+    googlesql_base::refcount::CompactReferenceCounted<VariantRefImpl, int64_t>::Unref();
+  }
+
+  const Value& inner_value() const override { return inner_value_; }
+
+  uint64_t physical_byte_size() const override {
+    return sizeof(VariantRefImpl) + inner_value_.physical_byte_size();
+  }
+
+  bool Equals(const VariantRef* other,
+              const ValueEqualityCheckOptions& options) const override {
+    if (this == other) return true;
+    if (other == nullptr) return false;
+
+    return Value::EqualsInternal(inner_value_, other->inner_value(),
+                                 /*allow_bags=*/false, options);
+  }
+
+  absl::HashState Hash(absl::HashState state) const override {
+    return absl::HashState::combine(std::move(state), inner_value_);
+  }
+
+ private:
+  Value inner_value_;
+};
+
+}  // namespace internal
+
+absl::StatusOr<Value> Value::Variant(const Value& inner_value) {
+  GOOGLESQL_RET_CHECK(inner_value.is_valid()) << "inner_value in Variant must be valid";
+
+  if (inner_value.type()->IsVariant()) {
+    return inner_value;
+  }
+
+  GOOGLESQL_RETURN_IF_ERROR(ValidateTypeForVariant(inner_value.type()));
+
+  return Value(new internal::VariantRefImpl(inner_value));
+}
 
 }  // namespace googlesql

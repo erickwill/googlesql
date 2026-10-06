@@ -1230,7 +1230,9 @@ absl::Status Resolver::ResolveQueryStatement(
         language().SupportsStatementKind(RESOLVED_GENERALIZED_QUERY_STMT));
     GOOGLESQL_RET_CHECK(
         language().LanguageFeatureEnabled(FEATURE_PIPES) ||
-        language().LanguageFeatureEnabled(FEATURE_SQL_GRAPH_TERMINAL_INSERT));
+        language().LanguageFeatureEnabled(FEATURE_SQL_GRAPH_TERMINAL_INSERT) ||
+        language().LanguageFeatureEnabled(
+            FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE));
     std::unique_ptr<const ResolvedOutputSchema> output_schema;
     if (*output_name_list != nullptr &&
         !(*output_name_list)->columns().empty()) {
@@ -2932,9 +2934,9 @@ absl::Status Resolver::ResolveCreateExternalSchemaStatement(
   GOOGLESQL_RETURN_IF_ERROR(ResolveCreateStatementOptions(
       ast_statement, "CREATE EXTERNAL SCHEMA", &create_scope, &create_mode));
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-      ast_statement->with_connection_clause(), &resolved_connection));
+      ast_statement->with_connection_clause(), &resolved_connection_list));
 
   // Engine-specific options are required for external schema (as they are how
   // the source of the external schema is provided)
@@ -2944,7 +2946,7 @@ absl::Status Resolver::ResolveCreateExternalSchemaStatement(
                                      &resolved_options));
   *output = MakeResolvedCreateExternalSchemaStmt(
       ast_statement->name()->ToIdentifierVector(), create_scope, create_mode,
-      std::move(resolved_options), std::move(resolved_connection));
+      std::move(resolved_options), std::move(resolved_connection_list));
   return absl::OkStatus();
 }
 
@@ -3564,9 +3566,9 @@ absl::Status Resolver::ResolveCreateModelStatement(
   }
 
   // Resolve connection.
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-      ast_statement->with_connection_clause(), &resolved_connection,
+      ast_statement->with_connection_clause(), &resolved_connection_list,
       /*is_default_connection_allowed=*/true));
 
   // Resolve the query.
@@ -3642,7 +3644,7 @@ absl::Status Resolver::ResolveCreateModelStatement(
       std::move(transform_analytic_function_group_list),
       std::move(input_column_definition_list),
       std::move(output_column_definition_list), is_remote,
-      std::move(resolved_connection));
+      std::move(resolved_connection_list));
 
   return absl::OkStatus();
 }
@@ -3992,7 +3994,7 @@ absl::Status Resolver::ResolveCreateTableStmtBaseProperties(
         break;
     }
     GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-        with_connection_clause, &statement_base_properties->connection,
+        with_connection_clause, &statement_base_properties->connection_list,
         is_default_connection_allowed));
   }
 
@@ -4180,7 +4182,7 @@ absl::Status Resolver::ResolveCreateTableStatement(
         statement_base_properties.is_value_table,
         statement_base_properties.like_table,
         std::move(statement_base_properties.collation),
-        std::move(statement_base_properties.connection),
+        std::move(statement_base_properties.connection_list),
         std::move(statement_base_properties.partition_by_list),
         std::move(statement_base_properties.cluster_by_list),
         std::move(statement_base_properties.output_column_list),
@@ -4222,7 +4224,7 @@ absl::Status Resolver::ResolveCreateTableStatement(
         statement_base_properties.is_value_table,
         statement_base_properties.like_table,
         std::move(statement_base_properties.collation),
-        std::move(statement_base_properties.connection),
+        std::move(statement_base_properties.connection_list),
         std::move(statement_base_properties.clone_from),
         std::move(statement_base_properties.copy_from),
         std::move(statement_base_properties.partition_by_list),
@@ -4453,7 +4455,7 @@ Resolver::MakeResolvedColumnAnnotationsFromAnnotationMap(
     }
   } else if (type_annotation_map->IsStructMap()) {
     // The type annotation map is for a complex type.
-    std::vector<const Type*> component_types = target_type->ComponentTypes();
+    TypeListView component_types = target_type->ComponentTypes();
     GOOGLESQL_RET_CHECK_EQ(component_types.size(),
                  type_annotation_map->AsStructMap()->num_fields());
 
@@ -4517,7 +4519,7 @@ static absl::Status PopulateCollationAnnotations(
   if (column_annotations->child_list().empty()) {
     return absl::OkStatus();
   }
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   GOOGLESQL_RET_CHECK_GE(component_types.size(), column_annotations->child_list().size());
   for (int i = 0; i < column_annotations->child_list_size(); ++i) {
     GOOGLESQL_RETURN_IF_ERROR(PopulateCollationAnnotations(
@@ -4825,7 +4827,7 @@ absl::Status Resolver::ResolveCreateLiveTableStatement(
         statement_base_properties.is_value_table,
         statement_base_properties.like_table,
         std::move(statement_base_properties.collation),
-        std::move(statement_base_properties.connection),
+        std::move(statement_base_properties.connection_list),
         std::move(statement_base_properties.partition_by_list),
         std::move(statement_base_properties.cluster_by_list));
   } else {
@@ -4842,7 +4844,7 @@ absl::Status Resolver::ResolveCreateLiveTableStatement(
         statement_base_properties.is_value_table,
         statement_base_properties.like_table,
         std::move(statement_base_properties.collation),
-        std::move(statement_base_properties.connection),
+        std::move(statement_base_properties.connection_list),
         std::move(statement_base_properties.partition_by_list),
         std::move(statement_base_properties.cluster_by_list),
         std::move(statement_base_properties.output_column_list),
@@ -5033,7 +5035,7 @@ absl::Status Resolver::ResolveCreateExternalTableStatement(
       statement_base_properties.is_value_table,
       statement_base_properties.like_table,
       std::move(statement_base_properties.collation),
-      std::move(statement_base_properties.connection),
+      std::move(statement_base_properties.connection_list),
       std::move(statement_base_properties.with_partition_columns));
 
   return absl::OkStatus();
@@ -5509,7 +5511,7 @@ absl::Status Resolver::ResolveCreateFunctionStatement(
            << scope_str << " modifier.";
   }
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
 
   const ASTWithConnectionClause* with_connection =
       ast_statement->with_connection_clause();
@@ -5530,7 +5532,7 @@ absl::Status Resolver::ResolveCreateFunctionStatement(
 
     if (with_connection != nullptr) {
       GOOGLESQL_RETURN_IF_ERROR(
-          ResolveConnectionClause(with_connection, &resolved_connection));
+          ResolveConnectionClause(with_connection, &resolved_connection_list));
     }
   } else if (with_connection != nullptr) {
     if (!language().LanguageFeatureEnabled(FEATURE_REMOTE_FUNCTION) &&
@@ -5560,7 +5562,7 @@ absl::Status Resolver::ResolveCreateFunctionStatement(
                 "or must be used with LANGUAGE clause";
     }
     GOOGLESQL_RETURN_IF_ERROR(
-        ResolveConnectionClause(with_connection, &resolved_connection));
+        ResolveConnectionClause(with_connection, &resolved_connection_list));
   }
 
   // If REMOTE keyword is used or LANGUAGE is set to "REMOTE" and the feature is
@@ -5587,7 +5589,7 @@ absl::Status Resolver::ResolveCreateFunctionStatement(
       language_string, code_string, std::move(resolved_aggregate_exprs),
       std::move(resolved_expr), std::move(resolved_options), sql_security,
       ConvertDeterminismLevel(ast_statement->determinism_level()), is_remote,
-      std::move(resolved_connection));
+      std::move(resolved_connection_list));
   MaybeRecordParseLocation(ast_statement->function_declaration()->name(),
                            output->get());
   return absl::OkStatus();
@@ -5860,7 +5862,7 @@ absl::Status Resolver::ResolveCreateTableFunctionStatement(
            << scope_str << " modifier.";
   }
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   const ASTWithConnectionClause* with_connection =
       ast_statement->with_connection_clause();
   if (with_connection != nullptr) {
@@ -5875,7 +5877,7 @@ absl::Status Resolver::ResolveCreateTableFunctionStatement(
     }
 
     GOOGLESQL_RETURN_IF_ERROR(
-        ResolveConnectionClause(with_connection, &resolved_connection));
+        ResolveConnectionClause(with_connection, &resolved_connection_list));
   }
 
   // Option resolution is done with an empty namescope. That includes any
@@ -5893,7 +5895,7 @@ absl::Status Resolver::ResolveCreateTableFunctionStatement(
       language_string, code_string, std::move(resolved_query),
       std::move(resolved_output_column_list),
       return_tvf_relation.is_value_table(), sql_security,
-      std::move(resolved_connection));
+      std::move(resolved_connection_list));
   MaybeRecordParseLocation(ast_statement->function_declaration()->name(),
                            output->get());
   return absl::OkStatus();
@@ -6353,7 +6355,7 @@ absl::Status Resolver::ResolveCreateProcedureStatement(
     }
   }
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   if (ast_statement->with_connection_clause() != nullptr) {
     if (!language().LanguageFeatureEnabled(FEATURE_NON_SQL_PROCEDURE)) {
       return MakeSqlErrorAt(ast_statement)
@@ -6364,7 +6366,7 @@ absl::Status Resolver::ResolveCreateProcedureStatement(
              << "WITH CONNECTION clause is not supported inside modules";
     }
     GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-        ast_statement->with_connection_clause(), &resolved_connection));
+        ast_statement->with_connection_clause(), &resolved_connection_list));
   }
 
   std::string procedure_body;
@@ -6483,7 +6485,7 @@ absl::Status Resolver::ResolveCreateProcedureStatement(
   *output = MakeResolvedCreateProcedureStmt(
       procedure_name, create_scope, create_mode, arg_info->ArgumentNames(),
       *signature, std::move(resolved_options), procedure_body,
-      std::move(resolved_connection), language_string, code_string,
+      std::move(resolved_connection_list), language_string, code_string,
       external_security);
 
   MaybeRecordParseLocation(ast_statement->name(), output->get());
@@ -6695,27 +6697,54 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
   // Resolve the default (if present) to a googlesql::Value.
   std::optional<Value> default_value;
   bool default_value_has_explicit_type = false;
-  if (function_param.default_value() != nullptr) {
+
+  const ASTExpression* default_value_expr = function_param.default_value();
+  if (default_value_expr != nullptr) {
     if (!language().LanguageFeatureEnabled(
             FEATURE_FUNCTION_ARGUMENTS_WITH_DEFAULTS)) {
-      return MakeSqlErrorAt(function_param.default_value())
+      return MakeSqlErrorAt(default_value_expr)
              << "Function arguments with DEFAULT values are not supported";
     }
+
     std::unique_ptr<const ResolvedExpr> resolved_expr;
-    GOOGLESQL_RETURN_IF_ERROR(ResolveScalarExpr(function_param.default_value(),
+    GOOGLESQL_RETURN_IF_ERROR(ResolveScalarExpr(default_value_expr,
                                       empty_name_scope_.get(),
                                       "function parameter", &resolved_expr));
-    if (resolved_expr == nullptr ||
-        resolved_expr->node_kind() != RESOLVED_LITERAL) {
-      return MakeSqlErrorAt(function_param.default_value())
+
+    if (resolved_expr == nullptr) {
+      return MakeSqlErrorAt(default_value_expr)
              << "Function parameter default value must be a literal";
     }
-    const ResolvedLiteral* resolved_literal =
-        resolved_expr->GetAs<ResolvedLiteral>();
-    GOOGLESQL_RET_CHECK(resolved_literal != nullptr);
 
-    default_value_has_explicit_type = resolved_literal->has_explicit_type();
-    default_value = resolved_literal->value();
+    if (resolved_expr->node_kind() == RESOLVED_MAKE_COLUMN_LIST_SPEC) {
+      const ASTColumnListSpec* ast_column_list_spec =
+          default_value_expr->GetAsOrDie<ASTColumnListSpec>();
+      const ResolvedMakeColumnListSpec* column_list_spec =
+          resolved_expr->GetAs<ResolvedMakeColumnListSpec>();
+      GOOGLESQL_ASSIGN_OR_RETURN(std::vector<IdString> id_column_names,
+                       ValidateAndExtractColumnListSpecColumnNames(
+                           *ast_column_list_spec->column_names(),
+                           *column_list_spec->column_name_list()));
+
+      std::vector<std::string> column_names;
+      column_names.reserve(id_column_names.size());
+      for (const IdString& column_name : id_column_names) {
+        column_names.push_back(column_name.ToString());
+      }
+      GOOGLESQL_ASSIGN_OR_RETURN(default_value, Value::MakeColumnListSpec(
+                                          values::StringArray(column_names)));
+      default_value_has_explicit_type = true;
+    } else if (resolved_expr->node_kind() == RESOLVED_LITERAL) {
+      const ResolvedLiteral* resolved_literal =
+          resolved_expr->GetAs<ResolvedLiteral>();
+      GOOGLESQL_RET_CHECK(resolved_literal != nullptr);
+
+      default_value_has_explicit_type = resolved_literal->has_explicit_type();
+      default_value = resolved_literal->value();
+    } else {
+      return MakeSqlErrorAt(default_value_expr)
+             << "Function parameter default value must be a literal";
+    }
   }
 
   bool is_any_string_arg = IsAnyStringArg(function_param);
@@ -6756,8 +6785,8 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
     }
     // TODO b/http://b/506944023 - Support default params with a default lambda
     // expression.
-    if (function_param.default_value() != nullptr) {
-      return MakeSqlErrorAt(function_param.default_value())
+    if (default_value_expr != nullptr) {
+      return MakeSqlErrorAt(default_value_expr)
              << "Function-typed arguments cannot have default values";
     }
     return ResolveFunctionTypedParameter(
@@ -6788,6 +6817,16 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
         // Special handling for untyped empty array, as <default_value>
         // is having its type as ARRAY<INT64> now.
         default_value = Value::Array(resolved_type->AsArray(), /*values=*/{});
+      } else if (!default_value_has_explicit_type &&
+                 default_value->is_empty_array() &&
+                 resolved_type->IsVariant()) {
+        // Special handling for untyped empty array when the parameter type is
+        // VARIANT: wraps an empty ARRAY<VARIANT> inside a Variant value.
+        GOOGLESQL_ASSIGN_OR_RETURN(const ArrayType* array_type,
+                         type_factory_->MakeArrayType(
+                             type_factory_->get_variant(), language()));
+        Value empty_array = Value::EmptyArray(array_type);
+        GOOGLESQL_ASSIGN_OR_RETURN(default_value, Value::Variant(empty_array));
       } else {
         InputArgumentType arg(*default_value,
                               /*is_default_argument_value=*/true);
@@ -6796,7 +6835,7 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
             FEATURE_STRICT_FUNCTION_DEFAULT_ARG_TYPE_COERCION);
         if (!coercer_.AssignableTo(arg, resolved_type, is_explicit,
                                    &match_result)) {
-          return MakeSqlErrorAt(function_param.default_value())
+          return MakeSqlErrorAt(default_value_expr)
                  << "Default argument value does not match the argument "
                     "type. Got: "
                  << default_value->type()->ShortTypeName(
@@ -6811,7 +6850,7 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
                       analyzer_options_.language(), resolved_type,
                       /*catalog=*/nullptr, /*canonicalize_zero=*/true),
             _.AttachPayload(
-                GetErrorLocationPoint(function_param.default_value(),
+                GetErrorLocationPoint(default_value_expr,
                                       /*include_leftmost_child=*/true)
                     .ToInternalErrorLocation()));
       }
@@ -6819,6 +6858,12 @@ absl::Status Resolver::ResolveScalarFunctionParameter(
     argument_type_options.set_default(std::move(*default_value));
     argument_type_options.set_cardinality(FunctionArgumentType::OPTIONAL);
   }
+
+  if (resolved_type->IsColumnListSpec()) {
+    argument_type_options.set_must_be_non_null(true);
+    argument_type_options.set_must_be_analysis_constant();
+  }
+
   GOOGLESQL_ASSIGN_OR_RETURN(const AnnotationMap* annotation_map,
                    CreateAnnotationMapFromTypeWithModifiers(
                        resolved_type, resolved_type_modifiers));
@@ -7503,9 +7548,9 @@ absl::Status Resolver::ResolveExportDataStatement(
     input_name_list = opt_query_name_list.get();
   }
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-      ast_statement->with_connection_clause(), &resolved_connection));
+      ast_statement->with_connection_clause(), &resolved_connection_list));
 
   std::vector<std::unique_ptr<const ResolvedOption>> resolved_options;
   GOOGLESQL_RETURN_IF_ERROR(ResolveOptionsList(ast_statement->options_list(),
@@ -7513,7 +7558,7 @@ absl::Status Resolver::ResolveExportDataStatement(
                                      &resolved_options));
 
   *output = MakeResolvedExportDataStmt(
-      std::move(resolved_connection), std::move(resolved_options),
+      std::move(resolved_connection_list), std::move(resolved_options),
       MakeOutputColumnList(*input_name_list), input_name_list->is_value_table(),
       std::move(opt_query_scan));
   return absl::OkStatus();
@@ -7525,9 +7570,9 @@ absl::Status Resolver::ResolveExportMetadataStatement(
   std::vector<std::string> name_path =
       ast_statement->name_path()->ToIdentifierVector();
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-      ast_statement->with_connection_clause(), &resolved_connection));
+      ast_statement->with_connection_clause(), &resolved_connection_list));
 
   std::vector<std::unique_ptr<const ResolvedOption>> resolved_options;
   GOOGLESQL_RETURN_IF_ERROR(ResolveOptionsList(ast_statement->options_list(),
@@ -7536,7 +7581,7 @@ absl::Status Resolver::ResolveExportMetadataStatement(
 
   *output = MakeResolvedExportMetadataStmt(
       SchemaObjectKindToName(ast_statement->schema_object_kind()), name_path,
-      std::move(resolved_connection), std::move(resolved_options));
+      std::move(resolved_connection_list), std::move(resolved_options));
   return absl::OkStatus();
 }
 
@@ -7546,9 +7591,9 @@ absl::Status Resolver::ResolveExportModelStatement(
   std::vector<std::string> model_name_path =
       ast_statement->model_name_path()->ToIdentifierVector();
 
-  std::unique_ptr<const ResolvedConnection> resolved_connection;
+  std::unique_ptr<const ResolvedConnectionList> resolved_connection_list;
   GOOGLESQL_RETURN_IF_ERROR(ResolveConnectionClause(
-      ast_statement->with_connection_clause(), &resolved_connection));
+      ast_statement->with_connection_clause(), &resolved_connection_list));
 
   std::vector<std::unique_ptr<const ResolvedOption>> resolved_options;
   GOOGLESQL_RETURN_IF_ERROR(ResolveOptionsList(ast_statement->options_list(),
@@ -7556,7 +7601,7 @@ absl::Status Resolver::ResolveExportModelStatement(
                                      &resolved_options));
 
   *output = MakeResolvedExportModelStmt(model_name_path,
-                                        std::move(resolved_connection),
+                                        std::move(resolved_connection_list),
                                         std::move(resolved_options));
   return absl::OkStatus();
 }
@@ -8668,7 +8713,7 @@ absl::Status Resolver::ResolveAuxLoadDataStatement(
       std::move(statement_base_properties.cluster_by_list),
       std::move(statement_base_properties.resolved_options),
       std::move(statement_base_properties.with_partition_columns),
-      std::move(statement_base_properties.connection),
+      std::move(statement_base_properties.connection_list),
       std::move(from_files_options_list));
   return absl::OkStatus();
 }

@@ -158,6 +158,10 @@ inline absl::StatusOr<Value> CastStatusOrValue(
 bool IsTypeCastableToJson(const Type* from_type,
                           const LanguageOptions& language_options);
 
+// Returns true if the type is castable to VARIANT.
+bool IsTypeCastableToVariant(const Type* from_type,
+                             const LanguageOptions& language_options);
+
 // Returns true if values of `type` can be coerced to JSON for equality
 // comparison. This function should return true iff for any given `T x`, `T y`,
 // `(x = y) <=> (CAST(x AS JSON) = CAST(y AS JSON))`.

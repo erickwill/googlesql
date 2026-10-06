@@ -19,6 +19,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "googlesql/public/type.h"
@@ -32,8 +33,8 @@ namespace googlesql {
 namespace internal {
 
 // VariantValueAdapter adapts a GoogleSQL value to provide views aligned with
-// the Variant data model. In addition to storing a `googlesql::Value`, it
-// provides the following views:
+// the Variant data model. In addition to storing a `googlesql::Value`, for
+// certain types, it provides the following views:
 // 1. Primitive: A primitive value is a value that is not an object or
 //    array. Examples include int64, string, bool, null, etc. JSON primitive
 //    values are also exposed as Primitives.
@@ -45,6 +46,12 @@ namespace internal {
 // 3. Array: An array is an ordered list of Variant values. Any array-like type
 //    in GoogleSQL (e.g., JSON Array, Array of any type) is exposed
 //    as an Array.
+// Note that the above views are not applicable to all types that can be stored
+// in a Variant. For example, a MAP with non-string keys is not exposed as an
+// any of the above views, in which case, only the underlying `googlesql::Value`
+// can be used.
+// Invariant: For any variant value, at most one of IsPrimitive(), IsObject(),
+//            and IsArray() is true.
 //
 // This class provides ergonomic accessors aligned with the Variant View
 // Framework (Primitive, Object, Array) described above.
@@ -54,13 +61,13 @@ namespace internal {
 // 1. SQL NULL: The absence of a value (e.g., untyped NULL or typed SQL NULL
 //    like `Value::NullInt64()`). Checked via `is_null()`.
 // 2. Variant null: It is a primitive value Similar to JSON `null` is a valid
-//    value. Checked via `IsVariantNull()`.
+//    value. Checked via `IsVariantNull()`. It is considered a primitive;
+//    therefore `IsPrimitive()` returns true for it, while `IsObject()` and
+//    `IsArray()` return false.
 //
 // In this view, when accessing child fields or
 // elements in Arrays, Structs, Maps, or Protos, any encountered SQL NULL is
-// exposed as a Variant null. A Variant null is considered a primitive;
-// therefore `IsPrimitive()` returns true for it, while `IsObject()` and
-// `IsArray()` return false.
+// exposed as a Variant null.
 //
 class VariantValueAdapter {
  public:
@@ -96,7 +103,18 @@ class VariantValueAdapter {
   // If the Variant represents the underlying value as an object,
   // returns the keys of the object.
   // Requires IsObject() to be true. Otherwise, returns an error.
+  // TODO: DO NOT USE. This function would be removed because
+  // it provides no benefit over GetMembers().
   absl::StatusOr<std::vector<std::string>> GetKeys() const;
+
+  // If the Variant represents the underlying value as an object,
+  // returns all key-value pairs (members) of the object. Only the top-level
+  // object is unpacked; nested objects are returned as VariantValueAdapter
+  // instances without recursive unpacking.
+  // Requires IsObject() to be true. Otherwise, returns an error.
+  // TODO: Support complex proto fields (nested messages, enums).
+  absl::StatusOr<std::vector<std::pair<std::string, VariantValueAdapter>>>
+  GetMembers() const;
 
   // If the Variant represents the underlying value as an object,
   // returns whether the key exists in the object.
@@ -125,6 +143,14 @@ class VariantValueAdapter {
   absl::StatusOr<int> GetArraySize() const;
 
   // If the Variant represents the underlying value as an array,
+  // returns all elements of the array. Only the top-level elements are
+  // unpacked;
+  // nested arrays or objects are returned as VariantValueAdapter instances
+  // without recursive unpacking.
+  // Requires IsArray() to be true. Otherwise, returns an error.
+  absl::StatusOr<std::vector<VariantValueAdapter>> GetElements() const;
+
+  // If the Variant represents the underlying value as an array,
   // returns the element at the given index.
   // Returns std::nullopt if the index is out of bounds.
   // Requires IsArray() to be true. Otherwise, returns an error.
@@ -136,6 +162,18 @@ class VariantValueAdapter {
   // Returns an error if the index is out of bounds.
   // Requires IsArray() to be true. Otherwise, returns an error.
   absl::StatusOr<VariantValueAdapter> GetElementIfExists(int index) const;
+
+  // Returns a debug string representation of the Variant value projected
+  // through the Simple View.
+  // For Primitive view, the underlying value's DebugString is returned.
+  // For Array view, the elements are recursively converted to
+  // their DebugString representations.
+  // For Object view, the values are recursively converted to
+  // their DebugString representations. The key-value pairs are
+  // lexicographically sorted by key.
+  // SQL NULL Variants are represented as "NULL" while Variant Nulls are
+  // represented as "null".
+  std::string DebugString() const;
 
  private:
   Value value_;

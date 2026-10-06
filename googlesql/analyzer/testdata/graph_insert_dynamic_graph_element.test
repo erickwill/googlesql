@@ -1,4 +1,4 @@
-[default language_features=NONE,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_RETURN_EXTENSIONS,+SQL_GRAPH_TERMINAL_INSERT,+SQL_GRAPH_DYNAMIC_ELEMENT_TYPE,+SQL_GRAPH_DYNAMIC_LABEL_PROPERTIES_IN_DDL]
+[default language_features=NONE,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_RETURN_EXTENSIONS,+SQL_GRAPH_TERMINAL_INSERT,+SQL_GRAPH_DYNAMIC_ELEMENT_TYPE,+SQL_GRAPH_DYNAMIC_LABEL_PROPERTIES_IN_DDL,+JSON_TYPE]
 [default no_run_sqlbuilder]
 
 [language_features=NONE,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_RETURN_EXTENSIONS,+SQL_GRAPH_TERMINAL_INSERT]
@@ -22,6 +22,140 @@ INSERT (n:Entity {name: "Alice"})
 ERROR: Cannot insert dynamic property 'name' because the dynamic properties backing column 'nodeJsonProp' is read-only [at 2:19]
 INSERT (n:Entity {name: "Alice"})
                   ^
+==
+
+# Dynamic graph: Explicitly specifying property mapped to node dynamic label backing column alongside a dynamic label yields error
+GRAPH aml_dynamic
+INSERT (n:DynamicGraphNode & Label1 {id: 1, nodeLabelCol: "CustomLabel"})
+--
+ERROR: Cannot explicitly specify property 'nodeLabelCol' because it causes duplicate insertion into dynamic label backing column 'nodeLabelCol' [at 2:45]
+INSERT (n:DynamicGraphNode & Label1 {id: 1, nodeLabelCol: "CustomLabel"})
+                                            ^
+==
+
+# Dynamic graph: Explicitly specifying property mapped to node dynamic properties backing column alongside a dynamic property yields error
+GRAPH aml_dynamic
+INSERT (n:DynamicGraphNode {id: 1, nodeJsonProp: JSON '{"a": 1}', dyn_prop: "val"})
+--
+ERROR: Cannot explicitly specify property 'nodeJsonProp' because it causes duplicate insertion into dynamic properties backing column 'nodeJsonProp' [at 2:36]
+INSERT (n:DynamicGraphNode {id: 1, nodeJsonProp: JSON '{"a": 1}', dyn_prop: "...
+                                   ^
+==
+
+# Dynamic graph: Explicitly specifying property mapped to node dynamic properties backing column after a dynamic property yields error
+GRAPH aml_dynamic
+INSERT (n:DynamicGraphNode {id: 1, dyn_prop: "val", nodeJsonProp: JSON '{"a": 1}'})
+--
+ERROR: Cannot explicitly specify property 'nodeJsonProp' because it causes duplicate insertion into dynamic properties backing column 'nodeJsonProp' [at 2:53]
+INSERT (n:DynamicGraphNode {id: 1, dyn_prop: "val", nodeJsonProp: JSON '{"a":...
+                                                    ^
+==
+
+# Dynamic graph: Explicitly specifying property mapped to edge dynamic label backing column alongside a dynamic label yields error
+GRAPH aml_dynamic
+INSERT (p:Entity {id: 1})-[e:Connection & CustomEdge {edgeLabelCol: "CustomEdge"}]->(q:Entity {id: 2})
+--
+ERROR: Cannot explicitly specify property 'edgeLabelCol' because it causes duplicate insertion into dynamic label backing column 'edgeLabelCol' [at 2:55]
+INSERT (p:Entity {id: 1})-[e:Connection & CustomEdge {edgeLabelCol: "CustomEd...
+                                                      ^
+==
+
+# Dynamic graph: Explicitly specifying property mapped to edge dynamic properties backing column alongside a dynamic property yields error
+GRAPH aml_dynamic
+INSERT (p:Entity {id: 1})-[e:Connection {edgeJsonProp: JSON '{"a": 1}', dyn_prop: "val"}]->(q:Entity {id: 2})
+--
+ERROR: Cannot explicitly specify property 'edgeJsonProp' because it causes duplicate insertion into dynamic properties backing column 'edgeJsonProp' [at 2:42]
+INSERT (p:Entity {id: 1})-[e:Connection {edgeJsonProp: JSON '{"a": 1}', dyn_p...
+                                         ^
+==
+
+# Dynamic graph: Explicitly specifying properties mapped to dynamic label and dynamic properties backing columns is allowed when no dynamic labels or dynamic properties are specified
+GRAPH aml_dynamic
+INSERT (p:Entity {id: 1, nodeLabelCol: "CustomLabel", nodeJsonProp: JSON '{"a": 1}'})-[e:Connection {edgeLabelCol: "CustomEdge", edgeJsonProp: JSON '{"b": 2}'}]->(q:Entity {id: 2})
+--
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dynamic
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphInsertScan
+              | +-column_list=$element_table.[p#1, q#2]
+              | +-input_scan=
+              | | +-SingleRowScan
+              | +-insert_node_list=
+              | | +-p#1 :=
+              | | | +-GraphInsertElement
+              | | |   +-type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>
+              | | |   +-property_list=
+              | | |   | +-GraphDMLPropertyItem
+              | | |   | | +-property_name="id"
+              | | |   | | +-property=id(INT64)
+              | | |   | | +-property_value=
+              | | |   | |   +-Literal(type=INT64, value=1)
+              | | |   | +-GraphDMLPropertyItem
+              | | |   | | +-property_name="nodeLabelCol"
+              | | |   | | +-property=nodeLabelCol(STRING)
+              | | |   | | +-property_value=
+              | | |   | |   +-Literal(type=STRING, value="CustomLabel")
+              | | |   | +-GraphDMLPropertyItem
+              | | |   |   +-property_name="nodeJsonProp"
+              | | |   |   +-property=nodeJsonProp(JSON)
+              | | |   |   +-property_value=
+              | | |   |     +-Literal(type=JSON, value={"a":1}, has_explicit_type=TRUE)
+              | | |   +-label_list=
+              | | |   | +-GraphLabel
+              | | |   |   +-label=aml_dynamic.Entity
+              | | |   |   +-label_name=
+              | | |   |     +-Literal(type=STRING, value="Entity", has_explicit_type=TRUE)
+              | | |   +-element_table=DynamicGraphNode
+              | | +-q#2 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="id"
+              | |     |   +-property=id(INT64)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=INT64, value=2)
+              | |     +-label_list=
+              | |     | +-GraphLabel
+              | |     |   +-label=aml_dynamic.Entity
+              | |     |   +-label_name=
+              | |     |     +-Literal(type=STRING, value="Entity", has_explicit_type=TRUE)
+              | |     +-element_table=DynamicGraphNode
+              | +-insert_edge_list=
+              | | +-e#3 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_EDGE(aml_dynamic)<category STRING, dst_id INT64, edgeJsonProp JSON, edgeLabelCol STRING, id INT64, DYNAMIC>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     | | +-property_name="edgeLabelCol"
+              | |     | | +-property=edgeLabelCol(STRING)
+              | |     | | +-property_value=
+              | |     | |   +-Literal(type=STRING, value="CustomEdge")
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="edgeJsonProp"
+              | |     |   +-property=edgeJsonProp(JSON)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=JSON, value={"b":2}, has_explicit_type=TRUE)
+              | |     +-label_list=
+              | |     | +-GraphLabel
+              | |     |   +-label=aml_dynamic.CONNECTION
+              | |     |   +-label_name=
+              | |     |     +-Literal(type=STRING, value="Connection", has_explicit_type=TRUE)
+              | |     +-source_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>, column=$element_table.p#1)
+              | |     +-dest_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>, column=$element_table.q#2)
+              | |     +-element_table=DynamicGraphEdge
+              | +-path_element_list=$element_table.[p#1, e#3, q#2]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan(column_list=$element_table.[p#1, q#2])
 ==
 
 #######################################################
@@ -676,6 +810,87 @@ GeneralizedQueryStmt
               | |     |   +-property_value=
               | |     |     +-Literal(type=INT64, value=1)
               | |     +-label_list=
+              | |     | +-GraphLabel
+              | |     |   +-label_name=
+              | |     |     +-Literal(type=STRING, value="Person", has_explicit_type=TRUE)
+              | |     +-element_table=DynamicGraphNode
+              | +-path_element_list=[$element_table.n#1]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan
+==
+
+# Insert with multiple dynamic labels on the same table
+GRAPH aml_dynamic
+INSERT (n:Person & Customer {code: 1})
+--
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dynamic
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphInsertScan
+              | +-input_scan=
+              | | +-SingleRowScan
+              | +-insert_node_list=
+              | | +-n#1 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="code"
+              | |     |   +-property=code(INT64)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=INT64, value=1)
+              | |     +-label_list=
+              | |     | +-GraphLabel
+              | |     | | +-label_name=
+              | |     | |   +-Literal(type=STRING, value="Person", has_explicit_type=TRUE)
+              | |     | +-GraphLabel
+              | |     |   +-label_name=
+              | |     |     +-Literal(type=STRING, value="Customer", has_explicit_type=TRUE)
+              | |     +-element_table=DynamicGraphNode
+              | +-path_element_list=[$element_table.n#1]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan
+==
+
+# Insert with mixed static and dynamic labels on the same table
+GRAPH aml_dynamic
+INSERT (n:Entity & Person {code: 1})
+--
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dynamic
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphInsertScan
+              | +-input_scan=
+              | | +-SingleRowScan
+              | +-insert_node_list=
+              | | +-n#1 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dynamic)<code INT64, id INT64, nodeJsonProp JSON, nodeLabelCol STRING, DYNAMIC>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="code"
+              | |     |   +-property=code(INT64)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=INT64, value=1)
+              | |     +-label_list=
+              | |     | +-GraphLabel
+              | |     | | +-label=aml_dynamic.Entity
+              | |     | | +-label_name=
+              | |     | |   +-Literal(type=STRING, value="Entity", has_explicit_type=TRUE)
               | |     | +-GraphLabel
               | |     |   +-label_name=
               | |     |     +-Literal(type=STRING, value="Person", has_explicit_type=TRUE)

@@ -21,7 +21,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "googlesql/base/logging.h"
 #include "googlesql/common/errors.h"
@@ -53,14 +52,14 @@ namespace googlesql {
 std::string MapType::ShortTypeName(ProductMode mode,
                                    bool use_external_float32) const {
   return absl::StrCat(
-      "MAP<", key_type_->ShortTypeName(mode, use_external_float32), ", ",
-      value_type_->ShortTypeName(mode, use_external_float32), ">");
+      "MAP<", key_type()->ShortTypeName(mode, use_external_float32), ", ",
+      value_type()->ShortTypeName(mode, use_external_float32), ">");
 }
 
 std::string MapType::TypeName(ProductMode mode,
                               bool use_external_float32) const {
-  return absl::StrCat("MAP<", key_type_->TypeName(mode, use_external_float32),
-                      ", ", value_type_->TypeName(mode, use_external_float32),
+  return absl::StrCat("MAP<", key_type()->TypeName(mode, use_external_float32),
+                      ", ", value_type()->TypeName(mode, use_external_float32),
                       ">");
 }
 
@@ -94,11 +93,11 @@ absl::StatusOr<std::string> MapType::TypeNameWithModifiers(
         TypeModifiers::MakeTypeModifiers(TypeParameters(), Collation());
   }
 
-  GOOGLESQL_ASSIGN_OR_RETURN(absl::string_view key_type_name,
-                   key_type_->TypeNameWithModifiers(key_type_modifiers, mode,
-                                                    use_external_float32));
-  GOOGLESQL_ASSIGN_OR_RETURN(absl::string_view value_type_name,
-                   value_type_->TypeNameWithModifiers(
+  GOOGLESQL_ASSIGN_OR_RETURN(std::string key_type_name,
+                   key_type()->TypeNameWithModifiers(key_type_modifiers, mode,
+                                                     use_external_float32));
+  GOOGLESQL_ASSIGN_OR_RETURN(std::string value_type_name,
+                   value_type()->TypeNameWithModifiers(
                        value_type_modifiers, mode, use_external_float32));
 
   return absl::StrCat("MAP<", key_type_name, ", ", value_type_name, ">");
@@ -116,13 +115,14 @@ bool MapType::SupportsEquality() const { return false; }
 
 bool MapType::IsSupportedType(const LanguageOptions& language_options) const {
   return language_options.LanguageFeatureEnabled(FEATURE_MAP_TYPE) &&
-         key_type_->IsSupportedType(language_options) &&
-         key_type_->SupportsGrouping(language_options) &&
-         value_type_->IsSupportedType(language_options);
+         key_type()->IsSupportedType(language_options) &&
+         key_type()->SupportsGrouping(language_options) &&
+         value_type()->IsSupportedType(language_options);
 }
 
 int MapType::nesting_depth() const {
-  return std::max(key_type_->nesting_depth(), value_type_->nesting_depth()) + 1;
+  return std::max(key_type()->nesting_depth(), value_type()->nesting_depth()) +
+         1;
 }
 
 absl::Status MapType::ValidateResolvedTypeParameters(
@@ -132,17 +132,16 @@ absl::Status MapType::ValidateResolvedTypeParameters(
     return absl::OkStatus();
   }
   GOOGLESQL_RET_CHECK_EQ(type_parameters.num_children(), 2);
-  GOOGLESQL_RETURN_IF_ERROR(key_type_->ValidateResolvedTypeParameters(
+  GOOGLESQL_RETURN_IF_ERROR(key_type()->ValidateResolvedTypeParameters(
       type_parameters.child(0), mode));
-  return value_type_->ValidateResolvedTypeParameters(type_parameters.child(1),
-                                                     mode);
+  return value_type()->ValidateResolvedTypeParameters(type_parameters.child(1),
+                                                      mode);
 }
 
 MapType::MapType(const TypeFactoryBase& factory, const Type* key_type,
                  const Type* value_type)
     : ContainerType(factory, TYPE_MAP),
-      key_type_(key_type),
-      value_type_(value_type) {}
+      component_types_({key_type, value_type}) {}
 MapType::~MapType() = default;
 
 bool MapType::SupportsGroupingImpl(const LanguageOptions& language_options,
@@ -248,14 +247,15 @@ static absl::HashState HashValueContentForMap(const ValueContent& value,
 absl::HashState MapType::HashValueContent(const ValueContent& value,
                                           absl::HashState state) const {
   return HashValueContentForMap<HashableNullableValueContent<
-      /*ignore_floats=*/false>>(value, std::move(state), key_type_,
-                                value_type_);
+      /*ignore_floats=*/false>>(value, std::move(state), key_type(),
+                                value_type());
 }
 
 absl::HashState MapType::HashValueContentIgnoringFloat(
     const ValueContent& value, absl::HashState state) const {
   return HashValueContentForMap<HashableNullableValueContent<
-      /*ignore_floats=*/true>>(value, std::move(state), key_type_, value_type_);
+      /*ignore_floats=*/true>>(value, std::move(state), key_type(),
+                               value_type());
 }
 
 bool MapType::LookupMapEntryEqualsExpected(
@@ -268,7 +268,7 @@ bool MapType::LookupMapEntryEqualsExpected(
     const ValueEqualityCheckOptions& options,
     const ValueEqualityCheckOptions& key_equality_options) const {
   auto lookup_value_or_missing = lookup_map->GetContentMapValueByKey(
-      lookup_key, key_type_, key_equality_options);
+      lookup_key, key_type(), key_equality_options);
 
   if (!lookup_value_or_missing.has_value()) {
     if (options.reason) {
@@ -278,7 +278,8 @@ bool MapType::LookupMapEntryEqualsExpected(
           absl::Substitute(
               "Key {$0} did not exist in both maps. Present in "
               "{$1} but not present in {$2}.\n",
-              FormatNullableValueContent(lookup_key, key_type_, format_options),
+              FormatNullableValueContent(lookup_key, key_type(),
+                                         format_options),
               FormatValueContent(formattable_expected_content, format_options),
               FormatValueContent(formattable_lookup_content, format_options)));
     }
@@ -292,11 +293,12 @@ bool MapType::LookupMapEntryEqualsExpected(
           absl::Substitute(
               "The value for key {$0} did not match. Value was {$1} and {$2} "
               "in respective maps {$3} and {$4}.\n",
-              FormatNullableValueContent(lookup_key, key_type_, format_options),
-              FormatNullableValueContent(expected_value, value_type_,
+              FormatNullableValueContent(lookup_key, key_type(),
+                                         format_options),
+              FormatNullableValueContent(expected_value, value_type(),
                                          format_options),
               FormatNullableValueContent(lookup_value_or_missing.value(),
-                                         value_type_, format_options),
+                                         value_type(), format_options),
               FormatValueContent(formattable_expected_content, format_options),
               FormatValueContent(formattable_lookup_content, format_options)));
     }
@@ -359,9 +361,9 @@ bool MapType::ValueContentEquals(
   }
 
   NullableValueContentEq key_eq =
-      NullableValueContentEq(key_options, key_type_);
+      NullableValueContentEq(key_options, key_type());
   NullableValueContentEq value_eq =
-      NullableValueContentEq(value_options, value_type_);
+      NullableValueContentEq(value_options, value_type());
 
   auto x_it = x_map->begin();
   auto y_it = y_map->begin();
@@ -421,14 +423,14 @@ absl::Status MapType::SerializeValueContent(const ValueContent& value,
   for (const auto& [key, value] : *value_content_map) {
     auto* map_entry = map_proto->add_entry();
     if (!key.is_null()) {
-      GOOGLESQL_RETURN_IF_ERROR(key_type_->SerializeValueContent(
+      GOOGLESQL_RETURN_IF_ERROR(key_type()->SerializeValueContent(
           key.value_content(), map_entry->mutable_key()));
     } else {
       // Populate the key with an empty ValueProto.
       map_entry->mutable_key();
     }
     if (!value.is_null()) {
-      GOOGLESQL_RETURN_IF_ERROR(value_type_->SerializeValueContent(
+      GOOGLESQL_RETURN_IF_ERROR(value_type()->SerializeValueContent(
           value.value_content(), map_entry->mutable_value()));
     } else {
       // Populate the value with an empty ValueProto.
@@ -490,10 +492,10 @@ void MapType::FormatValueContentDebugModeImpl(
                       auto& [key, value] = map_entry;
                       std::string key_str =
                           DebugFormatNullableValueContentForContainer(
-                              key, this->key_type_, options);
+                              key, this->key_type(), options);
                       std::string value_str =
                           DebugFormatNullableValueContentForContainer(
-                              value, this->value_type_, options);
+                              value, this->value_type(), options);
                       absl::StrAppend(out, key_str, ": ", value_str);
                     }));
   absl::StrAppend(result, "}");
@@ -506,11 +508,11 @@ void MapType::FormatValueContentSqlModeImpl(
     if (options.mode == Type::FormatValueContentOptions::Mode::kSQLExpression ||
         value_content_map->num_elements() == 0) {
       absl::StrAppend(result, "NEW MAP<",
-                      key_type_->TypeName(options.product_mode(),
-                                          options.use_external_float32),
+                      key_type()->TypeName(options.product_mode(),
+                                           options.use_external_float32),
                       ", ",
-                      value_type_->TypeName(options.product_mode(),
-                                            options.use_external_float32),
+                      value_type()->TypeName(options.product_mode(),
+                                             options.use_external_float32),
                       ">{");
     } else {
       absl::StrAppend(result, "MAP{");
@@ -525,9 +527,9 @@ void MapType::FormatValueContentSqlModeImpl(
                 const auto& [key, value] = map_entry;
                 absl::StrAppend(
                     out,
-                    FormatNullableValueContent(key, this->key_type_, options),
+                    FormatNullableValueContent(key, this->key_type(), options),
                     ":",
-                    FormatNullableValueContent(value, this->value_type_,
+                    FormatNullableValueContent(value, this->value_type(),
                                                options));
               }),
           "}");
@@ -548,11 +550,11 @@ void MapType::FormatValueContentSqlModeImpl(
   if (options.mode == Type::FormatValueContentOptions::Mode::kSQLExpression ||
       value_content_map->num_elements() == 0) {
     absl::StrAppend(result, "ARRAY<STRUCT<",
-                    key_type_->TypeName(options.product_mode(),
-                                        options.use_external_float32),
+                    key_type()->TypeName(options.product_mode(),
+                                         options.use_external_float32),
                     ", ",
-                    value_type_->TypeName(options.product_mode(),
-                                          options.use_external_float32),
+                    value_type()->TypeName(options.product_mode(),
+                                           options.use_external_float32),
                     ">>");
   }
 
@@ -562,9 +564,9 @@ void MapType::FormatValueContentSqlModeImpl(
                     [options, this](std::string* out, const auto& map_entry) {
                       auto& [key, value] = map_entry;
                       std::string key_str = FormatNullableValueContent(
-                          key, this->key_type_, options);
+                          key, this->key_type(), options);
                       std::string value_str = FormatNullableValueContent(
-                          value, this->value_type_, options);
+                          value, this->value_type(), options);
                       absl::StrAppend(out, "(", key_str, ", ", value_str, ")");
                     }),
       "])");

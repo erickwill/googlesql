@@ -66,6 +66,7 @@
 #include "googlesql/reference_impl/evaluation.h"
 #include "googlesql/reference_impl/tuple.h"
 #include "googlesql/reference_impl/tuple_comparator.h"
+#include "googlesql/reference_impl/type_helpers.h"
 #include "googlesql/reference_impl/variable_generator.h"
 #include "googlesql/reference_impl/variable_id.h"
 #include "googlesql/resolved_ast/resolved_ast.h"
@@ -2150,8 +2151,8 @@ class GroupRowsOp : public RelationalOp {
 };
 
 // A placeholder RelationalOp for returning an iterator to the current rows
-// being aggregated in a UDA, represented by `active_group_rows_`
-// in EvaluationContext.
+// being aggregated in a UDA, represented by `uda_input_rows_` in
+// EvaluationContext.
 class RowsForUdaOp : public RelationalOp {
  public:
   RowsForUdaOp(const RowsForUdaOp&) = delete;
@@ -5198,10 +5199,10 @@ class DMLInsertValueExpr final : public DMLValueExpr {
  private:
   // Positions corresponding to an element of 'stmt()->insert_column_list()'.
   struct InsertColumnOffsets {
-    // The index of the column in 'column_list_'. We avoid use of the term
-    // "index" in code to avoid confusion with an index on primary keys.
+    // The 0-based index of the column in 'column_list_'. We avoid use of the
+    // term "index" in code to avoid confusion with an index on primary keys.
     int column_offset = -1;
-    // The index of the column in 'stmt()->insert_column_list()'.
+    // The 0-based index of the column in 'stmt()->insert_column_list()'.
     int insert_column_offset = -1;
   };
 
@@ -5703,6 +5704,177 @@ class GraphIsLabeledExpr final : public ValueExpr {
 
   const ResolvedGraphLabelExpr* label_expr_;
   const bool is_negated_;
+};
+
+// Evaluates a GQL DML scan operation and formats the result into the expected
+// DML output type (e.g., returning updated table statistics or modified row
+// arrays).
+class DMLGraphOutputExpr final : public ValueExpr {
+ public:
+  using TableInfo = GraphTargetTableTypeInfo;
+
+  static absl::StatusOr<std::unique_ptr<DMLGraphOutputExpr>> Create(
+      std::unique_ptr<ValueExpr> scan_expr, std::vector<TableInfo> tables,
+      const Type* output_type, bool has_returning = false);
+
+  DMLGraphOutputExpr(const DMLGraphOutputExpr&) = delete;
+  DMLGraphOutputExpr& operator=(const DMLGraphOutputExpr&) = delete;
+
+  absl::Status SetSchemasForEvaluation(
+      absl::Span<const TupleSchema* const> params_schemas) override;
+
+  bool Eval(absl::Span<const TupleData* const> params,
+            EvaluationContext* context, VirtualTupleSlot* result,
+            absl::Status* status) const override;
+
+  std::string DebugInternal(const std::string& indent,
+                            bool verbose) const override;
+
+ private:
+  DMLGraphOutputExpr(std::unique_ptr<ValueExpr> scan_expr,
+                     std::vector<TableInfo> tables, const Type* output_type,
+                     bool has_returning);
+
+  std::unique_ptr<ValueExpr> scan_expr_;
+  std::vector<TableInfo> tables_;
+  bool has_returning_ = false;
+};
+
+// Relational operator that executes Graph DML insertion side effects.
+// Iterates over input tuples and applies node and edge insertions into
+// corresponding graph element tables laterally.
+class GraphInsertApplyOp final : public RelationalOp {
+ public:
+  // Information about a generated column on the target base table.
+  struct GeneratedColumnInfo {
+    // Represents the target catalog column in the base table of the element
+    // table. Must not be nullptr.
+    const Column* target_column = nullptr;
+    // 0-based index of the target catalog column in the base table of the
+    // element table. Must not be -1.
+    int target_col_idx = -1;
+    // Value expression to be used for evaluation.
+    std::unique_ptr<ValueExpr> expr;
+  };
+
+  // Information about a static property to be inserted to the element table.
+  struct PropertyToInsert {
+    // Name of the inserted static property.
+    std::string name;
+    // Represents the target catalog column in the base table of the element
+    // table. Must not be nullptr.
+    const Column* target_column = nullptr;
+    // 0-based index of the target catalog column in the base table of the
+    // element table. Must not be -1.
+    int target_col_idx = -1;
+    // Value expression to be used for evaluation.
+    std::unique_ptr<ValueExpr> expr;
+  };
+
+  // Information about a node endpoint referenced by a to-be-inserted edge.
+  struct NodeEndpoint {
+    enum class Source {
+      // The endpoint is an inserted node in the same INSERT statement.
+      kInsertedNode,
+      // The endpoint is an input variable from the incoming working table.
+      kInputVariable
+    };
+    Source source = Source::kInsertedNode;
+    // Index in `nodes_to_insert_` if kInsertedNode
+    int inserted_node_index = -1;
+    // Index in `input` tuple slot if kInputVariable
+    int input_slot_idx = -1;
+    // Property names on the referenced node table corresponding to the edge's
+    // SOURCE or DESTINATION KEY columns.
+    // REQUIRES:
+    // - `source` must be kInputVariable.
+    // - The order must matches the order of
+    //   `GraphNodeTableReference::GetNodeTableColumns()` in `GraphEdgeTable`.
+    std::vector<std::string> property_names;
+  };
+
+  // Information about a graph element to be inserted.
+  struct ElementToInsert {
+    // Variable pointing to the newly inserted graph element column in the
+    // output schema.
+    VariableId row_variable;
+    // The target graph element table for the element to be inserted.
+    // Must not be nullptr.
+    const GraphElementTable* table = nullptr;
+    // Static properties supplied in the INSERT path pattern.
+    // REQUIRES: Target column indices in `static_properties` must be mutually
+    // distinct and must not conflict with dynamic label, dynamic properties,
+    // generated columns, or edge endpoint key columns.
+    std::vector<PropertyToInsert> static_properties;
+    // Value expression and 0-based index of the backing catalog column in the
+    // base table if the target element table supports dynamic label.
+    std::unique_ptr<ValueExpr> dynamic_label_expr;
+    int dynamic_label_col_idx = -1;
+    // Value expression and 0-based index of the backing catalog column in the
+    // base table if the target element table supports dynamic properties.
+    std::unique_ptr<ValueExpr> dynamic_properties_expr;
+    int dynamic_properties_col_idx = -1;
+    // Variables pointing to all columns in the base table.
+    // REQUIRES: Only set when `generated_columns` is not empty.
+    std::vector<VariableId> table_variables;
+    // Sorted list of generated columns in the base table.
+    std::vector<GeneratedColumnInfo> generated_columns;
+
+    // SOURCE and DESTINATION node endpoints.
+    // Set only for edge elements (std::nullopt for nodes).
+    std::optional<NodeEndpoint> source_node;
+    std::optional<NodeEndpoint> dest_node;
+  };
+
+  // Creates a GraphInsertApplyOp.
+  // - `nodes_to_insert` is the list of node elements to insert.
+  // - `edges_to_insert` is the list of edge elements to insert.
+  // - `input` is the input relational operator that produces the tuples of the
+  //   incoming working table.
+  // REQUIRES: `nodes_to_insert` and `edges_to_insert` are not empty at the same
+  // time.
+  static absl::StatusOr<std::unique_ptr<GraphInsertApplyOp>> Create(
+      std::vector<ElementToInsert> nodes_to_insert,
+      std::vector<ElementToInsert> edges_to_insert,
+      std::unique_ptr<RelationalOp> input);
+
+  GraphInsertApplyOp(const GraphInsertApplyOp&) = delete;
+  GraphInsertApplyOp& operator=(const GraphInsertApplyOp&) = delete;
+
+  absl::Span<const ElementToInsert> nodes_to_insert() const {
+    return nodes_to_insert_;
+  }
+  absl::Span<const ElementToInsert> edges_to_insert() const {
+    return edges_to_insert_;
+  }
+
+  absl::Status SetSchemasForEvaluation(
+      absl::Span<const TupleSchema* const> params_schemas) override;
+
+  absl::StatusOr<std::unique_ptr<TupleIterator>> CreateIterator(
+      absl::Span<const TupleData* const> params, int num_extra_slots,
+      EvaluationContext* context) const override;
+
+  std::unique_ptr<TupleSchema> CreateOutputSchema() const override;
+  static std::string GetIteratorDebugString(
+      absl::string_view input_iter_debug_string);
+  std::string IteratorDebugString() const override;
+
+  std::string DebugInternal(const std::string& indent,
+                            bool verbose) const override;
+
+ private:
+  enum ArgKind { kInput };
+
+  GraphInsertApplyOp(std::vector<ElementToInsert> nodes_to_insert,
+                     std::vector<ElementToInsert> edges_to_insert,
+                     std::unique_ptr<RelationalOp> input);
+
+  const RelationalOp* input() const;
+  RelationalOp* mutable_input();
+
+  std::vector<ElementToInsert> nodes_to_insert_;
+  std::vector<ElementToInsert> edges_to_insert_;
 };
 
 // Computes the key slot indexes corresponding to 'keys' in 'schema'. If

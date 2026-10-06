@@ -131,6 +131,7 @@
 #include "googlesql/resolved_ast/resolved_column.h"
 #include "googlesql/resolved_ast/resolved_node.h"
 #include "googlesql/resolved_ast/resolved_node_kind.pb.h"
+#include "googlesql/resolved_ast/rewrite_utils.h"
 #include "absl/container/flat_hash_set.h"
 #include "googlesql/base/check.h"
 #include "absl/status/status.h"
@@ -781,6 +782,10 @@ class VisitorBasedGeneralizedQueryStmtRewriter : public Rewriter {
       const AnalyzerOptions& options, std::unique_ptr<const ResolvedNode> input,
       Catalog& catalog, TypeFactory& type_factory,
       AnalyzerOutputProperties& output_properties) const override {
+    if (HasNonTerminalInsertScan(input.get())) {
+      return absl::UnimplementedError(
+          "Non-terminal insert scans are not supported yet");
+    }
     auto visitor = GeneralizedQueryStmtRewriteVisitor();
     GOOGLESQL_ASSIGN_OR_RETURN(auto rewritten, visitor.VisitAll(std::move(input)));
     GOOGLESQL_RETURN_IF_ERROR(visitor.CheckFinalState());

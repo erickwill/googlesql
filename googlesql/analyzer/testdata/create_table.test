@@ -5859,8 +5859,10 @@ CreateTableStmt
 +-name_path=t
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-  +-Connection(connection=$connection_default)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=$connection_default)
 
 ==
 
@@ -5882,19 +5884,95 @@ CreateTableStmt
 +-name_path=t
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-  +-Connection(connection=connection2)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection2)
 
 ==
 
-# TODO: Support multi-connection syntax.
 [language_features=NONE,+CREATE_TABLE_WITH_CONNECTION]
 create table t (a int64) with connection (key1="connection2", key2="connection2");
 --
 ERROR: Multiple connections in CONNECTION clause is not supported [at 1:31]
 create table t (a int64) with connection (key1="connection2", key2="connectio...
                               ^
+==
 
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1="connection2", key2=connection2);
+--
+CreateTableStmt
++-name_path=t
++-column_definition_list=
+| +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
++-connection_list=
+  +-ConnectionList
+    +-connection_kv_list=
+      +-ConnectionKeyValuePair
+      | +-key="key1"
+      | +-connection=
+      |   +-Connection(connection=connection2)
+      +-ConnectionKeyValuePair
+        +-key="key2"
+        +-connection=
+          +-Connection(connection=connection2)
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1="connection2", KEY1=connection2);
+--
+ERROR: Duplicate connection key KEY1 [at 1:63]
+create table t (a int64) with connection (key1="connection2", KEY1=connection2);
+                                                              ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1="not_found_conn");
+--
+ERROR: Connection not found: not_found_conn [at 1:48]
+create table t (a int64) with connection (key1="not_found_conn");
+                                               ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1="");
+--
+ERROR: Path strings cannot be empty [at 1:48]
+create table t (a int64) with connection (key1="");
+                                               ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1="a..b");
+--
+ERROR: Path string contains an empty path component [at 1:48]
+create table t (a int64) with connection (key1="a..b");
+                                               ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection ();
+--
+ERROR: Syntax error: Unexpected ")" [at 1:43]
+create table t (a int64) with connection ();
+                                          ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1=123);
+--
+ERROR: Connection name must be a path expression or string literal [at 1:48]
+create table t (a int64) with connection (key1=123);
+                                               ^
+==
+
+[language_features=NONE,+CREATE_TABLE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table t (a int64) with connection (key1=1+1);
+--
+ERROR: Connection name must be a path expression or string literal [at 1:48]
+create table t (a int64) with connection (key1=1+1);
+                                               ^
 ==
 
 [language_features=NONE,+CREATE_TABLE_WITH_CONNECTION]
@@ -5913,8 +5991,10 @@ CreateTableStmt
 +-name_path=t
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-  +-Connection(connection=connection2)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection2)
 
 ==
 
@@ -5928,8 +6008,10 @@ CreateTableStmt
 | +-x := Literal(type=STRING, value="foo")
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-  +-Connection(connection=connection2)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection2)
 
 ==
 
@@ -5943,8 +6025,10 @@ CreateTableStmt
 | +-x := Literal(type=STRING, value="foo")
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-  +-Connection(connection=connection2)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection2)
 
 ==
 

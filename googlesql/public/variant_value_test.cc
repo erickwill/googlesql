@@ -1356,5 +1356,468 @@ TEST(VariantValueTest, EmptyObjectsAndArrays) {
               StatusIs(absl::StatusCode::kOutOfRange));
 }
 
+TEST(VariantValueTest, GetMembersStruct) {
+  TypeFactory factory;
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"a", types::Int64Type()},
+                                    {"b", types::StringType()},
+                                    {"a", types::Int64Type()},
+                                    {"", types::BoolType()}},
+                                   &struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val,
+      Value::MakeStruct(struct_type, {Value::Int64(10), Value::NullString(),
+                                      Value::Int64(20), Value::Bool(true)}));
+
+  VariantValueView ref(struct_val);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto members, ref.GetMembers());
+  ASSERT_EQ(members.size(), 3);
+
+  EXPECT_EQ(members[0].first, "a");
+  EXPECT_THAT(members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(10)));
+
+  EXPECT_EQ(members[1].first, "b");
+  EXPECT_TRUE(members[1].second.IsVariantNull());
+
+  EXPECT_EQ(members[2].first, "");
+  EXPECT_THAT(members[2].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Bool(true)));
+}
+
+TEST(VariantValueTest, GetMembersMap) {
+  TypeFactory factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* map_type,
+      factory.MakeMapType(types::StringType(), types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_val,
+      Value::MakeMap(map_type, {{Value::NullString(), Value::Int64(99)},
+                                {Value::String("k1"), Value::Int64(1)},
+                                {Value::String("k2"), Value::NullInt64()}}));
+
+  VariantValueView ref(map_val);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto members, ref.GetMembers());
+  ASSERT_EQ(members.size(), 2);
+
+  EXPECT_EQ(members[0].first, "k1");
+  EXPECT_THAT(members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(1)));
+
+  EXPECT_EQ(members[1].first, "k2");
+  EXPECT_TRUE(members[1].second.IsVariantNull());
+}
+
+TEST(VariantValueTest, GetMembersJson) {
+  // Parsed JSON object
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      JSONValue parsed_json,
+      JSONValue::ParseJSONString(R"({"x": 42, "y": null, "z": [1, 2]})"));
+  VariantValueView parsed_ref(Value::Json(std::move(parsed_json)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_members, parsed_ref.GetMembers());
+  ASSERT_EQ(parsed_members.size(), 3);
+  EXPECT_EQ(parsed_members[0].first, "x");
+  EXPECT_THAT(parsed_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(42)));
+  EXPECT_EQ(parsed_members[1].first, "y");
+  EXPECT_TRUE(parsed_members[1].second.IsVariantNull());
+  EXPECT_EQ(parsed_members[2].first, "z");
+  EXPECT_TRUE(parsed_members[2].second.IsArray());
+
+  // Unparsed JSON object
+  VariantValueView unparsed_ref(
+      Value::UnvalidatedJsonString(R"({"k": "val"})"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto unparsed_members, unparsed_ref.GetMembers());
+  ASSERT_EQ(unparsed_members.size(), 1);
+  EXPECT_EQ(unparsed_members[0].first, "k");
+  EXPECT_THAT(unparsed_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::String("val")));
+}
+
+TEST(VariantValueTest, GetMembersProto) {
+  TypeFactory factory;
+
+  // Proto with primitive and repeated primitive fields
+  const ProtoType* inner_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(
+      googlesql_test::TestNullabilityInnerPB::descriptor(), &inner_proto_type));
+  googlesql_test::TestNullabilityInnerPB inner_msg;
+  inner_msg.set_required_field(10);
+  inner_msg.add_repeated_field(20);
+  inner_msg.add_repeated_field(30);
+  VariantValueView inner_ref(
+      Value::Proto(inner_proto_type, inner_msg.SerializeAsCord()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto inner_members, inner_ref.GetMembers());
+  ASSERT_EQ(inner_members.size(), 3);
+  EXPECT_EQ(inner_members[0].first, "required_field");
+  EXPECT_THAT(inner_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(10)));
+  EXPECT_EQ(inner_members[1].first, "optional_field");
+  EXPECT_THAT(inner_members[1].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(0)));
+  EXPECT_EQ(inner_members[2].first, "repeated_field");
+  EXPECT_TRUE(inner_members[2].second.IsArray());
+  EXPECT_THAT(inner_members[2].second.GetArraySize(), IsOkAndHolds(2));
+
+  // Proto with use_field_defaults = false
+  const ProtoType* nulls_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(
+      googlesql_test::MessageWithNulls::descriptor(), &nulls_proto_type));
+  googlesql_test::MessageWithNulls nulls_msg;
+  nulls_msg.set_i1(10);
+  VariantValueView nulls_ref(
+      Value::Proto(nulls_proto_type, nulls_msg.SerializeAsCord()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto nulls_members, nulls_ref.GetMembers());
+  ASSERT_EQ(nulls_members.size(), 4);
+  EXPECT_EQ(nulls_members[0].first, "i1");
+  EXPECT_THAT(nulls_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(10)));
+  EXPECT_EQ(nulls_members[1].first, "i2");
+  EXPECT_TRUE(nulls_members[1].second.IsVariantNull());
+  EXPECT_EQ(nulls_members[2].first, "i3");
+  EXPECT_THAT(nulls_members[2].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(0)));
+  EXPECT_EQ(nulls_members[3].first, "i4");
+  EXPECT_THAT(nulls_members[3].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(6)));
+
+  // Proto with unsupported nested message / enum fields fails GetMembers()
+  const ProtoType* ks_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(googlesql_test::KitchenSinkPB::descriptor(),
+                                  &ks_proto_type));
+  googlesql_test::KitchenSinkPB ks_msg;
+  ks_msg.set_int64_key_1(1);
+  ks_msg.set_int64_key_2(2);
+  VariantValueView ks_ref(
+      Value::Proto(ks_proto_type, ks_msg.SerializeAsCord()));
+  EXPECT_THAT(ks_ref.GetMembers(), StatusIs(absl::StatusCode::kUnimplemented));
+}
+
+TEST(VariantValueTest, GetMembersNestedComplexTypes) {
+  TypeFactory factory;
+
+  const ProtoType* proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(
+      googlesql_test::TestNullabilityInnerPB::descriptor(), &proto_type));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* map_type,
+                       factory.MakeMapType(types::StringType(), proto_type));
+
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"nested_map", map_type},
+                                    {"nested_json", types::JsonType()},
+                                    {"nested_array", types::Int64ArrayType()}},
+                                   &struct_type));
+
+  googlesql_test::TestNullabilityInnerPB proto_msg;
+  proto_msg.set_required_field(123);
+  proto_msg.add_repeated_field(456);
+  Value proto_val = Value::Proto(proto_type, proto_msg.SerializeAsCord());
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_val,
+      Value::MakeMap(map_type, {{Value::String("key1"), proto_val}}));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      JSONValue parsed_json,
+      JSONValue::ParseJSONString(
+          R"({"inner_obj": {"k": "v"}, "inner_arr": [1, 2]})"));
+  Value json_val = Value::Json(std::move(parsed_json));
+
+  Value array_val = Value::Array(types::Int64ArrayType(),
+                                 {Value::Int64(10), Value::Int64(20)});
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val,
+      Value::MakeStruct(struct_type, {map_val, json_val, array_val}));
+
+  VariantValueView root_ref(struct_val);
+  ASSERT_TRUE(root_ref.IsObject());
+
+  // Top-level GetMembers() only unpacks the immediate Struct fields.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto root_members, root_ref.GetMembers());
+  ASSERT_EQ(root_members.size(), 3);
+  EXPECT_EQ(root_members[0].first, "nested_map");
+  EXPECT_TRUE(root_members[0].second.IsObject());
+  EXPECT_EQ(root_members[1].first, "nested_json");
+  EXPECT_TRUE(root_members[1].second.IsObject());
+  EXPECT_EQ(root_members[2].first, "nested_array");
+  EXPECT_TRUE(root_members[2].second.IsArray());
+  EXPECT_FALSE(root_members[2].second.IsObject());
+  EXPECT_THAT(root_members[2].second.GetMembers(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+  EXPECT_THAT(root_members[2].second.GetArraySize(), IsOkAndHolds(2));
+
+  // Unpack nested Map<String, Proto> member.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto map_members, root_members[0].second.GetMembers());
+  ASSERT_EQ(map_members.size(), 1);
+  EXPECT_EQ(map_members[0].first, "key1");
+  EXPECT_TRUE(map_members[0].second.IsObject());
+
+  // Unpack nested Proto member inside the Map.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto proto_members, map_members[0].second.GetMembers());
+  ASSERT_EQ(proto_members.size(), 3);
+  EXPECT_EQ(proto_members[0].first, "required_field");
+  EXPECT_THAT(proto_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(123)));
+  EXPECT_EQ(proto_members[1].first, "optional_field");
+  EXPECT_THAT(proto_members[1].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(0)));
+  EXPECT_EQ(proto_members[2].first, "repeated_field");
+  EXPECT_TRUE(proto_members[2].second.IsArray());
+
+  // Unpack nested JSON object member.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto json_members, root_members[1].second.GetMembers());
+  ASSERT_EQ(json_members.size(), 2);
+  EXPECT_EQ(json_members[0].first, "inner_arr");
+  EXPECT_TRUE(json_members[0].second.IsArray());
+  EXPECT_EQ(json_members[1].first, "inner_obj");
+  EXPECT_TRUE(json_members[1].second.IsObject());
+
+  // Unpack inner JSON object inside the JSON object.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto inner_json_members,
+                       json_members[1].second.GetMembers());
+  ASSERT_EQ(inner_json_members.size(), 1);
+  EXPECT_EQ(inner_json_members[0].first, "k");
+  EXPECT_THAT(inner_json_members[0].second.GetPrimitiveValue(),
+              IsOkAndHolds(Value::String("v")));
+}
+
+TEST(VariantValueTest, GetMembersNonObjectErrors) {
+  TypeFactory factory;
+
+  VariantValueView int_ref(Value::Int64(42));
+  EXPECT_THAT(int_ref.GetMembers(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  VariantValueView arr_ref(
+      Value::Array(types::Int64ArrayType(), {Value::Int64(1)}));
+  EXPECT_THAT(arr_ref.GetMembers(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* int_map_type,
+      factory.MakeMapType(types::Int64Type(), types::StringType()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value int_map_val,
+      Value::MakeMap(int_map_type, {{Value::Int64(1), Value::String("a")}}));
+  VariantValueView int_map_ref(int_map_val);
+  EXPECT_THAT(int_map_ref.GetMembers(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  VariantValueView null_ref(Value::NullInt64());
+  EXPECT_THAT(null_ref.GetMembers(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(VariantValueTest, GetElementsSqlArray) {
+  Value array_val =
+      Value::Array(types::Int64ArrayType(),
+                   {Value::Int64(10), Value::NullInt64(), Value::Int64(30)});
+  VariantValueView ref(array_val);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(std::vector<VariantValueView> elements,
+                       ref.GetElements());
+  ASSERT_EQ(elements.size(), 3);
+  EXPECT_THAT(elements[0].GetPrimitiveValue(), IsOkAndHolds(Value::Int64(10)));
+  EXPECT_TRUE(elements[1].IsVariantNull());
+  EXPECT_THAT(elements[2].GetPrimitiveValue(), IsOkAndHolds(Value::Int64(30)));
+}
+
+TEST(VariantValueTest, GetElementsJsonArray) {
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue parsed_json,
+                       JSONValue::ParseJSONString(R"([1, null, {"a": 2}])"));
+  VariantValueView parsed_ref(Value::Json(std::move(parsed_json)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(std::vector<VariantValueView> parsed_elements,
+                       parsed_ref.GetElements());
+  ASSERT_EQ(parsed_elements.size(), 3);
+  EXPECT_THAT(parsed_elements[0].GetPrimitiveValue(),
+              IsOkAndHolds(Value::Int64(1)));
+  EXPECT_TRUE(parsed_elements[1].IsVariantNull());
+  EXPECT_TRUE(parsed_elements[2].IsObject());
+
+  VariantValueView unparsed_ref(Value::UnvalidatedJsonString(R"(["x", "y"])"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(std::vector<VariantValueView> unparsed_elements,
+                       unparsed_ref.GetElements());
+  ASSERT_EQ(unparsed_elements.size(), 2);
+  EXPECT_THAT(unparsed_elements[0].GetPrimitiveValue(),
+              IsOkAndHolds(Value::String("x")));
+  EXPECT_THAT(unparsed_elements[1].GetPrimitiveValue(),
+              IsOkAndHolds(Value::String("y")));
+}
+
+TEST(VariantValueTest, GetElementsNonArrayErrors) {
+  VariantValueView int_ref(Value::Int64(42));
+  EXPECT_THAT(int_ref.GetElements(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  VariantValueView obj_ref(Value::UnvalidatedJsonString(R"({"a": 1})"));
+  EXPECT_THAT(obj_ref.GetElements(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  VariantValueView null_ref(Value::NullInt64());
+  EXPECT_THAT(null_ref.GetElements(),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(VariantValueTest, DebugStringPrimitivesAndNulls) {
+  // Invalid value
+  EXPECT_EQ(VariantValueView(Value()).DebugString(), "Uninitialized value");
+
+  // SQL NULL
+  EXPECT_EQ(VariantValueView(Value::NullInt64()).DebugString(), "NULL");
+
+  // Variant Null (JSON null)
+  Value variant_null = Value::Json(JSONValue());
+  EXPECT_EQ(VariantValueView(variant_null).DebugString(), "null");
+
+  // Primitives
+  EXPECT_EQ(VariantValueView(Value::Int64(42)).DebugString(), "42");
+  EXPECT_EQ(VariantValueView(Value::String("hello")).DebugString(),
+            "\"hello\"");
+  EXPECT_EQ(VariantValueView(Value::Bool(true)).DebugString(), "true");
+
+  // JSON primitives (parsed and unparsed) are formatted as SQL primitives
+  EXPECT_EQ(
+      VariantValueView(Value::UnvalidatedJsonString("\"hello\"")).DebugString(),
+      "\"hello\"");
+  EXPECT_EQ(VariantValueView(Value::UnvalidatedJsonString("123")).DebugString(),
+            "123");
+  EXPECT_EQ(
+      VariantValueView(Value::UnvalidatedJsonString("null")).DebugString(),
+      "null");
+}
+
+TEST(VariantValueTest, DebugStringObjectsAndArrays) {
+  TypeFactory factory;
+
+  // Struct formatted as Simple View Object: {"a": 1, "b": "two", "c": null}
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"b", types::StringType()},
+                                    {"a", types::Int64Type()},
+                                    {"c", types::Int64Type()}},
+                                   &struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val,
+      Value::MakeStruct(struct_type, {Value::String("two"), Value::Int64(1),
+                                      Value::NullInt64()}));
+  EXPECT_EQ(VariantValueView(struct_val).DebugString(),
+            R"({"a": 1, "b": "two", "c": null})");
+
+  // Struct with duplicate field names and anonymous field
+  const StructType* dup_struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"x", types::Int64Type()},
+                                    {"x", types::Int64Type()},
+                                    {"", types::StringType()}},
+                                   &dup_struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value dup_struct_val,
+      Value::MakeStruct(dup_struct_type, {Value::Int64(10), Value::Int64(20),
+                                          Value::String("anon")}));
+  EXPECT_EQ(VariantValueView(dup_struct_val).DebugString(),
+            R"({"": "anon", "x": 10})");
+
+  // Empty Struct
+  const StructType* empty_struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({}, &empty_struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value empty_struct_val,
+                       Value::MakeStruct(empty_struct_type, {}));
+  EXPECT_EQ(VariantValueView(empty_struct_val).DebugString(), "{}");
+
+  // Map<String, V> with SQL NULL key (skipped) and SQL NULL value (null)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* str_map_type,
+      factory.MakeMapType(types::StringType(), types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value str_map_val,
+      Value::MakeMap(str_map_type,
+                     {{Value::NullString(), Value::Int64(99)},
+                      {Value::String("k1"), Value::Int64(1)},
+                      {Value::String("k2"), Value::NullInt64()}}));
+  EXPECT_EQ(VariantValueView(str_map_val).DebugString(),
+            R"({"k1": 1, "k2": null})");
+
+  // JSON object and array
+  Value json_val = Value::UnvalidatedJsonString(
+      R"({"arr": [1, null, {"nested": "ok"}], "flag": true})");
+  EXPECT_EQ(VariantValueView(json_val).DebugString(),
+            R"({"arr": [1, null, {"nested": "ok"}], "flag": true})");
+
+  // Array of Structs with SQL NULL element
+  const ArrayType* struct_array_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(struct_type, &struct_array_type));
+  Value struct_array_val =
+      Value::Array(struct_array_type, {struct_val, Value::Null(struct_type)});
+  EXPECT_EQ(VariantValueView(struct_array_val).DebugString(),
+            R"([{"a": 1, "b": "two", "c": null}, null])");
+
+  // Proto with primitive and repeated primitive fields
+  const ProtoType* inner_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(
+      googlesql_test::TestNullabilityInnerPB::descriptor(), &inner_proto_type));
+  googlesql_test::TestNullabilityInnerPB inner_msg;
+  inner_msg.set_required_field(10);
+  inner_msg.add_repeated_field(20);
+  inner_msg.add_repeated_field(30);
+  Value inner_proto_val =
+      Value::Proto(inner_proto_type, inner_msg.SerializeAsCord());
+  EXPECT_EQ(VariantValueView(inner_proto_val).DebugString(),
+            R"({"optional_field": 0, "repeated_field": [20, 30], )"
+            R"("required_field": 10})");
+
+  // Proto with use_field_defaults = false
+  const ProtoType* nulls_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(
+      googlesql_test::MessageWithNulls::descriptor(), &nulls_proto_type));
+  googlesql_test::MessageWithNulls nulls_msg;
+  nulls_msg.set_i1(10);
+  Value nulls_proto_val =
+      Value::Proto(nulls_proto_type, nulls_msg.SerializeAsCord());
+  EXPECT_EQ(VariantValueView(nulls_proto_val).DebugString(),
+            R"({"i1": 10, "i2": null, "i3": 0, "i4": 6})");
+}
+
+TEST(VariantValueTest, DebugStringNonSimpleViewFallback) {
+  TypeFactory factory;
+
+  // Map with non-string keys is not a Simple View Object/Array/Primitive and
+  // delegates directly to Value::DebugString().
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* int_map_type,
+      factory.MakeMapType(types::Int64Type(), types::StringType()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value int_map_val,
+      Value::MakeMap(int_map_type, {{Value::Int64(1), Value::String("one")},
+                                    {Value::Int64(2), Value::NullString()}}));
+  EXPECT_EQ(VariantValueView(int_map_val).DebugString(),
+            int_map_val.DebugString());
+
+  // Range is not a Simple View Object/Array/Primitive and delegates directly
+  // to Value::DebugString().
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value range_val,
+                       Value::MakeRange(Value::Date(1), Value::Date(2)));
+  EXPECT_EQ(VariantValueView(range_val).DebugString(), range_val.DebugString());
+
+  // Corrupted unparsed JSON object and array fail view extraction and fall
+  // back to Value::DebugString().
+  Value bad_json_obj = Value::UnvalidatedJsonString("{\"a\": 1");
+  EXPECT_EQ(VariantValueView(bad_json_obj).DebugString(),
+            bad_json_obj.DebugString());
+  Value bad_json_arr = Value::UnvalidatedJsonString("[1, 2");
+  EXPECT_EQ(VariantValueView(bad_json_arr).DebugString(),
+            bad_json_arr.DebugString());
+
+  // Proto with unsupported nested message/enum fields fails GetMembers() and
+  // falls back to Value::DebugString().
+  const ProtoType* ks_proto_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeProtoType(googlesql_test::KitchenSinkPB::descriptor(),
+                                  &ks_proto_type));
+  googlesql_test::KitchenSinkPB ks_msg;
+  ks_msg.set_int64_key_1(1);
+  ks_msg.set_int64_key_2(2);
+  Value ks_proto_val = Value::Proto(ks_proto_type, ks_msg.SerializeAsCord());
+  EXPECT_EQ(VariantValueView(ks_proto_val).DebugString(),
+            ks_proto_val.DebugString());
+}
+
 }  // namespace
 }  // namespace googlesql

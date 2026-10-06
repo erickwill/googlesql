@@ -25,7 +25,6 @@
 #include <utility>
 #include <vector>
 
-#include "googlesql/base/arena.h"
 #include "googlesql/parser/macros/diagnostic.h"
 #include "googlesql/parser/macros/token_provider_base.h"
 #include "googlesql/parser/token_stream.h"
@@ -40,6 +39,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "googlesql/base/arena.h"
 
 namespace googlesql {
 namespace parser {

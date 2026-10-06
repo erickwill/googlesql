@@ -182,6 +182,18 @@ class EvaluationContext {
                                bool is_value_table, Value array,
                                const LanguageOptions& language_options);
 
+  // Updates the table 'table_name' with a new array.
+  absl::Status UpdateTableAsArray(absl::string_view table_name, Value array);
+
+  // Increment the number of rows modified for a table.
+  void IncrementNumRowsModified(absl::string_view table_name, int64_t count);
+
+  // Get the number of rows modified for a table.
+  int64_t GetNumRowsModified(absl::string_view table_name) const;
+
+  // Clear all row modification counts.
+  void ClearNumRowsModified();
+
   // Indicates that the result of evaluation is non-deterministic.
   // If this context has a non-null parent context, then we also set
   // non-determinism on the parent context.
@@ -388,11 +400,12 @@ class EvaluationContext {
   // Deletes the C++ value associated with the given variable Id.
   void ClearCppValue(VariableId variable) { cpp_values_.erase(variable); }
 
-  // TODO: Delete this accessor & field as it's no longer used by
-  // group rows implementation.
-  const TupleDataDeque* active_group_rows() const { return active_group_rows_; }
-  void set_active_group_rows(const TupleDataDeque* group_rows) {
-    active_group_rows_ = group_rows;
+  // Stores the accumulated input rows for the UDA currently being evaluated
+  // in this context. Set by UserDefinedAggregateFunctionEvaluator and consumed
+  // by RowsForUdaOp.
+  const TupleDataDeque* uda_input_rows() const { return uda_input_rows_; }
+  void set_uda_input_rows(const TupleDataDeque* uda_input_rows) {
+    uda_input_rows_ = uda_input_rows;
   }
 
   // Registers accumulated group rows to context.
@@ -445,8 +458,9 @@ class EvaluationContext {
   std::shared_ptr<MemoryAccountant> memory_accountant_;
   // Tables added by AddTableAsArray().
   std::map<std::string, Value, std::less<>> tables_;
+  absl::flat_hash_map<std::string, int64_t> num_rows_modified_;
 
-  const TupleDataDeque* active_group_rows_ = nullptr;
+  const TupleDataDeque* uda_input_rows_ = nullptr;
   // Indicates that the result of evaluation is non-deterministic.
   bool deterministic_output_;
   LanguageOptions language_options_;

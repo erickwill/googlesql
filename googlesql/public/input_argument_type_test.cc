@@ -18,15 +18,20 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "googlesql/base/testing/status_matchers.h"
+#include "googlesql/proto/function.pb.h"
+#include "googlesql/public/catalog.h"
 #include "googlesql/public/id_string.h"
 #include "googlesql/public/table_valued_function.h"
 #include "googlesql/public/type.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
@@ -59,6 +64,37 @@ static void TestExpectedArgumentTypeLessPair(const InputArgumentType& type1,
       << "expected: " << ArgumentDebugStrings(expected_arguments)
       << "\nactual: " << ArgumentDebugStrings(arguments);
 }
+
+class TestConnection : public Connection {
+ public:
+  explicit TestConnection(std::string name) : name_(std::move(name)) {}
+  std::string Name() const override { return name_; }
+  std::string FullName() const override { return name_; }
+
+ private:
+  std::string name_;
+};
+
+class TestConnectionCatalog : public Catalog {
+ public:
+  std::string FullName() const override { return "test_catalog"; }
+  void AddConnection(const Connection* connection) {
+    connections_[connection->Name()] = connection;
+  }
+  absl::Status FindConnection(const absl::Span<const std::string>& path,
+                              const Connection** connection,
+                              const FindOptions& options) override {
+    auto it = connections_.find(absl::StrJoin(path, "."));
+    if (it != connections_.end()) {
+      *connection = it->second;
+      return absl::OkStatus();
+    }
+    return absl::NotFoundError(absl::StrJoin(path, "."));
+  }
+
+ private:
+  absl::flat_hash_map<std::string, const Connection*> connections_;
+};
 
 TEST(InputArgumentTypeTests, TestInputArgumentTypeLess) {
   Value null_int64_value = Value::NullInt64();
@@ -220,6 +256,7 @@ TEST(InputArgumentTypeTest, TypeNameAndDebugString) {
     std::string expected_external_type_name;
     std::string expected_debug_string;
   };
+  const TestConnection connection("c");
   const std::vector<TypeAndOutputs> test_cases = {
       {InputArgumentType::UntypedNull(), "NULL", "NULL"},
       {InputArgumentType(int64_value), "INT64", "literal INT64"},
@@ -227,6 +264,9 @@ TEST(InputArgumentTypeTest, TypeNameAndDebugString) {
       {InputArgumentType(types::DoubleType(), true /* is_query_parameter */),
        "FLOAT64", "DOUBLE"},
       {InputArgumentType::LambdaInputArgumentType(), "LAMBDA", "LAMBDA"},
+      {InputArgumentType::ConnectionInputArgumentType(
+           TVFConnectionArgument(&connection)),
+       "CONNECTION", "CONNECTION"},
   };
 
   for (const auto& test_case : test_cases) {
@@ -309,6 +349,84 @@ TEST(InputArgumentTypeTest, Relation) {
   EXPECT_EQ(InputArgumentType::ArgumentsToString({arg, arg2}, PRODUCT_EXTERNAL,
                                                  {"n1", "n2"}),
             "n1 => TABLE<>, n2 => TABLE<> (from pipe input)");
+}
+
+TEST(InputArgumentTypeTest, ConnectionArgument) {
+  TestConnection conn1("conn1");
+  TestConnection conn2("conn2");
+
+  // Single connection argument.
+  TVFConnectionArgument single_connection_arg(&conn1);
+  InputArgumentType single_conn =
+      InputArgumentType::ConnectionInputArgumentType(single_connection_arg);
+  EXPECT_TRUE(single_conn.is_connection());
+  EXPECT_EQ(single_conn.DebugString(), "CONNECTION");
+  EXPECT_EQ(single_conn.UserFacingName(PRODUCT_EXTERNAL), "CONNECTION");
+
+  // Multi-connection key-value pair argument.
+  std::vector<TVFConnectionArgument::KeyValuePair> kv_list = {
+      {"read_conn", &conn1}, {"write_conn", &conn2}};
+  TVFConnectionArgument kv_connection_arg(kv_list);
+  InputArgumentType kv_conn =
+      InputArgumentType::ConnectionInputArgumentType(kv_connection_arg);
+  EXPECT_TRUE(kv_conn.is_connection());
+  EXPECT_EQ(kv_conn.DebugString(), "CONNECTION");
+  EXPECT_EQ(kv_conn.UserFacingName(PRODUCT_EXTERNAL), "CONNECTION");
+
+  // Equality comparison (category-level comparison for signature matching).
+  EXPECT_EQ(single_conn, kv_conn);
+}
+
+TEST(InputArgumentTypeTests, TVFConnectionArgumentSerializeDeserializeSingle) {
+  TestConnection conn("projects.my_project.connections.my_conn");
+  TestConnectionCatalog catalog;
+  catalog.AddConnection(&conn);
+
+  TVFConnectionArgument original(&conn);
+  TVFConnectionProto proto;
+  GOOGLESQL_ASSERT_OK(original.Serialize(&proto));
+  EXPECT_EQ(proto.name(), "projects.my_project.connections.my_conn");
+  EXPECT_EQ(proto.full_name(), "projects.my_project.connections.my_conn");
+  EXPECT_TRUE(proto.connection_kv_pair().empty());
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(TVFConnectionArgument restored,
+                       TVFConnectionArgument::Deserialize(proto, &catalog));
+  EXPECT_EQ(restored.connection(), &conn);
+  EXPECT_TRUE(restored.connection_kv_list().empty());
+  EXPECT_EQ(original, restored);
+}
+
+TEST(InputArgumentTypeTests, TVFConnectionArgumentSerializeDeserializeMulti) {
+  TestConnection conn1("conn1");
+  TestConnection conn2("conn2");
+  TestConnectionCatalog catalog;
+  catalog.AddConnection(&conn1);
+  catalog.AddConnection(&conn2);
+
+  std::vector<TVFConnectionArgument::KeyValuePair> kv_list = {
+      {"read_conn", &conn1}, {"write_conn", &conn2}};
+  TVFConnectionArgument original(kv_list);
+  TVFConnectionProto proto;
+  GOOGLESQL_ASSERT_OK(original.Serialize(&proto));
+  EXPECT_FALSE(proto.has_name());
+  EXPECT_FALSE(proto.has_full_name());
+  ASSERT_EQ(proto.connection_kv_pair_size(), 2);
+  EXPECT_EQ(proto.connection_kv_pair(0).key(), "read_conn");
+  EXPECT_EQ(proto.connection_kv_pair(0).name(), "conn1");
+  EXPECT_EQ(proto.connection_kv_pair(0).full_name(), "conn1");
+  EXPECT_EQ(proto.connection_kv_pair(1).key(), "write_conn");
+  EXPECT_EQ(proto.connection_kv_pair(1).name(), "conn2");
+  EXPECT_EQ(proto.connection_kv_pair(1).full_name(), "conn2");
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(TVFConnectionArgument restored,
+                       TVFConnectionArgument::Deserialize(proto, &catalog));
+  EXPECT_EQ(restored.connection(), nullptr);
+  ASSERT_EQ(restored.connection_kv_list().size(), 2);
+  EXPECT_EQ(restored.connection_kv_list()[0].key, "read_conn");
+  EXPECT_EQ(restored.connection_kv_list()[0].connection, &conn1);
+  EXPECT_EQ(restored.connection_kv_list()[1].key, "write_conn");
+  EXPECT_EQ(restored.connection_kv_list()[1].connection, &conn2);
+  EXPECT_EQ(original, restored);
 }
 
 }  // namespace

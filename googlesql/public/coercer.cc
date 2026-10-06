@@ -103,6 +103,15 @@ SuperTypesMap* CreateBuiltinSuperTypesMap() {
       continue;
     }
 
+    // VARIANT is not a supertype of any type other than itself, even though
+    // all types implicitly coerce to VARIANT. Otherwise, it would become the
+    // supertype of unrelated types (e.g. INT32 and STRING). Literals, query
+    // parameters and untyped NULL can still coerce to a VARIANT argument
+    // through the standard supertype rules for literals.
+    if (dst_type_kind == TYPE_VARIANT) {
+      continue;
+    }
+
     std::vector<const Type*>& supertypes = (*map)[src_type_kind];
     const Type* dst_type = types::TypeFromSimpleTypeKind(dst_type_kind);
     ABSL_CHECK_NE(dst_type, nullptr);
@@ -487,6 +496,9 @@ class Coercer::Context : public Coercer::ContextBase {
   absl::StatusOr<bool> CoercesTo(const InputArgumentType& from_argument,
                                  const Type* to_type,
                                  SignatureMatchResult* result);
+
+  absl::StatusOr<bool> CoercesToVariant(const InputArgumentType& from_argument,
+                                        SignatureMatchResult* result);
 
   absl::StatusOr<bool> ExtendedTypeCoercesTo(
       const Type* from_type, const Type* to_type,
@@ -1192,9 +1204,56 @@ absl::StatusOr<const Type*> Coercer::GetCommonSuperTypeImpl(
   return nullptr;  // No common supertype.
 }
 
+absl::StatusOr<bool> Coercer::Context::CoercesToVariant(
+    const InputArgumentType& from_argument, SignatureMatchResult* result) {
+  if (from_argument.is_untyped()) {
+    if (from_argument.is_untyped_empty_array() &&
+        !language_options().LanguageFeatureEnabled(FEATURE_VARIANT_TYPE)) {
+      result->incr_non_matched_arguments();
+      return false;
+    }
+    // Untyped NULL, empty array, or untyped parameter coerce with cost 0.
+    return true;
+  }
+
+  const Type* from_type = from_argument.type();
+  GOOGLESQL_RET_CHECK_NE(from_type, nullptr);
+
+  if (!IsTypeCastableToVariant(from_type, language_options())) {
+    result->incr_non_matched_arguments();
+    return false;
+  }
+
+  const CastFunctionProperty* property =
+      GetCastProperty(from_type->kind(), TYPE_VARIANT, &language_options());
+  if (property == nullptr) {
+    result->incr_non_matched_arguments();
+    return false;
+  }
+
+  if (!is_explicit() && !SupportsImplicitCoercion(property->type)) {
+    result->incr_non_matched_arguments();
+    return false;
+  }
+
+  if (from_argument.literal_value() != nullptr ||
+      from_argument.is_query_parameter()) {
+    result->incr_literals_coerced();
+    result->incr_literals_distance(property->cost);
+  } else {
+    result->incr_non_literals_coerced();
+    result->incr_non_literals_distance(property->cost);
+  }
+  return true;
+}
+
 absl::StatusOr<bool> Coercer::Context::CoercesTo(
     const InputArgumentType& from_argument, const Type* to_type,
     SignatureMatchResult* result) {
+  if (to_type->IsVariant()) {
+    return CoercesToVariant(from_argument, result);
+  }
+
   if (from_argument.is_untyped()) {
     if (to_type->IsDeclarativeType()) {
       return IsUntypedArgCoercibleToDeclarativeType(from_argument);
@@ -1318,7 +1377,12 @@ absl::StatusOr<bool> Coercer::Context::DeclarativeTypeCoerces(
 
 absl::StatusOr<bool> Coercer::Context::ParameterCoercesTo(
     const Type* from_type, const Type* to_type, SignatureMatchResult* result) {
-  if (IsExtendedCoercion(from_type, to_type)) {
+  if (to_type->IsVariant()) {
+    return CoercesToVariant(
+        InputArgumentType(from_type, /*is_query_parameter=*/true), result);
+  }
+
+  if (IsExtendedCoercion(from_type, to_type) && !from_type->IsVariant()) {
     return ExtendedTypeCoercesTo(
         from_type, to_type, Catalog::ConversionSourceExpressionKind::kParameter,
         result);
@@ -1375,7 +1439,11 @@ bool Coercer::Context::IsIntToOpaqueEnumInProductExternal(
 
 absl::StatusOr<bool> Coercer::Context::TypeCoercesTo(
     const Type* from_type, const Type* to_type, SignatureMatchResult* result) {
-  if (IsExtendedCoercion(from_type, to_type)) {
+  if (to_type->IsVariant()) {
+    return CoercesToVariant(InputArgumentType(from_type), result);
+  }
+
+  if (IsExtendedCoercion(from_type, to_type) && !from_type->IsVariant()) {
     return ExtendedTypeCoercesTo(
         from_type, to_type, Catalog::ConversionSourceExpressionKind::kOther,
         result);
@@ -1407,6 +1475,8 @@ absl::StatusOr<bool> Coercer::Context::TypeCoercesTo(
     return MapCoercesTo(InputArgumentType(from_type), to_type, result);
   }
 
+  // If this is an implicit coercion and the cast property does not support
+  // implicit coercion, then fail.
   if (!is_explicit() && !SupportsImplicitCoercion(property->type)) {
     result->incr_non_matched_arguments();
     return false;
@@ -1441,6 +1511,10 @@ absl::StatusOr<bool> Coercer::Context::StructCoercesTo(
 
   if (to_type->IsJson()) {
     return StructCoercesToJson(struct_argument, to_type, result);
+  }
+
+  if (to_type->IsVariant()) {
+    return CoercesToVariant(struct_argument, result);
   }
 
   if (!to_type->IsStruct() ||
@@ -1787,7 +1861,12 @@ absl::StatusOr<bool> Coercer::Context::MapCoercesTo(
 absl::StatusOr<bool> Coercer::Context::LiteralCoercesTo(
     const Value& literal_value, const Type* to_type,
     SignatureMatchResult* result) {
-  if (IsExtendedCoercion(literal_value.type(), to_type)) {
+  if (to_type->IsVariant()) {
+    return CoercesToVariant(InputArgumentType(literal_value), result);
+  }
+
+  if (IsExtendedCoercion(literal_value.type(), to_type) &&
+      !literal_value.type()->IsVariant()) {
     return ExtendedTypeCoercesTo(
         literal_value.type(), to_type,
         Catalog::ConversionSourceExpressionKind::kLiteral, result);
@@ -1806,7 +1885,7 @@ absl::StatusOr<bool> Coercer::Context::LiteralCoercesTo(
     return false;
   }
 
-  if (literal_value.type()->IsStruct()) {
+  if (literal_value.type()->IsStruct() && to_type->IsStruct()) {
     // Structs are coerced on a field-by-field basis.
     return StructCoercesTo(InputArgumentType(literal_value), to_type, result);
   }

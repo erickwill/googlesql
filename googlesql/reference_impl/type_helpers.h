@@ -16,13 +16,13 @@
 
 // Helper methods for producing the types required by TestDriver
 // implementations.
+#include <string>
 #include <vector>
 
 #include "googlesql/public/catalog.h"
 #include "googlesql/public/type.h"
 #include "googlesql/resolved_ast/resolved_column.h"
 #include "absl/status/statusor.h"
-#include "absl/types/span.h"
 
 #ifndef GOOGLESQL_REFERENCE_IMPL_TYPE_HELPERS_H_
 #define GOOGLESQL_REFERENCE_IMPL_TYPE_HELPERS_H_
@@ -75,6 +75,51 @@ absl::StatusOr<const StructType*> CreateDMLOutputType(
 absl::StatusOr<const StructType*> CreateDMLOutputTypeWithReturning(
     const ArrayType* table_array_type, const ArrayType* returning_array_type,
     TypeFactory* type_factory);
+
+// Represents type information for a modified table in Graph DML.
+struct GraphTargetTableTypeInfo {
+  // The string name of the target table.
+  //
+  // A string name is sufficient (no Table* or catalog lookup is needed) for
+  // two reasons:
+  // 1. Output Schema Construction: `name` is used directly as the field name
+  //    for this table's nested struct in the outer DML output struct type.
+  // 2. Runtime Evaluation: In the reference implementation, `EvaluationContext`
+  //    maintains table state in string-keyed maps (e.g. `GetTableAsArray(name)`
+  //    and `GetNumRowsModified(name)`), so runtime table lookups key directly
+  //    off this table name string.
+  std::string name;
+  const ArrayType* table_type = nullptr;
+};
+
+// Creates the DML output struct type corresponding to a Graph DML statement on
+// multiple target tables.
+//
+// The returned type is a struct with multiple nested structs and an optional
+// top-level returning_rows field:
+//   STRUCT<
+//     table1_name STRUCT< num_rows_modified INT64,
+//                         all_rows ARRAY<...> >,
+//     ...
+//     tableN_name STRUCT< num_rows_modified INT64,
+//                         all_rows ARRAY<...> >,
+//    [ returning_rows ARRAY<...> ]
+//   >
+//
+// For each target table in `table_types`, a field named after the table whose
+// type is a nested struct is created in the top-level output struct. The nested
+// struct has the following fields:
+//   - kDMLOutputNumRowsModifiedColumnName (INT64), representing the number of
+//     rows modified in this table.
+//   - kDMLOutputAllRowsColumnName (ARRAY<...>), representing all rows in the
+//     table after modification.
+//
+// If `returning_array_type` is not nullptr, a top-level field named
+// kDMLOutputReturningColumnName (ARRAY<...>) is appended to represent the
+// returned rows.
+absl::StatusOr<const StructType*> CreateGraphDMLOutputType(
+    const std::vector<GraphTargetTableTypeInfo>& table_types,
+    const ArrayType* returning_array_type, TypeFactory* type_factory);
 
 }  // namespace googlesql
 

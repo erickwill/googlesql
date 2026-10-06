@@ -6318,3 +6318,199 @@ QueryStmt
         | +-a#2 := Literal(type=ARRAY<STRUCT<k INT64>>, value=[{k:1}], has_explicit_type=TRUE)
         +-input_scan=
           +-SingleRowScan
+==
+
+# JSON field access under an array flatten records its parse location, and
+# it survives the flatten rewrite.
+[parse_location_record_type={{PARSE_LOCATION_RECORD_FULL_NODE_SCOPE|PARSE_LOCATION_RECORD_CODE_SEARCH}}]
+SELECT FLATTEN(JsonArray.field) FROM ArrayTypes
+--
+ALTERNATION GROUP: PARSE_LOCATION_RECORD_FULL_NODE_SCOPE
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#21 AS `$col1` [ARRAY<JSON>]
++-query=
+  +-ProjectScan
+    +-parse_location=0-47
+    +-column_list=[$query.$col1#21]
+    +-expr_list=
+    | +-$col1#21 :=
+    |   +-Flatten
+    |     +-parse_location=15-30
+    |     +-type=ARRAY<JSON>
+    |     +-expr=
+    |     | +-ColumnRef(parse_location=15-30, type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17)
+    |     +-get_field_list=
+    |       +-GetJsonField
+    |         +-parse_location=15-30
+    |         +-type=JSON
+    |         +-expr=
+    |         | +-FlattenedArg(type=JSON)
+    |         +-field_name="field"
+    +-input_scan=
+      +-TableScan(parse_location=37-47, column_list=[ArrayTypes.JsonArray#17], table=ArrayTypes, column_index_list=[16])
+
+[REPLACED_LITERALS]
+SELECT FLATTEN(JsonArray.field) FROM ArrayTypes
+
+[REWRITTEN AST]
+QueryStmt
++-output_column_list=
+| +-$query.$col1#21 AS `$col1` [ARRAY<JSON>]
++-query=
+  +-ProjectScan
+    +-parse_location=0-47
+    +-column_list=[$query.$col1#21]
+    +-expr_list=
+    | +-$col1#21 :=
+    |   +-SubqueryExpr
+    |     +-type=ARRAY<JSON>
+    |     +-subquery_type=SCALAR
+    |     +-parameter_list=
+    |     | +-ColumnRef(type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17)
+    |     +-subquery=
+    |       +-ProjectScan
+    |         +-column_list=[$with_expr.injected#26]
+    |         +-expr_list=
+    |         | +-injected#26 :=
+    |         |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<JSON>, ARRAY<JSON>) -> ARRAY<JSON>)
+    |         |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<JSON>) -> BOOL)
+    |         |     | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22)
+    |         |     +-Literal(type=ARRAY<JSON>, value=NULL)
+    |         |     +-SubqueryExpr
+    |         |       +-type=ARRAY<JSON>
+    |         |       +-subquery_type=ARRAY
+    |         |       +-parameter_list=
+    |         |       | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22)
+    |         |       +-subquery=
+    |         |         +-OrderByScan
+    |         |           +-column_list=[$flatten.injected#25]
+    |         |           +-is_ordered=TRUE
+    |         |           +-input_scan=
+    |         |           | +-ProjectScan
+    |         |           |   +-column_list=[$flatten.injected#23, $offset.injected#24, $flatten.injected#25]
+    |         |           |   +-expr_list=
+    |         |           |   | +-injected#25 :=
+    |         |           |   |   +-GetJsonField
+    |         |           |   |     +-parse_location=15-30
+    |         |           |   |     +-type=JSON
+    |         |           |   |     +-expr=
+    |         |           |   |     | +-ColumnRef(type=JSON, column=$flatten.injected#23)
+    |         |           |   |     +-field_name="field"
+    |         |           |   +-input_scan=
+    |         |           |     +-ArrayScan
+    |         |           |       +-column_list=[$flatten.injected#23, $offset.injected#24]
+    |         |           |       +-array_expr_list=
+    |         |           |       | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22, is_correlated=TRUE)
+    |         |           |       +-element_column_list=[$flatten.injected#23]
+    |         |           |       +-array_offset_column=
+    |         |           |         +-ColumnHolder(column=$offset.injected#24)
+    |         |           +-order_by_item_list=
+    |         |             +-OrderByItem
+    |         |               +-column_ref=
+    |         |                 +-ColumnRef(type=INT64, column=$offset.injected#24)
+    |         +-input_scan=
+    |           +-ProjectScan
+    |             +-column_list=[$flatten_input.injected#22]
+    |             +-expr_list=
+    |             | +-injected#22 := ColumnRef(type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17, is_correlated=TRUE)
+    |             +-input_scan=
+    |               +-SingleRowScan
+    +-input_scan=
+      +-TableScan(parse_location=37-47, column_list=[ArrayTypes.JsonArray#17], table=ArrayTypes, column_index_list=[16])
+--
+ALTERNATION GROUP: PARSE_LOCATION_RECORD_CODE_SEARCH
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#21 AS `$col1` [ARRAY<JSON>]
++-query=
+  +-ProjectScan
+    +-parse_location=0-47
+    +-column_list=[$query.$col1#21]
+    +-expr_list=
+    | +-$col1#21 :=
+    |   +-Flatten
+    |     +-parse_location=15-30
+    |     +-type=ARRAY<JSON>
+    |     +-expr=
+    |     | +-ColumnRef(parse_location=15-30, type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17)
+    |     +-get_field_list=
+    |       +-GetJsonField
+    |         +-parse_location=25-30
+    |         +-type=JSON
+    |         +-expr=
+    |         | +-FlattenedArg(type=JSON)
+    |         +-field_name="field"
+    +-input_scan=
+      +-TableScan(parse_location=37-47, column_list=[ArrayTypes.JsonArray#17], table=ArrayTypes, column_index_list=[16])
+
+[REPLACED_LITERALS]
+SELECT FLATTEN(JsonArray.field) FROM ArrayTypes
+
+[REWRITTEN AST]
+QueryStmt
++-output_column_list=
+| +-$query.$col1#21 AS `$col1` [ARRAY<JSON>]
++-query=
+  +-ProjectScan
+    +-parse_location=0-47
+    +-column_list=[$query.$col1#21]
+    +-expr_list=
+    | +-$col1#21 :=
+    |   +-SubqueryExpr
+    |     +-type=ARRAY<JSON>
+    |     +-subquery_type=SCALAR
+    |     +-parameter_list=
+    |     | +-ColumnRef(type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17)
+    |     +-subquery=
+    |       +-ProjectScan
+    |         +-column_list=[$with_expr.injected#26]
+    |         +-expr_list=
+    |         | +-injected#26 :=
+    |         |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<JSON>, ARRAY<JSON>) -> ARRAY<JSON>)
+    |         |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<JSON>) -> BOOL)
+    |         |     | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22)
+    |         |     +-Literal(type=ARRAY<JSON>, value=NULL)
+    |         |     +-SubqueryExpr
+    |         |       +-type=ARRAY<JSON>
+    |         |       +-subquery_type=ARRAY
+    |         |       +-parameter_list=
+    |         |       | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22)
+    |         |       +-subquery=
+    |         |         +-OrderByScan
+    |         |           +-column_list=[$flatten.injected#25]
+    |         |           +-is_ordered=TRUE
+    |         |           +-input_scan=
+    |         |           | +-ProjectScan
+    |         |           |   +-column_list=[$flatten.injected#23, $offset.injected#24, $flatten.injected#25]
+    |         |           |   +-expr_list=
+    |         |           |   | +-injected#25 :=
+    |         |           |   |   +-GetJsonField
+    |         |           |   |     +-parse_location=25-30
+    |         |           |   |     +-type=JSON
+    |         |           |   |     +-expr=
+    |         |           |   |     | +-ColumnRef(type=JSON, column=$flatten.injected#23)
+    |         |           |   |     +-field_name="field"
+    |         |           |   +-input_scan=
+    |         |           |     +-ArrayScan
+    |         |           |       +-column_list=[$flatten.injected#23, $offset.injected#24]
+    |         |           |       +-array_expr_list=
+    |         |           |       | +-ColumnRef(type=ARRAY<JSON>, column=$flatten_input.injected#22, is_correlated=TRUE)
+    |         |           |       +-element_column_list=[$flatten.injected#23]
+    |         |           |       +-array_offset_column=
+    |         |           |         +-ColumnHolder(column=$offset.injected#24)
+    |         |           +-order_by_item_list=
+    |         |             +-OrderByItem
+    |         |               +-column_ref=
+    |         |                 +-ColumnRef(type=INT64, column=$offset.injected#24)
+    |         +-input_scan=
+    |           +-ProjectScan
+    |             +-column_list=[$flatten_input.injected#22]
+    |             +-expr_list=
+    |             | +-injected#22 := ColumnRef(type=ARRAY<JSON>, column=ArrayTypes.JsonArray#17, is_correlated=TRUE)
+    |             +-input_scan=
+    |               +-SingleRowScan
+    +-input_scan=
+      +-TableScan(parse_location=37-47, column_list=[ArrayTypes.JsonArray#17], table=ArrayTypes, column_index_list=[16])

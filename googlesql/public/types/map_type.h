@@ -17,9 +17,9 @@
 #ifndef GOOGLESQL_PUBLIC_TYPES_MAP_TYPE_H_
 #define GOOGLESQL_PUBLIC_TYPES_MAP_TYPE_H_
 
+#include <array>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #include "googlesql/public/options.pb.h"
 #include "googlesql/public/type.pb.h"
@@ -34,7 +34,6 @@ namespace googlesql {
 
 class LanguageOptions;
 class TypeFactory;
-class TypeParameterValue;
 class TypeParameters;
 class ValueContent;
 class ValueProto;
@@ -46,14 +45,12 @@ class MapType : public ContainerType {
   MapType& operator=(const MapType&) = delete;
 #endif  // SWIG
 
-  const Type* key_type() const { return key_type_; }
-  const Type* value_type() const { return value_type_; }
+  const Type* key_type() const { return component_types_[0]; }
+  const Type* value_type() const { return component_types_[1]; }
 
   const MapType* AsMap() const override { return this; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    return {key_type_, value_type_};
-  }
+  TypeListView ComponentTypes() const override { return component_types_; }
 
   std::string ShortTypeName(ProductMode mode,
                             bool use_external_float32) const override;
@@ -81,8 +78,8 @@ class MapType : public ContainerType {
   bool SupportsEquality() const override;
 
   bool UsingFeatureV12CivilTimeType() const override {
-    return key_type_->UsingFeatureV12CivilTimeType() ||
-           value_type_->UsingFeatureV12CivilTimeType();
+    return key_type()->UsingFeatureV12CivilTimeType() ||
+           value_type()->UsingFeatureV12CivilTimeType();
   }
 
   bool IsSupportedType(const LanguageOptions& language_options) const override;
@@ -172,8 +169,8 @@ class MapType : public ContainerType {
       const internal::ValueContentMap* value_content_map,
       const FormatValueContentOptions& options, std::string* result) const;
 
-  const Type* const key_type_;
-  const Type* const value_type_;
+  // Key type is at index 0, value type is at index 1.
+  const std::array<const Type*, 2> component_types_;
 
   friend class TypeFactory;
 };

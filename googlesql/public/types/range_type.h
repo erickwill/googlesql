@@ -56,8 +56,8 @@ class RangeType : public ListBackedType {
   // The element type of the range.
   const Type* element_type() const { return element_type_; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    return {element_type_};
+  TypeListView ComponentTypes() const override {
+    return absl::MakeConstSpan(&element_type_, 1);
   }
 
   bool UsingFeatureV12CivilTimeType() const override {

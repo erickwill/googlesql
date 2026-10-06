@@ -2653,13 +2653,13 @@ std::string RowsForUdaOp::IteratorDebugString() const {
 absl::StatusOr<std::unique_ptr<TupleIterator>> RowsForUdaOp::CreateIterator(
     absl::Span<const TupleData* const> params, int num_extra_slots,
     EvaluationContext* context) const {
-  if (context->active_group_rows() == nullptr) {
+  if (context->uda_input_rows() == nullptr) {
     return googlesql_base::OutOfRangeErrorBuilder()
            << "RowsForUdaOp: Cannot read rows from the current context";
   }
 
   auto iter = std::make_unique<TupleDataDequeIterator>(
-      *context->active_group_rows(), num_extra_slots, CreateOutputSchema(),
+      *context->uda_input_rows(), num_extra_slots, CreateOutputSchema(),
       context);
   return MaybeReorder(std::move(iter), context);
 }

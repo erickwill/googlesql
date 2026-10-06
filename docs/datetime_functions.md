@@ -282,14 +282,14 @@ SELECT
 ## `DATETIME_ADD`
 
 ```googlesql
-DATETIME_ADD(datetime_expression, INTERVAL int64_expression part)
+DATETIME_ADD(datetime_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds `int64_expression` units of `part` to the `DATETIME` object.
+Adds `step_size` units of `step_unit` to the `DATETIME` object.
 
-`DATETIME_ADD` supports the following values for `part`:
+`DATETIME_ADD` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -305,7 +305,7 @@ Adds `int64_expression` units of `part` to the `DATETIME` object.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when the
 date is at (or near) the last day of the month. If the resulting month has fewer
-days than the original DATETIME's day, then the result day is the last day of
+days than the original `DATETIME` object's day, then the result day is the last day of
 the new month.
 
 **Return Data Type**
@@ -369,7 +369,10 @@ Gets the number of unit boundaries between two `DATETIME` values
 
 **Details**
 
-If `end_datetime` is earlier than `start_datetime`, the output is negative.
+If `end_datetime` is earlier than `start_datetime`, the output is 0 or negative.
+Decimals are always truncated rather than rounded. For example, both 3.9 and 3.1
+become 3, while -3.9 and -3.1 become -3 (instead of -4).
+
 Produces an error if the computation overflows, such as if the difference
 in nanoseconds
 between the two `DATETIME` values overflows.
@@ -382,7 +385,7 @@ behaves like `TIMESTAMP_DIFF(TIMESTAMP, TIMESTAMP, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT
@@ -396,6 +399,29 @@ SELECT
  +----------------------------+------------------------+------------------------+
  | 2010-07-07 10:20:00        | 2008-12-25 15:30:00    | 559                    |
  +----------------------------+------------------------+------------------------*/
+```
+
+In the following example, `DATETIME_DIFF` truncates the output rather than
+rounding it. Both 3 hours 54 minutes (3.9 hours) and 3 hours 6 minutes (3.1
+hours) truncate to 3 hours, and their negative counterparts truncate to -3
+hours:
+
+```googlesql
+SELECT
+  DATETIME_DIFF(DATETIME '2021-05-01 04:54:00',
+    DATETIME '2021-05-01 01:00:00', HOUR) AS diff_3_9,
+  DATETIME_DIFF(DATETIME '2021-05-01 04:06:00',
+    DATETIME '2021-05-01 01:00:00', HOUR) AS diff_3_1,
+  DATETIME_DIFF(DATETIME '2021-05-01 01:00:00',
+    DATETIME '2021-05-01 04:54:00', HOUR) AS diff_negative_3_9,
+  DATETIME_DIFF(DATETIME '2021-05-01 01:00:00',
+    DATETIME '2021-05-01 04:06:00', HOUR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ```googlesql
@@ -467,14 +493,14 @@ SELECT
 ## `DATETIME_SUB`
 
 ```googlesql
-DATETIME_SUB(datetime_expression, INTERVAL int64_expression part)
+DATETIME_SUB(datetime_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts `int64_expression` units of `part` from the `DATETIME`.
+Subtracts `step_size` units of `step_unit` from the `DATETIME` object.
 
-`DATETIME_SUB` supports the following values for `part`:
+`DATETIME_SUB` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -490,7 +516,7 @@ Subtracts `int64_expression` units of `part` from the `DATETIME`.
 
 Special handling is required for `MONTH`, `QUARTER`, and `YEAR` parts when the
 date is at (or near) the last day of the month. If the resulting month has fewer
-days than the original `DATETIME`'s day, then the result day is the last day of
+days than the original `DATETIME` object's day, then the result day is the last day of
 the new month.
 
 **Return Data Type**

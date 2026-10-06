@@ -26,9 +26,9 @@
 #include "googlesql/public/type.h"
 #include "googlesql/public/types/struct_type.h"
 #include "googlesql/public/types/type_factory.h"
+#include "googlesql/public/types/vector_type_util.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "absl/container/flat_hash_set.h"
-#include "googlesql/base/check.h"
 #include "absl/log/log.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
@@ -220,61 +220,68 @@ void RegisterAnalyzerTestOptions(
   test_case_options->RegisterBool(kDebugStringOmitPipeInputScanField, true);
 }
 
-std::vector<std::pair<std::string, const googlesql::Type*>> GetQueryParameters(
-    TypeFactory* type_factory) {
-  const googlesql::Type* array_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeArrayType(type_factory->get_int32(), &array_type));
+absl::StatusOr<std::vector<std::pair<std::string, const googlesql::Type*>>>
+GetQueryParameters(TypeFactory* type_factory) {
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_type,
+                   type_factory->MakeArrayType(type_factory->get_int32()));
 
-  const googlesql::Type* array_int64_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeArrayType(type_factory->get_int64(),
-                                       &array_int64_type));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_int64_type,
+                   type_factory->MakeArrayType(type_factory->get_int64()));
 
   const googlesql::Type* array_float_type = googlesql::types::FloatArrayType();
 
-  const googlesql::Type* array_double_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeArrayType(type_factory->get_double(),
-                                       &array_double_type));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_double_type,
+                   type_factory->MakeArrayType(type_factory->get_double()));
 
-  const googlesql::Type* array_string_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeArrayType(type_factory->get_string(),
-                                       &array_string_type));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_string_type,
+                   type_factory->MakeArrayType(type_factory->get_string()));
 
   const googlesql::Type* struct_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeStructType(
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
       {{"a", type_factory->get_int32()}, {"b", type_factory->get_string()}},
       &struct_type));
 
   const googlesql::Type* empty_struct_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeStructType({}, &empty_struct_type));
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType({}, &empty_struct_type));
 
   const googlesql::Type* struct_two_int64_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeStructType(
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
       {{"", type_factory->get_int64()}, {"", type_factory->get_int64()}},
       &struct_two_int64_type));
 
   const googlesql::Type* proto_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeProtoType(
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeProtoType(
       googlesql_test::KitchenSinkPB::descriptor(), &proto_type));
 
   const googlesql::Type* approx_distance_function_options_proto_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeProtoType(
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeProtoType(
       googlesql_test::TestApproxDistanceFunctionOptionsProto::descriptor(),
       &approx_distance_function_options_proto_type));
 
   const googlesql::Type* enum_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeEnumType(googlesql_test::TestEnum_descriptor(),
-                                      &enum_type));
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeEnumType(
+      googlesql_test::TestEnum_descriptor(), &enum_type));
 
-  const googlesql::Type* array_enum_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeArrayType(enum_type, &array_enum_type));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_enum_type,
+                   type_factory->MakeArrayType(enum_type));
 
   const googlesql::Type* struct_int64_type;
-  GOOGLESQL_CHECK_OK(type_factory->MakeStructType({{"", type_factory->get_int64()}},
-                                        &struct_int64_type));
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
+      {{"", type_factory->get_int64()}}, &struct_int64_type));
 
-  const googlesql::Type* array_struct_int64_type;
-  GOOGLESQL_CHECK_OK(
-      type_factory->MakeArrayType(struct_int64_type, &array_struct_int64_type));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_struct_int64_type,
+                   type_factory->MakeArrayType(struct_int64_type));
+
+  // VECTOR parameters are only registered by callers when FEATURE_VECTOR_TYPE
+  // is enabled, since callers filter by IsSupportedType().
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* vector_type,
+                   MakeVectorType(type_factory));
+  GOOGLESQL_ASSIGN_OR_RETURN(const googlesql::Type* array_vector_type,
+                   type_factory->MakeArrayType(vector_type));
+  const googlesql::Type* struct_vector_type;
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
+      {{"v", vector_type}, {"i", type_factory->get_int64()}},
+      &struct_vector_type));
 
   return std::vector<std::pair<std::string, const googlesql::Type*>>{
       {"test_param_bool", type_factory->get_bool()},
@@ -305,6 +312,9 @@ std::vector<std::pair<std::string, const googlesql::Type*>> GetQueryParameters(
       {"test_param_array_string", array_string_type},
       {"test_param_array_enum", array_enum_type},
       {"test_param_array_struct_int64", array_struct_int64_type},
+      {"test_param_vector", vector_type},
+      {"test_param_array_vector", array_vector_type},
+      {"test_param_struct_vector", struct_vector_type},
       // Parameter names that are reserved keywords are supported.
       {"select", type_factory->get_bool()},
       {"proto", proto_type},

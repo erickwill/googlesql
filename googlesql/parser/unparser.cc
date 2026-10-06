@@ -3034,9 +3034,16 @@ void Unparser::visitASTBitwiseShiftExpression(
   PrintCloseParenIfNeeded(node);
 }
 
+// The delimiters printed around a query that is nested inside an expression.
 struct Parens {
   std::string left = "(";
   std::string right = ")";
+  // True if the query is delimited by braces rather than parentheses. Unlike
+  // parentheses, braces do not delimit the expression on the left: the query is
+  // introduced by a bare `VALUE`/`EXISTS` keyword that can bind to whatever
+  // precedes it, so callers may still have to print parentheses of their own.
+  bool uses_braces = false;
+
   static Parens GetParensOrBraces(const ASTQuery* query) {
     Parens parens;
     const auto node_kind = query->query_expr()->node_kind();
@@ -3045,6 +3052,7 @@ struct Parens {
         node_kind == AST_GQL_LINEAR_OPS_QUERY) {
       parens.left = "{";
       parens.right = "}";
+      parens.uses_braces = true;
     }
     return parens;
   }
@@ -3282,18 +3290,29 @@ void Unparser::visitASTArrayElement(const ASTArrayElement* node, void* data) {
 
 void Unparser::visitASTExpressionSubquery(const ASTExpressionSubquery* node,
                                           void* data) {
+  const Parens parens = Parens::GetParensOrBraces(node->query());
+  // A subquery delimited by parentheses is self-delimiting, so parentheses from
+  // the input are redundant and are dropped. A subquery delimited by braces is
+  // not: it starts with a bare `VALUE`/`EXISTS` keyword that binds to whatever
+  // precedes it, so dropping the parentheses changes how the output reparses.
+  // In a braced constructor, for instance, `(VALUE { ... }).f : 1` would become
+  // `VALUE { ... }.f : 1`, where `VALUE` reparses as a field name.
+  if (parens.uses_braces) {
+    PrintOpenParenIfNeeded(node);
+  }
   print(ASTExpressionSubquery::ModifierToString(node->modifier()));
   if (node->hint() != nullptr) {
     node->hint()->Accept(this, data);
   }
-  Parens parens;
-  parens = Parens::GetParensOrBraces(node->query());
   print(parens.left);
   {
     Formatter::Indenter indenter(&formatter_);
     node->query()->Accept(this, data);
   }
   print(parens.right);
+  if (parens.uses_braces) {
+    PrintCloseParenIfNeeded(node);
+  }
 }
 
 void Unparser::visitASTHint(const ASTHint* node, void* data) {
@@ -4811,6 +4830,24 @@ void Unparser::visitASTAddColumnAction(const ASTAddColumnAction* node,
     print("FILL USING");
     node->fill_expression()->Accept(this, data);
   }
+}
+
+void Unparser::visitASTAddStoredColumnAction(
+    const ASTAddStoredColumnAction* node, void* data) {
+  print("ADD STORED COLUMN");
+  if (node->is_if_not_exists()) {
+    print("IF NOT EXISTS");
+  }
+  node->column_name()->Accept(this, data);
+}
+
+void Unparser::visitASTDropStoredColumnAction(
+    const ASTDropStoredColumnAction* node, void* data) {
+  print("DROP STORED COLUMN");
+  if (node->is_if_exists()) {
+    print("IF EXISTS");
+  }
+  node->column_name()->Accept(this, data);
 }
 
 void Unparser::visitASTColumnPosition(const ASTColumnPosition* node,

@@ -286,6 +286,17 @@ statement.
       <td>Binary</td>
     </tr>
 
+  <tr>
+    <td>&nbsp;</td>
+    <td>General quantified comparisons</td>
+    <td>Any comparable types. See
+    <a href="https://github.com/google/googlesql/blob/master/docs/data-types.md">Data Types</a>
+
+    for a complete list.</td>
+    <td>Compares a search value to a set of values.</td>
+    <td>Binary</td>
+  </tr>
+
     <tr>
       <td>&nbsp;</td>
       <td><code>IS [NOT] DISTINCT FROM</code></td>
@@ -577,6 +588,12 @@ ambiguity. For example:
   <td><a href="#like_operator_quantified">Quantified <code>LIKE</code> operator</a>
 </td>
   <td>Checks a search value for matches against several patterns.</td>
+</tr>
+
+<tr>
+  <td><a href="#general_quantified_comparisons">General quantified comparisons</a>
+</td>
+  <td>Compares a search value to a set of values.</td>
 </tr>
 
 <tr>
@@ -3742,6 +3759,258 @@ SELECT b'a' LIKE ALL (COLLATE('a', 'und:ci'), 'A');
 [semantic-rules-quant-like]: #semantic_rules_quant_like
 
 [reg-expressions-quant-like]: #reg_expressions_quant_like
+
+[operators-subqueries]: https://github.com/google/googlesql/blob/master/docs/subqueries.md#about_subqueries
+
+[operators-link-to-unnest]: https://github.com/google/googlesql/blob/master/docs/query-syntax.md#unnest_operator
+
+[collation]: https://github.com/google/googlesql/blob/master/docs/collation-concepts.md#collate_funcs
+
+### General quantified comparisons 
+<a id="general_quantified_comparisons"></a>
+
+General quantified comparisons support the following syntax:
+
+```googlesql
+expression comparison_operator quantifier value_set
+
+comparison_operator:
+  { = | != | <> | < | <= | > | >= }
+
+quantifier:
+  { ANY | SOME | ALL }
+
+value_set:
+  {
+    (expression[, ...])
+    | (subquery)
+    | UNNEST(array_expression)
+  }
+```
+
+**Description**
+
+Compares an expression to a set of values using a comparison operator and a
+quantifier.
+
+[Semantic rules][semantic-rules-general-quantified-comparisons] apply, but in
+general, the quantifiers behave as follows:
+
++ An `ANY` or `SOME` comparison returns `TRUE` if the comparison evaluates to
+  `TRUE` for at least one value in `value_set`, `FALSE` if the comparison
+  evaluates to `FALSE` for all values in `value_set`, or otherwise `NULL`.
++ An `ALL` comparison returns `TRUE` if the comparison evaluates to `TRUE` for
+  all values in `value_set`, `FALSE` if the comparison evaluates to `FALSE` for
+  at least one value in `value_set`, or otherwise `NULL`.
+
+**Definitions**
+
++ `expression`: The value that's compared to a set of values.
++ `comparison_operator`: The comparison operator used to compare `expression` to
+  each value in `value_set`. Supported operators include `=`, `!=`, `<>`, `<`,
+  `<=`, `>`, and `>=`.
++ `quantifier`: Condition for the comparison:
+  + `ANY`: Checks if the comparison evaluates to `TRUE` for at least one value
+    in `value_set`.
+  + `SOME`: Synonym for `ANY`.
+  + `ALL`: Checks if the comparison evaluates to `TRUE` for all values in
+    `value_set`.
++ `value_set`: One or more values to compare to `expression`. Supported forms:
+  + `(expression[, ...])`: A list of expressions.
+  + `(subquery)`: A [subquery][operators-subqueries] that returns a single
+    column. The values in that column are the set of values. If no rows are
+    produced, the set of values is empty.
+  + `UNNEST(array_expression)`: An [UNNEST operator][operators-link-to-unnest]
+    that returns a column of values from an array expression.
+
+**Collation caveats**
+
+[Collation][collation] is supported, but the following caveats apply:
+
++ If an input has no collation specification or an empty collation
+  specification and another input has an explicitly defined collation, the
+  explicitly defined collation is used for all comparisons.
++ All inputs with a non-empty, explicitly defined collation specification must
+  have the same collation specification, otherwise an error is returned.
+
+<a id="semantic_rules_general_quantified_comparisons"></a>
+
+**Semantic rules**
+
+When using a general quantified comparison with `ANY` or `SOME`, the following
+semantics apply in this order:
+
+1. Returns `FALSE` if `value_set` is empty.
+1. Returns `TRUE` if `expression comparison_operator value` evaluates to `TRUE`
+   for at least one value in `value_set`.
+1. Returns `FALSE` if `expression comparison_operator value` evaluates to
+   `FALSE` for all values in `value_set`.
+1. Returns `NULL`.
+
+When using a general quantified comparison with `ALL`, the following semantics
+apply in this order:
+
+1. Returns `TRUE` if `value_set` is empty.
+1. Returns `TRUE` if `expression comparison_operator value` evaluates to `TRUE`
+   for all values in `value_set`.
+1. Returns `FALSE` if `expression comparison_operator value` evaluates to
+   `FALSE` for at least one value in `value_set`.
+1. Returns `NULL`.
+
+Conceptually, `ANY` (or `SOME`) behaves like a chain of `OR` expressions, and
+`ALL` behaves like a chain of `AND` expressions.
+
+The semantics of:
+
+```googlesql
+x comparison_operator { ANY | SOME } (y, z, ...)
+```
+
+are defined as equivalent to:
+
+```googlesql
+FALSE OR (x comparison_operator y) OR (x comparison_operator z) OR ...
+```
+
+The semantics of:
+
+```googlesql
+x comparison_operator ALL (y, z, ...)
+```
+
+are defined as equivalent to:
+
+```googlesql
+TRUE AND (x comparison_operator y) AND (x comparison_operator z) AND ...
+```
+
+The subquery and array forms are defined similarly.
+
+**Return data type**
+
+`BOOL`
+
+**Examples**
+
+You can use this `WITH` clause to emulate a temporary table for `Numbers` in the
+following examples:
+
+```googlesql
+WITH Numbers AS (
+  SELECT 1 AS x UNION ALL
+  SELECT 2 UNION ALL
+  SELECT 3 UNION ALL
+  SELECT 4 UNION ALL
+  SELECT 5
+)
+SELECT * FROM Numbers;
+
+/*---+
+ | x |
+ +---+
+ | 1 |
+ | 2 |
+ | 3 |
+ | 4 |
+ | 5 |
+ +---*/
+```
+
+Example with `= ANY` and an expression list:
+
+```googlesql
+SELECT x FROM Numbers WHERE x = ANY (2, 4);
+
+/*---+
+ | x |
+ +---+
+ | 2 |
+ | 4 |
+ +---*/
+```
+
+Example with `> ALL` and an expression list:
+
+```googlesql
+SELECT x FROM Numbers WHERE x > ALL (2, 3);
+
+/*---+
+ | x |
+ +---+
+ | 4 |
+ | 5 |
+ +---*/
+```
+
+Example with `< ANY` and a subquery:
+
+```googlesql
+WITH
+  Numbers AS (
+    SELECT 1 AS x UNION ALL
+    SELECT 2 UNION ALL
+    SELECT 3 UNION ALL
+    SELECT 4 UNION ALL
+    SELECT 5
+  ),
+  Targets AS (
+    SELECT 3 AS target
+  )
+SELECT x FROM Numbers WHERE x < ANY (SELECT target FROM Targets);
+
+/*---+
+ | x |
+ +---+
+ | 1 |
+ | 2 |
+ +---*/
+```
+
+Example with `!= ALL` and an `UNNEST` operation:
+
+```googlesql
+SELECT x FROM Numbers WHERE x != ALL UNNEST([1, 2, 3, 4]);
+
+/*---+
+ | x |
+ +---+
+ | 5 |
+ +---*/
+```
+
+The following queries illustrate the semantic rules and three-valued logic for
+general quantified comparisons:
+
+```googlesql
+SELECT
+  5 = ANY (1, 5, 10) AS a,    -- TRUE: At least one comparison (5 = 5) is TRUE.
+  5 = ANY (1, 2, 3) AS b,     -- FALSE: All comparisons evaluate to FALSE.
+  5 = ANY (1, NULL, 5) AS c,  -- TRUE: 5 = 5 is TRUE, regardless of NULL.
+  5 = ANY (1, NULL, 2) AS d,  -- NULL: No comparison is TRUE and 5 = NULL is NULL.
+
+  5 = ALL (5, 5) AS e,        -- TRUE: All comparisons evaluate to TRUE.
+  5 = ALL (5, 10) AS f,       -- FALSE: At least one comparison (5 = 10) is FALSE.
+  5 = ALL (5, NULL) AS g,     -- NULL: No comparison is FALSE and 5 = NULL is NULL.
+  5 = ALL (1, NULL) AS h;     -- FALSE: 5 = 1 is FALSE, regardless of NULL.
+```
+
+The following queries illustrate the behavior of empty value sets:
+
+```googlesql
+SELECT
+  5 = ANY UNNEST([]) AS any_empty,  -- FALSE
+  5 = ALL UNNEST([]) AS all_empty;  -- TRUE
+```
+
+The following queries illustrate general quantified comparisons with collation:
+
+```googlesql
+SELECT
+  'a' = ANY ('A', COLLATE('B', 'und:ci')) AS a,  -- TRUE
+  'a' = ALL ('a', COLLATE('A', 'und:ci')) AS b;  -- TRUE
+```
+
+[semantic-rules-general-quantified-comparisons]: #semantic_rules_general_quantified_comparisons
 
 [operators-subqueries]: https://github.com/google/googlesql/blob/master/docs/subqueries.md#about_subqueries
 

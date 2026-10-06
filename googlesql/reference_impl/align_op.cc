@@ -549,9 +549,13 @@ class AlignTupleIterator : public TupleIterator {
           "OUTPUT WITHIN range is empty: ", output_within_->DebugString()));
     }
 
-    // Evaluate origin.
-    // TODO: Origin based on OUTPUT WITHIN lower or upper bound.
-    origin_ = absl::UnixEpoch();
+    // Evaluate origin. The origin is:
+    // 1. The value of timestamp_expr, if the clause is ORIGIN timestamp_expr.
+    // 2. The upper bound (implicit or explicit) of the OUTPUT WITHIN clause, if
+    // finite.
+    // 3. The lower bound (implicit or explicit) of the OUTPUT WITHIN clause, if
+    // finite.
+    // 4. The GoogleSQL Epoch.
     if (origin_expr_ != nullptr) {
       TupleSlot origin_slot;
       if (!origin_expr_->EvalSimple(params_, context_, &origin_slot, &status)) {
@@ -563,6 +567,12 @@ class AlignTupleIterator : public TupleIterator {
       }
       GOOGLESQL_RET_CHECK(origin_val.type()->IsTimestamp());
       origin_ = origin_val.ToTime();
+    } else if (output_upper_bound_ != absl::InfiniteFuture()) {
+      origin_ = output_upper_bound_;
+    } else if (output_lower_bound_ != absl::InfinitePast()) {
+      origin_ = output_lower_bound_;
+    } else {
+      origin_ = absl::UnixEpoch();
     }
 
     // Partition the input rows using partition_comparator_.

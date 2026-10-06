@@ -133,8 +133,10 @@ ALTERNATION GROUP: +REMOTE_MODEL,
 CreateModelStmt
 +-name_path=t1
 +-is_remote=TRUE
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 --
 ALTERNATION GROUP: <empty>
 --
@@ -143,13 +145,32 @@ create model t1 remote with connection connection1
 ^
 ==
 
-# TODO: Support multi-connection syntax.
 [language_features=NONE,+REMOTE_MODEL,+REMOTE_FUNCTION]
 create model t1 remote with connection (key1="connection1", key2="connection1")
 --
 ERROR: Multiple connections in CONNECTION clause is not supported [at 1:29]
 create model t1 remote with connection (key1="connection1", key2="connection1")
                             ^
+==
+
+[language_features=NONE,+REMOTE_MODEL,+REMOTE_FUNCTION,+MULTI_CONNECTIONS]
+create model t1 remote with connection (key1="connection1", key2=connection2)
+--
+CreateModelStmt
++-name_path=t1
++-is_remote=TRUE
++-connection_list=
+  +-ConnectionList
+    +-connection_kv_list=
+      +-ConnectionKeyValuePair
+      | +-key="key1"
+      | +-connection=
+      |   +-Connection(connection=connection1)
+      +-ConnectionKeyValuePair
+        +-key="key2"
+        +-connection=
+          +-Connection(connection=connection2)
+
 
 ==
 
@@ -980,8 +1001,10 @@ remote with connection default
 CreateModelStmt
 +-name_path=t1
 +-is_remote=TRUE
-+-connection=
-  +-Connection(connection=$connection_default)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=$connection_default)
 ==
 
 [no_java]
@@ -1011,8 +1034,10 @@ CreateModelStmt
 +-output_column_definition_list=
 | +-ColumnDefinition(name="o1", type=BOOL, column=t1.o1#3)
 +-is_remote=TRUE
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 # All clauses

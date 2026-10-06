@@ -46,6 +46,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 
 namespace googlesql {
@@ -778,6 +779,18 @@ TEST(FunctionSignatureTests, LambdaFunctionWithOptionsTests) {
   ASSERT_EQ(ARG_KIND_LAMBDA, lambda_with_options.kind());
   ASSERT_TRUE(lambda_with_options.options().has_argument_name());
   ASSERT_EQ(lambda_with_options.options().argument_name(), "my_lambda");
+}
+
+TEST(FunctionSignatureTests, LambdaWithoutOptionsSharesSimpleOptions) {
+  FunctionArgumentType lambda =
+      FunctionArgumentType::Lambda({FunctionArgumentType(types::Int64Type())},
+                                   FunctionArgumentType(types::BoolType()));
+  // FunctionArgumentType(const Type*) uses the SimpleOptions(REQUIRED)
+  // singleton, so the lambda must point at the very same instance.
+  FunctionArgumentType required_int64(types::Int64Type());
+  EXPECT_EQ(&lambda.options(), &required_int64.options());
+  EXPECT_EQ(lambda.cardinality(), FunctionArgumentType::REQUIRED);
+  EXPECT_EQ(lambda.num_occurrences(), 1);
 }
 
 // Utility to test function argument type equality.
@@ -2552,6 +2565,8 @@ void TestArgumentTypeOptionsSerialization(
               arg_type.options().array_element_must_support_equality());
   EXPECT_TRUE(dummy_type->options().array_element_must_support_grouping() ==
               arg_type.options().array_element_must_support_grouping());
+  EXPECT_TRUE(dummy_type->options().supports_order_by() ==
+              arg_type.options().supports_order_by());
 }
 
 TEST(FunctionSignatureTests, TestFunctionArgumentTypeOptionsConstraint) {
@@ -2959,7 +2974,7 @@ TEST(FunctionSignatureTest, ValidateSignatureConstraints) {
   const Type* int32_type = factory.get_int32();
 
   auto opt_with_kind = [](FunctionEnums::NamedArgumentKind kind,
-                          const std::string& name = "") {
+                          absl::string_view name = "") {
     FunctionArgumentTypeOptions opt;
     if (!name.empty() || kind != FunctionEnums::POSITIONAL_ONLY) {
       opt.set_argument_name(name, kind);
@@ -3141,6 +3156,61 @@ TEST(FunctionSignatureTest, ValidateSignatureConstraints) {
             /*context_ptr=*/nullptr);
       },
       "must be Scalar");
+}
+
+TEST(FunctionSignatureTests, SupportsOrderByRelationValid) {
+  TypeFactory factory;
+  TVFRelation schema({{"a", factory.get_string()}});
+  FunctionArgumentTypeOptions options;
+  options.set_supports_order_by(true);
+  FunctionArgumentType rel_arg = FunctionArgumentType::RelationWithSchema(
+      schema, /*extra_relation_input_columns_allowed=*/false, options);
+  EXPECT_TRUE(rel_arg.options().supports_order_by());
+  GOOGLESQL_EXPECT_OK(rel_arg.IsValid(PRODUCT_EXTERNAL));
+  TestArgumentTypeOptionsSerialization(rel_arg);
+
+  FunctionArgumentType any_rel_arg = FunctionArgumentType::AnyRelation(options);
+  EXPECT_TRUE(any_rel_arg.options().supports_order_by());
+  GOOGLESQL_EXPECT_OK(any_rel_arg.IsValid(PRODUCT_EXTERNAL));
+  TestArgumentTypeOptionsSerialization(any_rel_arg);
+}
+
+TEST(FunctionSignatureTests, SupportsOrderByNonRelationFails) {
+  TypeFactory factory;
+  FunctionArgumentTypeOptions options;
+  options.set_supports_order_by(true);
+
+  // Scalar argument
+  FunctionArgumentType scalar_arg(factory.get_int64(), options);
+  EXPECT_THAT(
+      scalar_arg.IsValid(PRODUCT_EXTERNAL),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Option supports_order_by can only be set on relation "
+                         "arguments")));
+
+  // Model argument
+  FunctionArgumentType model_arg(ARG_KIND_MODEL, options);
+  EXPECT_THAT(
+      model_arg.IsValid(PRODUCT_EXTERNAL),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Option supports_order_by can only be set on relation "
+                         "arguments")));
+
+  // Connection argument
+  FunctionArgumentType connection_arg(ARG_KIND_CONNECTION, options);
+  EXPECT_THAT(
+      connection_arg.IsValid(PRODUCT_EXTERNAL),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Option supports_order_by can only be set on relation "
+                         "arguments")));
+
+  // Descriptor argument
+  FunctionArgumentType descriptor_arg(ARG_KIND_DESCRIPTOR, options);
+  EXPECT_THAT(
+      descriptor_arg.IsValid(PRODUCT_EXTERNAL),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Option supports_order_by can only be set on relation "
+                         "arguments")));
 }
 
 }  // namespace googlesql

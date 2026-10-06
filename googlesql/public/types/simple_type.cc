@@ -670,6 +670,10 @@ void SimpleType::CopyValueContent(TypeKind kind, const ValueContent& from,
     case TYPE_COLUMN_LIST_SPEC:
       from.GetAs<internal::ValueContentOrderedListRef*>()->Ref();
       break;
+    case TYPE_VARIANT:
+      from.GetAs<internal::VariantRef*>()->Ref();
+      break;
+
     default:
       break;
   }
@@ -715,6 +719,10 @@ void SimpleType::ClearValueContent(TypeKind kind, const ValueContent& value) {
     case TYPE_COLUMN_LIST_SPEC:
       value.GetAs<internal::ValueContentOrderedListRef*>()->Unref();
       return;
+    case TYPE_VARIANT:
+      value.GetAs<internal::VariantRef*>()->Unref();
+      return;
+
     default:
       return;
   }
@@ -747,6 +755,9 @@ uint64_t SimpleType::GetValueContentExternallyAllocatedByteSize(
     case TYPE_COLUMN_LIST_SPEC:
       return value.GetAs<internal::ValueContentOrderedListRef*>()
           ->physical_byte_size();
+    case TYPE_VARIANT:
+      return value.GetAs<internal::VariantRef*>()->physical_byte_size();
+
     default:
       return 0;
   }
@@ -841,12 +852,8 @@ absl::HashState SimpleType::HashValueContent(const ValueContent& value,
     case TYPE_UUID:
       return absl::HashState::combine(std::move(state), GetUuidValue(value));
     case TYPE_VARIANT:
-      // TODO: Implement object-level comparisons for VARIANT.
-      // Object-level hashing is not supported yet as it requires deep semantic
-      // inspection of composite types, which should be implemented once a
-      // custom representation is defined. Current implementation only hashes
-      // the inline 8-byte content.
-      return absl::HashState::combine(std::move(state), value.GetAs<int64_t>());
+      return value.GetAs<internal::VariantRef*>()->Hash(std::move(state));
+
     default:
       ABSL_LOG(ERROR) << "Unexpected type kind: " << kind();
       return state;
@@ -961,15 +968,16 @@ bool SimpleType::ValueContentEquals(
     case TYPE_UUID:
       return ReferencedValueEquals<internal::UuidRef>(x, y);
     case TYPE_VARIANT:
-      // TODO: Implement object-level comparisons for VARIANT.
-      // Object-level comparisons (e.g. comparing a JSON object vs a STRUCT by
-      // their logical object representation) are not supported yet as they
-      // require deep semantic inspection and handling of different underlying
-      // representations, which should be implemented once a custom
-      // representation (e.g. ValueContentRef) is defined. The current
-      // implementation only performs bitwise/numeric comparison of inline
-      // 8-byte content.
-      return ContentEquals<int64_t>(x, y);
+      // VARIANT type uses the following equality rules:
+      // 1. Values of underlying type must be equal (val1 == val2), delegated
+      // to
+      //    Value::EqualsInternal which respects type-specific equality nuances
+      //    (like JSON semantic equality).
+      // 2. Annotations associated with the Variant must also be equal based on
+      //    AnnotationMap::Equals.
+      return x.GetAs<internal::VariantRef*>()->Equals(
+          y.GetAs<internal::VariantRef*>(), options);
+
     default:
       ABSL_LOG(FATAL) << "Unexpected simple type kind: " << kind();
   }
@@ -1200,6 +1208,10 @@ std::string SimpleType::FormatValueContent(
     }
     case TYPE_TOKENLIST:
       return FormatTokenList(value, options);
+    case TYPE_VARIANT:
+      // TODO: Implement this.
+      return "<Variant formatting not supported>";
+
     default:
       ABSL_LOG(ERROR) << "Unexpected type kind: " << kind();
       return "<Invalid simple type's value>";

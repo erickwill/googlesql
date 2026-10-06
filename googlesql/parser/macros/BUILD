@@ -50,6 +50,7 @@ cc_library(
     hdrs = ["macro_catalog.h"],
     visibility = [
         "//googlesql/parser:__pkg__",
+        "//googlesql/public:__pkg__",
         "//googlesql/tools/execute_query:__pkg__",
     ],
     deps = [
@@ -99,6 +100,7 @@ cc_library(
     hdrs = ["token_provider.h"],
     visibility = [
         "//googlesql/parser:__pkg__",
+        "//googlesql/public:__pkg__",
         "//googlesql/tools/execute_query:__pkg__",
     ],
     deps = [
@@ -153,6 +155,7 @@ cc_library(
     ],
     visibility = [
         "//googlesql/parser:__pkg__",
+        "//googlesql/public:__pkg__",
         "//googlesql/tools/execute_query:__pkg__",
     ],
     deps = [
@@ -227,6 +230,7 @@ cc_library(
     hdrs = ["standalone_macro_expansion.h"],
     visibility = [
         "//googlesql/parser:__pkg__",
+        "//googlesql/public:__pkg__",
         "//googlesql/tools/execute_query:__pkg__",
     ],
     deps = [
@@ -260,6 +264,7 @@ cc_library(
     hdrs = ["standalone_macro_expansion_impl.h"],
     visibility = [
         "//googlesql/parser:__pkg__",
+        "//googlesql/public:__pkg__",
         "//googlesql/tools/execute_query:__pkg__",
     ],
     deps = [

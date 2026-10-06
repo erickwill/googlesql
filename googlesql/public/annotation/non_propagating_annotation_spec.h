@@ -41,6 +41,12 @@ class NonPropagatingAnnotationSpec : public AnnotationSpec {
     return absl::OkStatus();
   }
 
+  absl::Status CheckAndPropagateForParameter(
+      const ResolvedParameter& parameter,
+      AnnotationMap* result_annotation_map) override {
+    return absl::OkStatus();
+  }
+
   absl::Status CheckAndPropagateForGetStructField(
       const ResolvedGetStructField& get_struct_field,
       AnnotationMap* result_annotation_map) override {

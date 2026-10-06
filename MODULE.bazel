@@ -16,7 +16,7 @@
 
 module(
     name = "googlesql",
-    version = "2026.9.2",
+    version = "2026.10.1",
 )
 
 GOOGLESQL_JAVA_ARTIFACTS = [
@@ -49,6 +49,7 @@ GOOGLESQL_JAVA_ARTIFACTS = [
 
 bazel_dep(name = "abseil-cpp", version = "20260107.0", repo_name = "com_google_absl")
 bazel_dep(name = "abseil-py", version = "2.1.0", repo_name = "io_abseil_py")
+bazel_dep(name = "aspect_rules_esbuild", version = "0.25.1")
 bazel_dep(name = "bazel_features", version = "1.33.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.1")
 bazel_dep(name = "boost.variant", version = "1.89.0")

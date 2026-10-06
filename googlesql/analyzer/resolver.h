@@ -32,7 +32,6 @@
 
 #include "googlesql/analyzer/annotation_propagator.h"
 #include "googlesql/analyzer/column_cycle_detector.h"
-#include "googlesql/analyzer/column_list_spec.h"
 #include "googlesql/analyzer/container_hash_equals.h"
 #include "googlesql/analyzer/estimator_function_resolver.h"
 #include "googlesql/analyzer/expr_matching_helpers.h"
@@ -4611,18 +4610,61 @@ class Resolver {
       const ASTPathExpression* path_expr,
       std::unique_ptr<const ResolvedConnection>* resolved_connection);
 
+  // Resolves a connection specified as a string literal (e.g.
+  // "project.location.connection_id"). Parses the string into path components
+  // and looks up the connection in the catalog. Returns an error if the string
+  // cannot be parsed or the connection is not found.
+  absl::Status ResolveConnectionString(
+      const ASTStringLiteral* string_literal,
+      std::unique_ptr<const ResolvedConnection>* resolved_connection);
+
+  // Resolves a single connection clause (ASTConnectionClause). For statements
+  // that only support a single connection (e.g. CREATE VECTOR INDEX). Rejects
+  // multi-connection syntax with an error. If <is_default_connection_allowed>
+  // is true, allows DEFAULT literal. Populates <resolved_connection>.
   absl::Status ResolveConnectionClause(
       const ASTConnectionClause* connection_clause,
       std::unique_ptr<const ResolvedConnection>* resolved_connection,
       bool is_default_connection_allowed = false);
 
+  // Resolves a connection clause (ASTConnectionClause) that can be either a
+  // single connection or a list of key-value pairs. Populates
+  // <resolved_connection_list>.
+  // If key-value pairs are specified (WITH CONNECTION (key = value, ...)),
+  // validates that FEATURE_MULTI_CONNECTIONS is enabled, checks for duplicate
+  // keys case-insensitively, and resolves each connection.
+  absl::Status ResolveConnectionClause(
+      const ASTConnectionClause* connection_clause,
+      std::unique_ptr<const ResolvedConnectionList>* resolved_connection_list,
+      bool is_default_connection_allowed = false);
+
+  // Resolves a single WITH CONNECTION clause (ASTWithConnectionClause). For
+  // statements that only support a single connection (e.g. CREATE VECTOR
+  // INDEX). Rejects multi-connection syntax with an error. If
+  // <is_default_connection_allowed> is true, allows DEFAULT literal.
+  // Populates <resolved_connection>.
   absl::Status ResolveConnectionClause(
       const ASTWithConnectionClause* with_connection,
       std::unique_ptr<const ResolvedConnection>* resolved_connection,
       bool is_default_connection_allowed = false);
 
-  static absl::Status ParseConnectionString(absl::string_view connection_str,
-                                            std::vector<std::string>* path);
+  // Resolves a WITH CONNECTION clause (ASTWithConnectionClause) that can be
+  // either a single connection or a list of key-value pairs. Populates
+  // <resolved_connection_list>.
+  // If key-value pairs are specified (WITH CONNECTION (key = value, ...)),
+  // validates that FEATURE_MULTI_CONNECTIONS is enabled, checks for duplicate
+  // keys case-insensitively, and resolves each connection.
+  absl::Status ResolveConnectionClause(
+      const ASTWithConnectionClause* with_connection,
+      std::unique_ptr<const ResolvedConnectionList>* resolved_connection_list,
+      bool is_default_connection_allowed = false);
+
+  // Parses a connection string (e.g. "project.location.connection_id") into
+  // its path components using the SQL parser rules.
+  // Returns an InvalidArgument error if the string is empty or invalid.
+  static absl::Status ParseConnectionString(
+      absl::string_view connection_str, const LanguageOptions& language_options,
+      std::vector<std::string>* path);
 
   absl::Status ResolveDefaultConnection(
       const ASTDefaultLiteral* default_literal,
@@ -4783,6 +4825,14 @@ class Resolver {
   // Resolves JSON field access.  <resolved_lhs> must have JSON type.
   // On success, <resolved_lhs> will be reset.
   absl::Status ResolveJsonFieldAccess(
+      const ParseLocationRange& parse_location, const ASTIdentifier* identifier,
+      std::unique_ptr<const ResolvedExpr> resolved_lhs,
+      std::unique_ptr<const ResolvedExpr>* resolved_expr_out);
+
+  // Resolves VARIANT field access into a ResolvedGetVariantField.
+  // `identifier`, `resolved_lhs`, and `resolved_expr_out` must be non-null, and
+  // `resolved_lhs` must have VARIANT type.
+  absl::Status ResolveVariantFieldAccess(
       const ASTIdentifier* identifier,
       std::unique_ptr<const ResolvedExpr> resolved_lhs,
       std::unique_ptr<const ResolvedExpr>* resolved_expr_out);
@@ -5890,7 +5940,7 @@ class Resolver {
   absl::Status ResolveColumnListSpec(
       const ASTColumnListSpec* column_list_spec,
       ExprResolutionInfo* expr_resolution_info,
-      std::unique_ptr<const ColumnListSpec>* column_list_spec_out);
+      std::unique_ptr<const ResolvedExpr>* resolved_expr_out);
 
   absl::StatusOr<ResolvedColumn> LookupUnpackColumn(IdString column_name,
                                                     const ASTNode* ast_location,
@@ -6606,7 +6656,7 @@ class Resolver {
     std::vector<std::unique_ptr<const ResolvedExpr>> partition_by_list;
     std::vector<std::unique_ptr<const ResolvedExpr>> cluster_by_list;
     std::unique_ptr<const ResolvedWithPartitionColumns> with_partition_columns;
-    std::unique_ptr<const ResolvedConnection> connection;
+    std::unique_ptr<const ResolvedConnectionList> connection_list;
     bool is_value_table;
     std::unique_ptr<const ResolvedScan> query_scan;
     std::vector<std::unique_ptr<const ResolvedOutputColumn>> output_column_list;

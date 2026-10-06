@@ -1026,11 +1026,8 @@ static absl::Status SaveToImpl(
       model_proto->set_name(arg.model().model()->Name());
       model_proto->set_full_name(arg.model().model()->FullName());
     } else if (arg.is_connection()) {
-      TVFConnectionProto* connection_proto =
-          arg_proto->mutable_connection_argument();
-      connection_proto->set_name(arg.connection().connection()->Name());
-      connection_proto->set_full_name(
-          arg.connection().connection()->FullName());
+      GOOGLESQL_RETURN_IF_ERROR(arg.connection().Serialize(
+          arg_proto->mutable_connection_argument()));
     } else if (arg.is_descriptor()) {
       TVFDescriptorProto* descriptor_proto =
           arg_proto->mutable_descriptor_argument();
@@ -1098,13 +1095,10 @@ absl::StatusOr<std::shared_ptr<TVFSignature>> RestoreFromImpl(
       input_args.push_back(TVFInputArgumentType(TVFModelArgument(
         model)));
     } else if (argument.has_connection_argument()) {
-      const Connection* connection;
-      const std::vector<std::string> path = absl::StrSplit(
-        argument.connection_argument().full_name(), '.');
-      GOOGLESQL_RETURN_IF_ERROR(params.catalog->FindConnection(path, &connection,
-                                                     Catalog::FindOptions()));
-      input_args.push_back(TVFInputArgumentType(TVFConnectionArgument(
-        connection)));
+      GOOGLESQL_ASSIGN_OR_RETURN(TVFConnectionArgument conn,
+                       TVFConnectionArgument::Deserialize(
+                           argument.connection_argument(), params.catalog));
+      input_args.push_back(TVFInputArgumentType(std::move(conn)));
     } else if (argument.has_descriptor_argument()) {
       std::vector<std::string> names;
       const TVFDescriptorProto& descriptor_arg = argument.descriptor_argument();
@@ -1362,6 +1356,28 @@ static std::string ToStringImpl(
   }
   ABSL_LOG(ERROR) << "Invalid PathSearchPrefixType: " << prefix_type;
   return absl::StrCat("INVALID_PATH_SEARCH_PREFIX_TYPE(", prefix_type, ")");
+}
+
+static std::string ToStringImpl(
+    ResolvedGraphUpdateElement::PropertyUpdateMode mode) {
+  std::string name =
+      ResolvedGraphUpdateElementEnums::PropertyUpdateMode_Name(mode);
+  if (!name.empty()) {
+    return name;
+  }
+  ABSL_LOG(ERROR) << "Invalid PropertyUpdateMode: " << mode;
+  return absl::StrCat("INVALID_PROPERTY_UPDATE_MODE(", mode, ")");
+}
+
+static std::string ToStringImpl(
+    ResolvedGraphUpdateElement::LabelUpdateMode mode) {
+  std::string name =
+      ResolvedGraphUpdateElementEnums::LabelUpdateMode_Name(mode);
+  if (!name.empty()) {
+    return name;
+  }
+  ABSL_LOG(ERROR) << "Invalid LabelUpdateMode: " << mode;
+  return absl::StrCat("INVALID_LABEL_UPDATE_MODE(", mode, ")");
 }
 
 static std::string ToStringImpl(ResolvedUpdateFieldItemEnums::Operation operation) {

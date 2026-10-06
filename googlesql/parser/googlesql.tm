@@ -1683,6 +1683,18 @@ alter_action {ASTNode*}:
       node->set_is_if_not_exists(@if_not_exists.has_value());
       $$ = node;
     }
+  | "ADD" "STORED" "COLUMN" if_not_exists? identifier[column]
+    {
+      auto* node = MakeNode<ASTAddStoredColumnAction>(@$, $column);
+      node->set_is_if_not_exists(@if_not_exists.has_value());
+      $$ = node;
+    }
+  | "DROP" "STORED" "COLUMN" opt_if_exists identifier[column]
+    {
+      auto* node = MakeNode<ASTDropStoredColumnAction>(@$, $column);
+      node->set_is_if_exists($opt_if_exists);
+      $$ = node;
+    }
   | "DROP" "COLUMN" opt_if_exists identifier
     {
       auto* node = MakeNode<ASTDropColumnAction>(@$, $4);

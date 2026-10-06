@@ -205,12 +205,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
                       +-group_by_list=
-                      | +-grain_lock_key#41 :=
+                      | +-grain_lock_key_0#41 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<key INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<key INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#40 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -267,7 +271,7 @@ FROM
       SUM(ANY_VALUE(projectscan_13.a_12.referenced_columns.price)
         WHERE
           NOT((projectscan_13.a_12) IS NULL)
-        GROUP BY projectscan_13.a_12.key_columns) AS a_15
+        GROUP BY projectscan_13.a_12.key_columns.key) AS a_15
     FROM
       (
         SELECT
@@ -334,7 +338,7 @@ FROM
      SUM(ANY_VALUE(projectscan_13.a_12.referenced_columns.price)
        WHERE
          NOT((projectscan_13.a_12) IS NULL)
-       GROUP BY projectscan_13.a_12.key_columns) AS a_15
+       GROUP BY projectscan_13.a_12.key_columns.key) AS a_15
    GROUP BY a_14
 |> AS aggregatescan_16
 |> SELECT
@@ -502,12 +506,16 @@ QueryStmt
     |                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
     |                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
     |                   +-group_by_list=
-    |                   | +-grain_lock_key#41 :=
+    |                   | +-grain_lock_key_0#41 :=
     |                   |   +-GetStructField
-    |                   |     +-type=STRUCT<key INT64>
+    |                   |     +-type=INT64
     |                   |     +-expr=
-    |                   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
-    |                   |     +-field_idx=1
+    |                   |     | +-GetStructField
+    |                   |     |   +-type=STRUCT<key INT64>
+    |                   |     |   +-expr=
+    |                   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
+    |                   |     |   +-field_idx=1
+    |                   |     +-field_idx=0
     |                   +-group_by_aggregate_list=
     |                     +-$any_value_grain_lock_0#40 :=
     |                       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -567,7 +575,7 @@ SELECT
           SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
             WHERE
               NOT((projectscan_15.a_14) IS NULL)
-            GROUP BY projectscan_15.a_14.key_columns) AS a_16
+            GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
         FROM
           (
             SELECT
@@ -655,7 +663,7 @@ FROM
             SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
               WHERE
                 NOT((projectscan_15.a_14) IS NULL)
-              GROUP BY projectscan_15.a_14.key_columns) AS a_16
+              GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
        |> AS aggregatescan_17
        |> SELECT
             (aggregatescan_17.a_16) + 1 AS a_18
@@ -894,12 +902,16 @@ QueryStmt
         |                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
         |                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
         |                       +-group_by_list=
-        |                       | +-grain_lock_key#42 :=
+        |                       | +-grain_lock_key_0#42 :=
         |                       |   +-GetStructField
-        |                       |     +-type=STRUCT<key INT64>
+        |                       |     +-type=INT64
         |                       |     +-expr=
-        |                       |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
-        |                       |     +-field_idx=1
+        |                       |     | +-GetStructField
+        |                       |     |   +-type=STRUCT<key INT64>
+        |                       |     |   +-expr=
+        |                       |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
+        |                       |     |   +-field_idx=1
+        |                       |     +-field_idx=0
         |                       +-group_by_aggregate_list=
         |                         +-$any_value_grain_lock_0#41 :=
         |                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -959,7 +971,7 @@ SELECT
           SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
             WHERE
               NOT((projectscan_15.a_14) IS NULL)
-            GROUP BY projectscan_15.a_14.key_columns) AS a_16
+            GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
         FROM
           (
             SELECT
@@ -1023,7 +1035,7 @@ FROM
             SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
               WHERE
                 NOT((projectscan_15.a_14) IS NULL)
-              GROUP BY projectscan_15.a_14.key_columns) AS a_16
+              GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
        |> AS aggregatescan_17
        |> SELECT
             (aggregatescan_17.a_16) + 1 AS a_18
@@ -1187,12 +1199,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#35)
                   +-group_by_list=
-                  | +-grain_lock_key#38 :=
+                  | +-grain_lock_key_0#38 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#35)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#35)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#37 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -1218,7 +1234,7 @@ FROM
       SUM(ANY_VALUE(projectscan_11.a_10.referenced_columns.price)
         WHERE
           NOT((projectscan_11.a_10) IS NULL)
-        GROUP BY projectscan_11.a_10.key_columns) AS a_13
+        GROUP BY projectscan_11.a_10.key_columns.key) AS a_13
     FROM
       (
         SELECT
@@ -1300,7 +1316,7 @@ FROM
      SUM(ANY_VALUE(projectscan_11.a_10.referenced_columns.price)
        WHERE
          NOT((projectscan_11.a_10) IS NULL)
-       GROUP BY projectscan_11.a_10.key_columns) AS a_13
+       GROUP BY projectscan_11.a_10.key_columns.key) AS a_13
    GROUP BY a_12
 |> AS aggregatescan_14
 |> SELECT
@@ -1525,12 +1541,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
                       +-group_by_list=
-                      | +-grain_lock_key#41 :=
+                      | +-grain_lock_key_0#41 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<key INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<key INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#40 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -1589,7 +1609,7 @@ FROM
       SUM(ANY_VALUE(projectscan_13.a_12.referenced_columns.price)
         WHERE
           NOT((projectscan_13.a_12) IS NULL)
-        GROUP BY projectscan_13.a_12.key_columns) AS a_15
+        GROUP BY projectscan_13.a_12.key_columns.key) AS a_15
     FROM
       (
         SELECT
@@ -1658,7 +1678,7 @@ FROM
      SUM(ANY_VALUE(projectscan_13.a_12.referenced_columns.price)
        WHERE
          NOT((projectscan_13.a_12) IS NULL)
-       GROUP BY projectscan_13.a_12.key_columns) AS a_15
+       GROUP BY projectscan_13.a_12.key_columns.key) AS a_15
    GROUP BY a_14
 |> AS aggregatescan_16
 |> SELECT
@@ -1840,12 +1860,16 @@ QueryStmt
     |                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
     |                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
     |                   +-group_by_list=
-    |                   | +-grain_lock_key#41 :=
+    |                   | +-grain_lock_key_0#41 :=
     |                   |   +-GetStructField
-    |                   |     +-type=STRUCT<key INT64>
+    |                   |     +-type=INT64
     |                   |     +-expr=
-    |                   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
-    |                   |     +-field_idx=1
+    |                   |     | +-GetStructField
+    |                   |     |   +-type=STRUCT<key INT64>
+    |                   |     |   +-expr=
+    |                   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#38)
+    |                   |     |   +-field_idx=1
+    |                   |     +-field_idx=0
     |                   +-group_by_aggregate_list=
     |                     +-$any_value_grain_lock_0#40 :=
     |                       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -1905,7 +1929,7 @@ SELECT
           SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
             WHERE
               NOT((projectscan_15.a_14) IS NULL)
-            GROUP BY projectscan_15.a_14.key_columns) AS a_16
+            GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
         FROM
           (
             SELECT
@@ -1997,7 +2021,7 @@ FROM
             SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
               WHERE
                 NOT((projectscan_15.a_14) IS NULL)
-              GROUP BY projectscan_15.a_14.key_columns) AS a_16
+              GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
        |> AS aggregatescan_17
        |> SELECT
             (aggregatescan_17.a_16) + 1 AS a_18
@@ -2250,12 +2274,16 @@ QueryStmt
         |                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
         |                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
         |                       +-group_by_list=
-        |                       | +-grain_lock_key#42 :=
+        |                       | +-grain_lock_key_0#42 :=
         |                       |   +-GetStructField
-        |                       |     +-type=STRUCT<key INT64>
+        |                       |     +-type=INT64
         |                       |     +-expr=
-        |                       |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
-        |                       |     +-field_idx=1
+        |                       |     | +-GetStructField
+        |                       |     |   +-type=STRUCT<key INT64>
+        |                       |     |   +-expr=
+        |                       |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$aggregate.dep_closure#39)
+        |                       |     |   +-field_idx=1
+        |                       |     +-field_idx=0
         |                       +-group_by_aggregate_list=
         |                         +-$any_value_grain_lock_0#41 :=
         |                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -2317,7 +2345,7 @@ SELECT
           SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
             WHERE
               NOT((projectscan_15.a_14) IS NULL)
-            GROUP BY projectscan_15.a_14.key_columns) AS a_16
+            GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
         FROM
           (
             SELECT
@@ -2383,7 +2411,7 @@ FROM
             SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.price)
               WHERE
                 NOT((projectscan_15.a_14) IS NULL)
-              GROUP BY projectscan_15.a_14.key_columns) AS a_16
+              GROUP BY projectscan_15.a_14.key_columns.key) AS a_16
        |> AS aggregatescan_17
        |> SELECT
             (aggregatescan_17.a_16) + 1 AS a_18
@@ -2607,11 +2635,25 @@ QueryStmt
                   |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>) -> BOOL)
                   |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.dep_closure#22)
                   |   +-group_by_list=
-                  |   | +-grain_lock_key#25 :=
+                  |   | +-grain_lock_key_0#25 :=
+                  |   | | +-GetStructField
+                  |   | |   +-type=INT64
+                  |   | |   +-expr=
+                  |   | |   | +-GetStructField
+                  |   | |   |   +-type=STRUCT<KEY1 INT64, key2 INT64>
+                  |   | |   |   +-expr=
+                  |   | |   |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.dep_closure#22)
+                  |   | |   |   +-field_idx=1
+                  |   | |   +-field_idx=0
+                  |   | +-grain_lock_key_1#26 :=
                   |   |   +-GetStructField
-                  |   |     +-type=STRUCT<KEY1 INT64, key2 INT64>
+                  |   |     +-type=INT64
                   |   |     +-expr=
-                  |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.dep_closure#22)
+                  |   |     | +-GetStructField
+                  |   |     |   +-type=STRUCT<KEY1 INT64, key2 INT64>
+                  |   |     |   +-expr=
+                  |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.dep_closure#22)
+                  |   |     |   +-field_idx=1
                   |   |     +-field_idx=1
                   |   +-group_by_aggregate_list=
                   |     +-$any_value_grain_lock_0#24 :=
@@ -2627,20 +2669,34 @@ QueryStmt
                   |           +-field_idx=0
                   +-constituent_aggregate_2#21 :=
                     +-AggregateFunctionCall(GoogleSQL:sum(INT64) -> INT64)
-                      +-ColumnRef(type=INT64, column=$aggregate.$any_value_grain_lock_0#26)
+                      +-ColumnRef(type=INT64, column=$aggregate.$any_value_grain_lock_0#27)
                       +-where_expr=
                       | +-FunctionCall(GoogleSQL:$not(BOOL) -> BOOL)
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<measure_sum_price STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, Quantity INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<measure_sum_price STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, Quantity INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.agg_arg#19)
                       +-group_by_list=
-                      | +-grain_lock_key#27 :=
+                      | +-grain_lock_key_0#28 :=
+                      | | +-GetStructField
+                      | |   +-type=INT64
+                      | |   +-expr=
+                      | |   | +-GetStructField
+                      | |   |   +-type=STRUCT<KEY1 INT64, key2 INT64>
+                      | |   |   +-expr=
+                      | |   |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<measure_sum_price STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, Quantity INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.agg_arg#19)
+                      | |   |   +-field_idx=1
+                      | |   +-field_idx=0
+                      | +-grain_lock_key_1#29 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<KEY1 INT64, key2 INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<measure_sum_price STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, Quantity INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.agg_arg#19)
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<KEY1 INT64, key2 INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<measure_sum_price STRUCT<referenced_columns STRUCT<Price INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, Quantity INT64>, key_columns STRUCT<KEY1 INT64, key2 INT64>>, column=$aggregate.agg_arg#19)
+                      |     |   +-field_idx=1
                       |     +-field_idx=1
                       +-group_by_aggregate_list=
-                        +-$any_value_grain_lock_0#26 :=
+                        +-$any_value_grain_lock_0#27 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
                             +-GetStructField
                               +-type=INT64
@@ -2706,11 +2762,11 @@ FROM
       SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.Price)
         WHERE
           NOT((projectscan_15.a_14) IS NULL)
-        GROUP BY projectscan_15.a_14.key_columns) AS a_18,
+        GROUP BY projectscan_15.a_14.key_columns.KEY1, projectscan_15.a_14.key_columns.key2) AS a_18,
       SUM(ANY_VALUE(projectscan_15.a_12.referenced_columns.Quantity)
         WHERE
           NOT((projectscan_15.a_12) IS NULL)
-        GROUP BY projectscan_15.a_12.key_columns) AS a_19
+        GROUP BY projectscan_15.a_12.key_columns.KEY1, projectscan_15.a_12.key_columns.key2) AS a_19
     FROM
       (
         SELECT
@@ -2791,11 +2847,11 @@ FROM
      SUM(ANY_VALUE(projectscan_15.a_14.referenced_columns.Price)
        WHERE
          NOT((projectscan_15.a_14) IS NULL)
-       GROUP BY projectscan_15.a_14.key_columns) AS a_18,
+       GROUP BY projectscan_15.a_14.key_columns.KEY1, projectscan_15.a_14.key_columns.key2) AS a_18,
      SUM(ANY_VALUE(projectscan_15.a_12.referenced_columns.Quantity)
        WHERE
          NOT((projectscan_15.a_12) IS NULL)
-       GROUP BY projectscan_15.a_12.key_columns) AS a_19
+       GROUP BY projectscan_15.a_12.key_columns.KEY1, projectscan_15.a_12.key_columns.key2) AS a_19
    GROUP BY a_16, a_17
 |> AS aggregatescan_20
 |> SELECT
@@ -3009,12 +3065,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<item_id INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<item_id INT64>>, column=$aggregate.dep_closure#19)
                       +-group_by_list=
-                      | +-grain_lock_key#22 :=
+                      | +-grain_lock_key_0#22 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<item_id INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<item_id INT64>>, column=$aggregate.dep_closure#19)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<item_id INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<item_id INT64>>, column=$aggregate.dep_closure#19)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#21 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -3075,7 +3135,7 @@ FROM
       SUM(ANY_VALUE(projectscan_14.a_13.referenced_columns.price)
         WHERE
           NOT((projectscan_14.a_13) IS NULL)
-        GROUP BY projectscan_14.a_13.key_columns) AS a_16
+        GROUP BY projectscan_14.a_13.key_columns.item_id) AS a_16
     FROM
       (
         SELECT
@@ -3150,7 +3210,7 @@ FROM
      SUM(ANY_VALUE(projectscan_14.a_13.referenced_columns.price)
        WHERE
          NOT((projectscan_14.a_13) IS NULL)
-       GROUP BY projectscan_14.a_13.key_columns) AS a_16
+       GROUP BY projectscan_14.a_13.key_columns.item_id) AS a_16
    GROUP BY a_15
 |> AS aggregatescan_17
 |> SELECT

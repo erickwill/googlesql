@@ -2895,10 +2895,36 @@ absl::Status GraphTableQueryResolver::ValidateGqlDmlOperator(
       }
       return absl::OkStatus();
     }
-    case AST_GQL_SET:
-      return MakeSqlErrorAt(gql_op) << "Graph SET is not supported";
-    case AST_GQL_REMOVE:
-      return MakeSqlErrorAt(gql_op) << "Graph REMOVE is not supported";
+    case AST_GQL_SET: {
+      if (!resolver_->language().LanguageFeatureEnabled(
+              FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE)) {
+        return MakeSqlErrorAt(gql_op) << "Graph SET is not supported";
+      }
+      if (context.is_nested) {
+        return MakeSqlErrorAt(gql_op)
+               << "SET is not allowed in non-top-level graph statement";
+      }
+      if (context.is_set_op) {
+        return MakeSqlErrorAt(gql_op)
+               << "SET is not allowed in GQL set operations";
+      }
+      return absl::OkStatus();
+    }
+    case AST_GQL_REMOVE: {
+      if (!resolver_->language().LanguageFeatureEnabled(
+              FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE)) {
+        return MakeSqlErrorAt(gql_op) << "Graph REMOVE is not supported";
+      }
+      if (context.is_nested) {
+        return MakeSqlErrorAt(gql_op)
+               << "REMOVE is not allowed in non-top-level graph statement";
+      }
+      if (context.is_set_op) {
+        return MakeSqlErrorAt(gql_op)
+               << "REMOVE is not allowed in GQL set operations";
+      }
+      return absl::OkStatus();
+    }
     case AST_GQL_DELETE:
       return MakeSqlErrorAt(gql_op) << "Graph DELETE is not supported";
     default:
@@ -2947,9 +2973,20 @@ GraphTableQueryResolver::ResolveGqlOperator(
                                            local_scope.get(),
                                            std::move(inputs));
     }
-    case AST_GQL_SET:
+    case AST_GQL_SET: {
+      GOOGLESQL_RETURN_IF_ERROR(ValidateGqlDmlOperator(gql_op, context));
+      resolver_->needs_generalized_query_stmt_ = true;
+      GraphDmlResolver dml_resolver(resolver_, graph_);
+      return dml_resolver.ResolveGqlSet(*gql_op->GetAsOrDie<ASTGqlSet>(),
+                                        local_scope.get(), std::move(inputs));
+    }
     case AST_GQL_REMOVE: {
-      return ValidateGqlDmlOperator(gql_op, context);
+      GOOGLESQL_RETURN_IF_ERROR(ValidateGqlDmlOperator(gql_op, context));
+      resolver_->needs_generalized_query_stmt_ = true;
+      GraphDmlResolver dml_resolver(resolver_, graph_);
+      return dml_resolver.ResolveGqlRemove(*gql_op->GetAsOrDie<ASTGqlRemove>(),
+                                           local_scope.get(),
+                                           std::move(inputs));
     }
     case AST_GQL_DELETE: {
       return ValidateGqlDmlOperator(gql_op, context);
@@ -3538,16 +3575,16 @@ static bool IsCompositeQuery(const ASTGqlOperator* node) {
   return IsLinearQuery(node) || node->Is<ASTGqlSetOperation>();
 }
 
-// Recursively searches the parsed GQL operator `op` for an ASTGqlInsert node.
-// Returns true if an ASTGqlInsert is found, or false otherwise.
-static bool ContainsInsertOp(const ASTGqlOperator* op) {
-  if (op->Is<ASTGqlInsert>()) {
+// Recursively searches the parsed GQL operator `op` for an operator of `kind`.
+// Returns true if found, or false otherwise.
+static bool ContainsGqlOpOfKind(const ASTGqlOperator* op, ASTNodeKind kind) {
+  if (op->node_kind() == kind) {
     return true;
   }
   if (op->Is<ASTGqlOperatorList>()) {
     for (const auto* child_op :
          op->GetAsOrDie<ASTGqlOperatorList>()->operators()) {
-      if (ContainsInsertOp(child_op)) {
+      if (ContainsGqlOpOfKind(child_op, kind)) {
         return true;
       }
     }
@@ -3558,16 +3595,33 @@ static bool ContainsInsertOp(const ASTGqlOperator* op) {
 absl::Status GraphTableQueryResolver::ValidateGqlLinearQueryListDml(
     const ASTGqlOperatorList& gql_ops_list,
     const GqlQueryContext& context) const {
-  if (context.is_nested || !resolver_->language().LanguageFeatureEnabled(
-                               FEATURE_SQL_GRAPH_TERMINAL_INSERT)) {
+  if (context.is_nested) {
+    return absl::OkStatus();
+  }
+  const bool insert_enabled = resolver_->language().LanguageFeatureEnabled(
+      FEATURE_SQL_GRAPH_TERMINAL_INSERT);
+  const bool update_enabled = resolver_->language().LanguageFeatureEnabled(
+      FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE);
+  if (!insert_enabled && !update_enabled) {
     return absl::OkStatus();
   }
   const int64_t num_ops = gql_ops_list.operators().size();
   for (int i = 0; i < num_ops - 1; ++i) {
-    if (ContainsInsertOp(gql_ops_list.operators(i))) {
+    if (insert_enabled &&
+        ContainsGqlOpOfKind(gql_ops_list.operators(i), AST_GQL_INSERT)) {
       return MakeSqlErrorAt(gql_ops_list.operators(i + 1))
              << "INSERT cannot be followed by NEXT and can only have an "
                 "immediate RETURN as the last statement in a graph query";
+    }
+    if (update_enabled &&
+        ContainsGqlOpOfKind(gql_ops_list.operators(i), AST_GQL_SET)) {
+      return MakeSqlErrorAt(gql_ops_list.operators(i + 1))
+             << "SET cannot be followed by NEXT in a graph query";
+    }
+    if (update_enabled &&
+        ContainsGqlOpOfKind(gql_ops_list.operators(i), AST_GQL_REMOVE)) {
+      return MakeSqlErrorAt(gql_ops_list.operators(i + 1))
+             << "REMOVE cannot be followed by NEXT in a graph query";
     }
   }
   return absl::OkStatus();
@@ -3785,7 +3839,9 @@ GraphTableQueryResolver::ResolveGqlOperatorList(
               correlated_name_list);
   }
 
-  if (gql_ops.back()->node_kind() == AST_GQL_INSERT) {
+  if (gql_ops.back()->node_kind() == AST_GQL_INSERT ||
+      gql_ops.back()->node_kind() == AST_GQL_SET ||
+      gql_ops.back()->node_kind() == AST_GQL_REMOVE) {
     GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedFinishScan> finish_scan,
                      ResolvedFinishScanBuilder()
                          .set_column_list({})

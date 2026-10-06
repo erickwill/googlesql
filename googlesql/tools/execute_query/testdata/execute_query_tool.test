@@ -4596,7 +4596,7 @@ QueryStmt
 ALTERNATION GROUP: unanalyze
 --
 SELECT
-  NEW MAP < STRING, INT64 > { VALUE { GRAPH aml RETURN "a" AS a_2}: 1 } AS a_1
+  NEW MAP < STRING, INT64 > { (VALUE {GRAPH aml RETURN "a" AS a_2 }): 1 } AS a_1
 \
 
 ==

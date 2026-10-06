@@ -120,6 +120,17 @@ FunctionArgumentTypeOptions::FunctionArgumentTypeOptions(
                      .extra_relation_input_columns_allowed =
                          extra_relation_input_columns_allowed}) {}
 
+FunctionArgumentType FunctionArgumentType::RelationWithSchema(
+    const TVFRelation& relation_input_schema,
+    bool extra_relation_input_columns_allowed,
+    FunctionArgumentTypeOptions options) {
+  options.set_relation_input_schema(
+      std::make_shared<TVFRelation>(relation_input_schema));
+  options.set_extra_relation_input_columns_allowed(
+      extra_relation_input_columns_allowed);
+  return FunctionArgumentType(ARG_KIND_RELATION, options);
+}
+
 absl::StatusOr<std::string>
 FunctionSignatureOptions::CheckFunctionSignatureConstraints(
     const FunctionSignature& concrete_signature,
@@ -266,13 +277,16 @@ absl::Status FunctionArgumentTypeOptions::Deserialize(
     options->set_extra_relation_input_columns_allowed(
         options_proto.extra_relation_input_columns_allowed());
   }
+  if (options_proto.has_supports_order_by()) {
+    options->set_supports_order_by(options_proto.supports_order_by());
+  }
   if (options_proto.has_relation_input_schema()) {
     GOOGLESQL_ASSIGN_OR_RETURN(
         TVFRelation relation,
         TVFRelation::Deserialize(options_proto.relation_input_schema(),
                                  type_deserializer));
-    *options = FunctionArgumentTypeOptions(
-        relation, options->extra_relation_input_columns_allowed());
+    options->set_relation_input_schema(
+        std::make_shared<TVFRelation>(std::move(relation)));
   }
   if (options_proto.has_argument_name()) {
     NamedArgumentKind named_argument_kind = kPositionalOrNamed;
@@ -466,6 +480,9 @@ absl::Status FunctionArgumentTypeOptions::Serialize(
   }
   options_proto->set_extra_relation_input_columns_allowed(
       extra_relation_input_columns_allowed());
+  if (supports_order_by()) {
+    options_proto->set_supports_order_by(supports_order_by());
+  }
   if (has_relation_input_schema()) {
     GOOGLESQL_RETURN_IF_ERROR(relation_input_schema().Serialize(
         file_descriptor_set_map,
@@ -536,23 +553,30 @@ absl::Status FunctionArgumentType::Serialize(
 FunctionArgumentType FunctionArgumentType::Lambda(
     std::vector<FunctionArgumentType> lambda_argument_types,
     FunctionArgumentType lambda_body_type,
-    FunctionArgumentTypeOptions options) {
+    std::shared_ptr<const FunctionArgumentTypeOptions> options) {
   // For now, we don't have the use cases of non REQUIRED values.
-  FunctionArgumentType arg_type =
-      FunctionArgumentType(ARG_KIND_LAMBDA, options);
-
+  FunctionArgumentType arg_type = FunctionArgumentType(
+      /*type=*/nullptr, std::move(options), /*type_modifiers=*/std::nullopt,
+      /*num_occurrences=*/1, ARG_KIND_LAMBDA);
   arg_type.lambda_ = std::make_shared<ArgumentTypeLambda>(
       std::move(lambda_argument_types), std::move(lambda_body_type));
-  arg_type.num_occurrences_ = 1;
-  arg_type.type_ = nullptr;
   return arg_type;
+}
+
+FunctionArgumentType FunctionArgumentType::Lambda(
+    std::vector<FunctionArgumentType> lambda_argument_types,
+    FunctionArgumentType lambda_body_type,
+    FunctionArgumentTypeOptions options) {
+  return Lambda(
+      std::move(lambda_argument_types), std::move(lambda_body_type),
+      std::make_shared<FunctionArgumentTypeOptions>(std::move(options)));
 }
 
 FunctionArgumentType FunctionArgumentType::Lambda(
     std::vector<FunctionArgumentType> lambda_argument_types,
     FunctionArgumentType lambda_body_type) {
   return Lambda(std::move(lambda_argument_types), std::move(lambda_body_type),
-                FunctionArgumentTypeOptions());
+                SimpleOptions(REQUIRED));
 }
 
 // static
@@ -742,61 +766,61 @@ FunctionArgumentType::SimpleOptions(ArgumentCardinality cardinality) {
 }
 
 FunctionArgumentType::FunctionArgumentType(
-    SignatureArgumentKind kind, const Type* type,
+    const Type* type,
     std::shared_ptr<const FunctionArgumentTypeOptions> options,
-    int num_occurrences, std::optional<TypeModifiers> type_modifiers)
-    : kind_(kind),
-      num_occurrences_(num_occurrences),
-      type_(type),
+    std::optional<TypeModifiers> type_modifiers, int num_occurrences,
+    SignatureArgumentKind kind)
+    : type_(type),
       options_(std::move(options)),
-      type_modifiers_(std::move(type_modifiers)) {
+      type_modifiers_(std::move(type_modifiers)),
+      num_occurrences_(num_occurrences),
+      kind_(kind) {
   ABSL_DCHECK_EQ(kind == ARG_KIND_EXPR_FIXED, type != nullptr);
 }
 
 FunctionArgumentType::FunctionArgumentType(SignatureArgumentKind kind,
                                            ArgumentCardinality cardinality,
                                            int num_occurrences)
-    : FunctionArgumentType(kind, /*type=*/nullptr, SimpleOptions(cardinality),
-                           num_occurrences, std::nullopt) {}
+    : FunctionArgumentType(/*type=*/nullptr, SimpleOptions(cardinality),
+                           std::nullopt, num_occurrences, kind) {}
 
 FunctionArgumentType::FunctionArgumentType(
     SignatureArgumentKind kind, FunctionArgumentTypeOptions options,
     int num_occurrences, std::optional<TypeModifiers> type_modifiers)
     : FunctionArgumentType(
-          kind, /*type=*/nullptr,
+          /*type=*/nullptr,
           std::make_shared<FunctionArgumentTypeOptions>(std::move(options)),
-          num_occurrences, std::move(type_modifiers)) {}
+          std::move(type_modifiers), num_occurrences, kind) {}
 
 FunctionArgumentType::FunctionArgumentType(SignatureArgumentKind kind,
                                            int num_occurrences)
-    : FunctionArgumentType(kind, /*type=*/nullptr, SimpleOptions(),
-                           num_occurrences, std::nullopt) {}
+    : FunctionArgumentType(/*type=*/nullptr, SimpleOptions(), std::nullopt,
+                           num_occurrences, kind) {}
 
 FunctionArgumentType::FunctionArgumentType(const Type* type,
                                            ArgumentCardinality cardinality,
                                            int num_occurrences)
-    : FunctionArgumentType(ARG_KIND_EXPR_FIXED, type,
-                           SimpleOptions(cardinality), num_occurrences,
-                           TypeModifiers()) {}
+    : FunctionArgumentType(type, SimpleOptions(cardinality), TypeModifiers(),
+                           num_occurrences, ARG_KIND_EXPR_FIXED) {}
 
 FunctionArgumentType::FunctionArgumentType(
     const Type* type, FunctionArgumentTypeOptions options, int num_occurrences,
     std::optional<TypeModifiers> type_modifiers)
     : FunctionArgumentType(
-          ARG_KIND_EXPR_FIXED, type,
+          type,
           std::make_shared<FunctionArgumentTypeOptions>(std::move(options)),
-          num_occurrences, std::move(type_modifiers)) {}
+          std::move(type_modifiers), num_occurrences, ARG_KIND_EXPR_FIXED) {}
 
 FunctionArgumentType::FunctionArgumentType(const Type* type,
                                            int num_occurrences)
-    : FunctionArgumentType(ARG_KIND_EXPR_FIXED, type, SimpleOptions(),
-                           num_occurrences, TypeModifiers()) {}
+    : FunctionArgumentType(type, SimpleOptions(), TypeModifiers(),
+                           num_occurrences, ARG_KIND_EXPR_FIXED) {}
 
 FunctionArgumentType::FunctionArgumentType(const Type* type,
                                            int num_occurrences,
                                            SignatureArgumentKind original_kind)
-    : FunctionArgumentType(ARG_KIND_EXPR_FIXED, type, SimpleOptions(),
-                           num_occurrences, TypeModifiers()) {
+    : FunctionArgumentType(type, SimpleOptions(), TypeModifiers(),
+                           num_occurrences, ARG_KIND_EXPR_FIXED) {
   ABSL_DCHECK(IsConcrete());
   original_kind_ = original_kind;
 }
@@ -1023,6 +1047,13 @@ absl::Status FunctionArgumentType::IsValid(ProductMode product_mode) const {
     for (const auto& column : relation.columns()) {
       GOOGLESQL_RETURN_IF_ERROR(column.IsValid(PRODUCT_EXTERNAL));
     }
+  }
+
+  if (options_->supports_order_by() && !IsRelation()) {
+    return MakeSqlError()
+           << "Option supports_order_by can only be set on relation "
+              "arguments: "
+           << DebugString();
   }
 
   return absl::OkStatus();

@@ -1494,3 +1494,161 @@ SELECT SAFE.ARRAY_TRANSFORM([1,2,3], e -> e>0);
 ERROR: Function calls with SAFE are not supported [at 1:8]
 SELECT SAFE.ARRAY_TRANSFORM([1,2,3], e -> e>0);
        ^
+==
+
+# Passing a function-typed parameter to ARRAY_TRANSFORM (with and without offset).
+[language_features=NONE,+INLINE_LAMBDA_ARGUMENT,+UDF_LAMBDA_ARGUMENTS]
+CREATE FUNCTION TransformWithParam(arr ARRAY<INT64>, f FUNCTION<{{INT64|(INT64, INT64)}} -> BOOL>)
+AS (ARRAY_TRANSFORM(arr, FUNCTION f));
+--
+ALTERNATION GROUP: INT64
+
+--
+CreateFunctionStmt
++-name_path=TransformWithParam
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, f]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> f) -> ARRAY<BOOL>
++-language="SQL"
++-code="ARRAY_TRANSFORM(arr, FUNCTION f)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:array_transform(ARRAY<INT64> array_to_transform, FUNCTION<INT64->BOOL> transformation) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:f, signature=(INT64) -> BOOL)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=TransformWithParam
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, f]
++-signature=(ARRAY<INT64> arr, FUNCTION<INT64->BOOL> f) -> ARRAY<BOOL>
++-language="SQL"
++-code="ARRAY_TRANSFORM(arr, FUNCTION f)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=ARRAY<BOOL>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$expr_subquery.$col1#6]
+        +-expr_list=
+        | +-$col1#6 :=
+        |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<BOOL>, ARRAY<BOOL>) -> ARRAY<BOOL>)
+        |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<INT64>) -> BOOL)
+        |     | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2)
+        |     +-Literal(type=ARRAY<BOOL>, value=NULL)
+        |     +-SubqueryExpr
+        |       +-type=ARRAY<BOOL>
+        |       +-subquery_type=ARRAY
+        |       +-parameter_list=
+        |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2)
+        |       +-subquery=
+        |         +-OrderByScan
+        |           +-column_list=[$expr_subquery.$col1#5]
+        |           +-is_ordered=TRUE
+        |           +-input_scan=
+        |           | +-ProjectScan
+        |           |   +-column_list=[$array.element#3, $array_offset.off#4, $expr_subquery.$col1#5]
+        |           |   +-expr_list=
+        |           |   | +-$col1#5 :=
+        |           |   |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> BOOL)
+        |           |   |     +-ColumnRef(type=INT64, column=$array.element#3)
+        |           |   +-input_scan=
+        |           |     +-ArrayScan
+        |           |       +-column_list=[$array.element#3, $array_offset.off#4]
+        |           |       +-array_expr_list=
+        |           |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#2, is_correlated=TRUE)
+        |           |       +-element_column_list=[$array.element#3]
+        |           |       +-array_offset_column=
+        |           |         +-ColumnHolder(column=$array_offset.off#4)
+        |           +-order_by_item_list=
+        |             +-OrderByItem
+        |               +-column_ref=
+        |                 +-ColumnRef(type=INT64, column=$array_offset.off#4)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$subquery1.array_to_transform#2]
+            +-expr_list=
+            | +-array_to_transform#2 := ArgumentRef(type=ARRAY<INT64>, name="arr")
+            +-input_scan=
+              +-SingleRowScan
+--
+ALTERNATION GROUP: (INT64, INT64)
+--
+CreateFunctionStmt
++-name_path=TransformWithParam
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, f]
++-signature=(ARRAY<INT64> arr, FUNCTION<(INT64, INT64)->BOOL> f) -> ARRAY<BOOL>
++-language="SQL"
++-code="ARRAY_TRANSFORM(arr, FUNCTION f)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:array_transform(ARRAY<INT64> array_to_transform, FUNCTION<(INT64, INT64)->BOOL> transformation) -> ARRAY<BOOL>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=ARRAY<INT64>, name="arr")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:f, signature=(INT64, INT64) -> BOOL)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=TransformWithParam
++-return_type=ARRAY<BOOL>
++-argument_name_list=[arr, f]
++-signature=(ARRAY<INT64> arr, FUNCTION<(INT64, INT64)->BOOL> f) -> ARRAY<BOOL>
++-language="SQL"
++-code="ARRAY_TRANSFORM(arr, FUNCTION f)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=ARRAY<BOOL>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$expr_subquery.$col1#7]
+        +-expr_list=
+        | +-$col1#7 :=
+        |   +-FunctionCall(GoogleSQL:if(BOOL, ARRAY<BOOL>, ARRAY<BOOL>) -> ARRAY<BOOL>)
+        |     +-FunctionCall(GoogleSQL:$is_null(ARRAY<INT64>) -> BOOL)
+        |     | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3)
+        |     +-Literal(type=ARRAY<BOOL>, value=NULL)
+        |     +-SubqueryExpr
+        |       +-type=ARRAY<BOOL>
+        |       +-subquery_type=ARRAY
+        |       +-parameter_list=
+        |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3)
+        |       +-subquery=
+        |         +-OrderByScan
+        |           +-column_list=[$expr_subquery.$col1#6]
+        |           +-is_ordered=TRUE
+        |           +-input_scan=
+        |           | +-ProjectScan
+        |           |   +-column_list=[$array.element#4, $array_offset.off#5, $expr_subquery.$col1#6]
+        |           |   +-expr_list=
+        |           |   | +-$col1#6 :=
+        |           |   |   +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64, INT64) -> BOOL)
+        |           |   |     +-ColumnRef(type=INT64, column=$array.element#4)
+        |           |   |     +-ColumnRef(type=INT64, column=$array_offset.off#5)
+        |           |   +-input_scan=
+        |           |     +-ArrayScan
+        |           |       +-column_list=[$array.element#4, $array_offset.off#5]
+        |           |       +-array_expr_list=
+        |           |       | +-ColumnRef(type=ARRAY<INT64>, column=$subquery1.array_to_transform#3, is_correlated=TRUE)
+        |           |       +-element_column_list=[$array.element#4]
+        |           |       +-array_offset_column=
+        |           |         +-ColumnHolder(column=$array_offset.off#5)
+        |           +-order_by_item_list=
+        |             +-OrderByItem
+        |               +-column_ref=
+        |                 +-ColumnRef(type=INT64, column=$array_offset.off#5)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=[$subquery1.array_to_transform#3]
+            +-expr_list=
+            | +-array_to_transform#3 := ArgumentRef(type=ARRAY<INT64>, name="arr")
+            +-input_scan=
+              +-SingleRowScan

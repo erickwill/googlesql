@@ -33,6 +33,7 @@
 #include "googlesql/base/varsetter.h"
 #include "googlesql/analyzer/expr_matching_helpers.h"
 #include "googlesql/analyzer/filter_fields_path_validator.h"
+#include "googlesql/common/constant_utils.h"
 #include "googlesql/common/graph_element_utils.h"
 #include "googlesql/common/measure_utils.h"
 #include "googlesql/common/thread_stack.h"
@@ -776,7 +777,7 @@ absl::Status Validator::ValidateResolvedExpr(
 
   // This will fail if more child types are added. Add them to the switch below
   // before updating this.
-  static_assert(ResolvedExpr::NUM_DESCENDANT_LEAF_TYPES == 34,
+  static_assert(ResolvedExpr::NUM_DESCENDANT_LEAF_TYPES == 36,
                 "Missing case in switch on ResolvedExpr descendants");
 
   // Do not add new checks inline here because they increase stack space used in
@@ -889,6 +890,10 @@ absl::Status Validator::ValidateResolvedExpr(
       return ValidateResolvedGetJsonFieldExpr(
           visible_columns, visible_parameters,
           expr->GetAs<ResolvedGetJsonField>());
+    case RESOLVED_GET_VARIANT_FIELD:
+      return ValidateResolvedGetVariantFieldExpr(
+          visible_columns, visible_parameters,
+          expr->GetAs<ResolvedGetVariantField>());
     case RESOLVED_GET_ROW_FIELD:
       return ValidateResolvedGetRowFieldExpr(
           visible_columns, visible_parameters,
@@ -939,6 +944,10 @@ absl::Status Validator::ValidateResolvedExpr(
       return ValidateResolvedUpdateConstructor(
           visible_columns, visible_parameters,
           expr->GetAs<ResolvedUpdateConstructor>());
+    case RESOLVED_MAKE_COLUMN_LIST_SPEC:
+      return ValidateResolvedMakeColumnListSpec(
+          visible_columns, visible_parameters,
+          expr->GetAs<ResolvedMakeColumnListSpec>());
     default:
       return ::googlesql_base::InternalErrorBuilder()
              << "Unhandled node kind: " << expr->node_kind_string()
@@ -1557,6 +1566,22 @@ absl::Status Validator::ValidateResolvedGetJsonFieldExpr(
                                        get_json_field->expr()));
   VALIDATOR_RET_CHECK(get_json_field->expr()->type()->IsJson());
   VALIDATOR_RET_CHECK(!get_json_field->field_name().empty());
+  return absl::OkStatus();
+}
+
+absl::Status Validator::ValidateResolvedGetVariantFieldExpr(
+    const std::set<ResolvedColumn>& visible_columns,
+    const std::set<ResolvedColumn>& visible_parameters,
+    const ResolvedGetVariantField* get_variant_field) {
+  PushErrorContext push(this, get_variant_field);
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(visible_columns, visible_parameters,
+                                       get_variant_field->expr()));
+  VALIDATOR_RET_CHECK(get_variant_field->expr()->type()->IsVariant());
+  VALIDATOR_RET_CHECK(get_variant_field->type()->IsVariant());
+  // ResolvedGetVariantField represents dot-notation field access (v.field),
+  // which requires a non-empty SQL identifier (matching ResolvedGetJsonField).
+  // Empty keys in Variant objects are queried via subscript syntax (v[""]).
+  VALIDATOR_RET_CHECK(!get_variant_field->field_name().empty());
   return absl::OkStatus();
 }
 
@@ -4092,7 +4117,7 @@ absl::Status Validator::ValidateResolvedTVFScan(
           VALIDATOR_RET_CHECK(resolved_arg->model() != nullptr);
           break;
         case ARG_KIND_CONNECTION:
-          VALIDATOR_RET_CHECK(resolved_arg->connection() != nullptr);
+          VALIDATOR_RET_CHECK(resolved_arg->connection_list() != nullptr);
           break;
         case ARG_KIND_DESCRIPTOR:
           VALIDATOR_RET_CHECK(resolved_arg->descriptor_arg() != nullptr);
@@ -5096,6 +5121,7 @@ absl::Status Validator::ValidateResolvedCreateExternalSchemaStmt(
   RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
   PushErrorContext push(this, stmt);
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return absl::OkStatus();
 }
 
@@ -5300,6 +5326,8 @@ absl::Status Validator::ValidateResolvedCreateTableStmtBase(
   if (stmt->collation_name() != nullptr) {
     GOOGLESQL_RETURN_IF_ERROR(ValidateCollateExpr(stmt->collation_name()));
   }
+
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
 
   return absl::OkStatus();
 }
@@ -5527,7 +5555,7 @@ absl::Status Validator::ValidateResolvedCreateModelStmt(
     }
   } else {
     // Local model.
-    VALIDATOR_RET_CHECK_EQ(stmt->connection(), nullptr);
+    VALIDATOR_RET_CHECK_EQ(stmt->connection_list(), nullptr);
 
     if (!enable_remote_model) {
       // If aliased query list is not allowed, then as select clause must
@@ -5638,6 +5666,7 @@ absl::Status Validator::ValidateResolvedCreateModelStmt(
   }
 
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return absl::OkStatus();
 }
 
@@ -5898,7 +5927,7 @@ absl::Status Validator::ValidateResolvedCreateFunctionStmt(
     VALIDATOR_RET_CHECK(stmt->code().empty());
   }
 
-  if (stmt->connection() != nullptr) {
+  if (stmt->connection_list() != nullptr) {
     VALIDATOR_RET_CHECK(
         stmt->is_remote() ||
         (language_options_.LanguageFeatureEnabled(
@@ -5906,6 +5935,7 @@ absl::Status Validator::ValidateResolvedCreateFunctionStmt(
          !stmt->language().empty()));
   }
 
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
   return absl::OkStatus();
 }
@@ -5986,13 +6016,14 @@ absl::Status Validator::ValidateResolvedCreateTableFunctionStmt(
     GOOGLESQL_RET_CHECK(stmt->output_column_list().empty());
   }
 
-  if (stmt->connection() != nullptr) {
+  if (stmt->connection_list() != nullptr) {
     VALIDATOR_RET_CHECK(language_options_.LanguageFeatureEnabled(
         FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION))
         << "WITH CONNECTION clause is not supported";
     VALIDATOR_RET_CHECK(!stmt->language().empty());
   }
 
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
   if (stmt->signature().IsTemplated()) {
     VALIDATOR_RET_CHECK(stmt->output_column_list().empty());
@@ -6023,12 +6054,13 @@ absl::Status Validator::ValidateResolvedCreateProcedureStmt(
       VALIDATOR_RET_CHECK(!stmt->language().empty());
     }
   } else {
-    VALIDATOR_RET_CHECK(stmt->connection() == nullptr);
+    VALIDATOR_RET_CHECK(stmt->connection_list() == nullptr);
     VALIDATOR_RET_CHECK(stmt->language().empty());
     VALIDATOR_RET_CHECK(stmt->code().empty());
     VALIDATOR_RET_CHECK(!stmt->procedure_body().empty());
   }
 
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return absl::OkStatus();
 }
 
@@ -6136,6 +6168,7 @@ absl::Status Validator::ValidateResolvedExportDataStmt(
                                                    stmt->output_column_list(),
                                                    stmt->is_value_table()));
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return absl::OkStatus();
 }
 
@@ -6144,6 +6177,7 @@ absl::Status Validator::ValidateResolvedExportModelStmt(
   RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
   PushErrorContext push(this, stmt);
   GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return absl::OkStatus();
 }
 
@@ -6154,7 +6188,9 @@ absl::Status Validator::ValidateResolvedExportMetadataStmt(
   VALIDATOR_RET_CHECK(!stmt->name_path().empty());
   VALIDATOR_RET_CHECK(absl::AsciiStrToLower(stmt->schema_object_kind()) ==
                       "table");
-  return ValidateOptionsList(stmt->option_list());
+  GOOGLESQL_RETURN_IF_ERROR(ValidateOptionsList(stmt->option_list()));
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
+  return absl::OkStatus();
 }
 
 absl::Status Validator::ValidateResolvedCallStmt(const ResolvedCallStmt* stmt) {
@@ -6684,6 +6720,10 @@ absl::Status Validator::ValidateResolvedScan(
     case RESOLVED_GRAPH_INSERT_SCAN:
       scan_subtype_status = ValidateResolvedGraphInsertScan(
           scan->GetAs<ResolvedGraphInsertScan>(), visible_parameters);
+      break;
+    case RESOLVED_GRAPH_UPDATE_SCAN:
+      scan_subtype_status = ValidateResolvedGraphUpdateScan(
+          scan->GetAs<ResolvedGraphUpdateScan>(), visible_parameters);
       break;
     case RESOLVED_FINISH_SCAN:
       scan_subtype_status = ValidateResolvedFinishScan(
@@ -7409,6 +7449,9 @@ absl::Status Validator::CheckExprIsPath(const ResolvedExpr* expr,
                              ref);
     case RESOLVED_GET_JSON_FIELD:
       return CheckExprIsPath(expr->GetAs<ResolvedGetJsonField>()->expr(), ref);
+    case RESOLVED_GET_VARIANT_FIELD:
+      return CheckExprIsPath(expr->GetAs<ResolvedGetVariantField>()->expr(),
+                             ref);
     default:
       VALIDATOR_RET_CHECK_FAIL()
           << "Expression is not a path: " << expr->node_kind_string();
@@ -7993,9 +8036,10 @@ absl::Status Validator::ValidateResolvedFunctionArgument(
     ++fields_set;
     resolved_arg->model()->model();  // Mark field as visited.
   }
-  if (resolved_arg->connection() != nullptr) {
+  if (resolved_arg->connection_list() != nullptr) {
     ++fields_set;
-    resolved_arg->connection()->connection();  // Mark field as visited.
+    GOOGLESQL_RETURN_IF_ERROR(
+        ValidateResolvedConnectionList(resolved_arg->connection_list()));
   }
   if (resolved_arg->sequence() != nullptr) {
     ++fields_set;
@@ -8041,8 +8085,45 @@ absl::Status Validator::ValidateResolvedFunctionArgument(
              "argument_column_list: "
           << argument_column.DebugString();
     }
+
+    std::set<ResolvedColumn> scan_visible_columns;
+    if (!resolved_arg->scan()->Is<ResolvedUnsetArgumentScan>()) {
+      GOOGLESQL_RETURN_IF_ERROR(AddColumnList(resolved_arg->scan()->column_list(),
+                                    &scan_visible_columns));
+    }
+    if (!resolved_arg->partition_by_list().empty() ||
+        !resolved_arg->order_by_list().empty()) {
+      VALIDATOR_RET_CHECK(language_options_.LanguageFeatureEnabled(
+          FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER));
+    }
+    for (const auto& partition_by : resolved_arg->partition_by_list()) {
+      std::string no_partitioning_type;
+      if (!partition_by->type()->SupportsPartitioning(language_options_,
+                                                      &no_partitioning_type)) {
+        return InternalErrorBuilder()
+               << "Type of PARTITIONING expressions " << no_partitioning_type
+               << " does not support partitioning:\n"
+               << partition_by->DebugString();
+      }
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(
+          scan_visible_columns, visible_parameters, partition_by.get()));
+    }
+    for (const auto& order_by : resolved_arg->order_by_list()) {
+      if (!order_by->column_ref()->type()->SupportsOrdering(
+              language_options_, /*type_description=*/nullptr)) {
+        return InternalErrorBuilder()
+               << "Type of ORDERING expressions "
+               << order_by->column_ref()->type()->DebugString()
+               << " does not support ordering:\n"
+               << order_by->column_ref()->DebugString();
+      }
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedOrderByItem(
+          scan_visible_columns, visible_parameters, order_by.get()));
+    }
   } else {
     VALIDATOR_RET_CHECK_EQ(0, resolved_arg->argument_column_list_size());
+    VALIDATOR_RET_CHECK_EQ(0, resolved_arg->partition_by_list_size());
+    VALIDATOR_RET_CHECK_EQ(0, resolved_arg->order_by_list_size());
   }
   if (resolved_arg->inline_lambda() != nullptr) {
     ++fields_set;
@@ -9522,6 +9603,7 @@ absl::Status Validator::ValidateResolvedAuxLoadDataStmt(
     GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(
         visible_columns, /*visible_parameters=*/{}, cluster_by_expr.get()));
   }
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionList(stmt->connection_list()));
   return ValidateOptionsList(stmt->from_files_option_list());
 }
 
@@ -9952,30 +10034,37 @@ absl::Status Validator::ValidateResolvedGraphDynamicPropertiesSpecification(
   return absl::OkStatus();
 }
 
-absl::Status Validator::ValidateGraphReturnOperator(const ResolvedScan* scan) {
+absl::Status Validator::ValidateLastGraphLinearOperator(
+    const ResolvedScan* scan) {
   VALIDATOR_RET_CHECK_NE(scan, nullptr);
 
   RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
   PushErrorContext push(this, scan);
 
+  // Terminal DML case.
+  if (scan->Is<ResolvedFinishScan>()) {
+    const ResolvedScan* input_scan =
+        scan->GetAs<ResolvedFinishScan>()->input_scan();
+    VALIDATOR_RET_CHECK_NE(input_scan, nullptr);
+    VALIDATOR_RET_CHECK(input_scan->Is<ResolvedGraphRefScan>());
+    return absl::OkStatus();
+  }
+
+  // RETURN-specific case.
   const ResolvedScan* curr_scan = scan;
   VALIDATOR_RET_CHECK(curr_scan->Is<ResolvedProjectScan>() ||
                       curr_scan->Is<ResolvedAggregateScan>() ||
                       curr_scan->Is<ResolvedOrderByScan>() ||
-                      curr_scan->Is<ResolvedLimitOffsetScan>() ||
-                      curr_scan->Is<ResolvedFinishScan>());
+                      curr_scan->Is<ResolvedLimitOffsetScan>());
   // Check that the resolved RETURN consists of nested ResolvedAggregateScan
   // and ResolvedProjectScan, the innermost scan should contain an
   // input scan that is either a GraphRefScan or SingleRowScan.
   while (curr_scan->Is<ResolvedAggregateScan>() ||
-         curr_scan->Is<ResolvedProjectScan>() ||
-         curr_scan->Is<ResolvedFinishScan>()) {
+         curr_scan->Is<ResolvedProjectScan>()) {
     if (curr_scan->Is<ResolvedAggregateScan>()) {
       curr_scan = curr_scan->GetAs<ResolvedAggregateScan>()->input_scan();
     } else if (curr_scan->Is<ResolvedProjectScan>()) {
       curr_scan = curr_scan->GetAs<ResolvedProjectScan>()->input_scan();
-    } else if (curr_scan->Is<ResolvedFinishScan>()) {
-      curr_scan = curr_scan->GetAs<ResolvedFinishScan>()->input_scan();
     }
   }
   VALIDATOR_RET_CHECK_NE(curr_scan, nullptr);
@@ -9983,8 +10072,7 @@ absl::Status Validator::ValidateGraphReturnOperator(const ResolvedScan* scan) {
                       curr_scan->Is<ResolvedGraphRefScan>() ||
                       curr_scan->Is<ResolvedOrderByScan>() ||
                       curr_scan->Is<ResolvedLimitOffsetScan>() ||
-                      curr_scan->Is<ResolvedAnalyticScan>() ||
-                      curr_scan->Is<ResolvedGraphInsertScan>());
+                      curr_scan->Is<ResolvedAnalyticScan>());
   return absl::OkStatus();
 }
 
@@ -10014,7 +10102,7 @@ absl::Status Validator::ValidateInnerGraphLinearScanStructure(
     // Check that all primitive ops has a non-empty input scan.
     const ResolvedScan* input_scan = nullptr;
     if (i == primitive_ops.size() - 1) {
-      GOOGLESQL_RETURN_IF_ERROR(ValidateGraphReturnOperator(primitive_ops[i].get()));
+      GOOGLESQL_RETURN_IF_ERROR(ValidateLastGraphLinearOperator(primitive_ops[i].get()));
       switch (primitive_ops[i]->node_kind()) {
         case RESOLVED_AGGREGATE_SCAN:
           input_scan =
@@ -10035,6 +10123,12 @@ absl::Status Validator::ValidateInnerGraphLinearScanStructure(
         case RESOLVED_FINISH_SCAN:
           input_scan =
               primitive_ops[i]->GetAs<ResolvedFinishScan>()->input_scan();
+          VALIDATOR_RET_CHECK_GE(i, 1)
+              << "ResolvedFinishScan must be preceded by a DML operation";
+          VALIDATOR_RET_CHECK(
+              primitive_ops[i - 1]->Is<ResolvedGraphInsertScan>() ||
+              primitive_ops[i - 1]->Is<ResolvedGraphUpdateScan>())
+              << "ResolvedFinishScan must be preceded by a DML operation";
           break;
         default:
           VALIDATOR_RET_CHECK_FAIL();
@@ -10100,6 +10194,10 @@ absl::Status Validator::ValidateInnerGraphLinearScanStructure(
           input_scan =
               primitive_ops[i]->GetAs<ResolvedGraphInsertScan>()->input_scan();
           break;
+        case RESOLVED_GRAPH_UPDATE_SCAN:
+          input_scan =
+              primitive_ops[i]->GetAs<ResolvedGraphUpdateScan>()->input_scan();
+          break;
         default:
           VALIDATOR_RET_CHECK_FAIL();
           break;
@@ -10120,15 +10218,24 @@ absl::Status Validator::ValidateTopLevelGraphLinearScanStructure(
   const std::vector<std::unique_ptr<const ResolvedScan>>& composite_queries =
       scan->scan_list();
   VALIDATOR_RET_CHECK(!composite_queries.empty());
-  for (const auto& composite_query : composite_queries) {
+  for (int i = 0; i < composite_queries.size(); ++i) {
+    const auto& composite_query = composite_queries[i];
     VALIDATOR_RET_CHECK(IsGraphCompositeQuery(composite_query.get()));
 
     if (composite_query->Is<ResolvedSetOperationScan>()) {
       GOOGLESQL_RETURN_IF_ERROR(ValidateGraphSetOperationScanStructure(
           composite_query->GetAs<ResolvedSetOperationScan>()));
     } else {
-      GOOGLESQL_RETURN_IF_ERROR(ValidateInnerGraphLinearScanStructure(
-          composite_query->GetAs<ResolvedGraphLinearScan>()));
+      const auto* inner_linear_scan =
+          composite_query->GetAs<ResolvedGraphLinearScan>();
+      GOOGLESQL_RETURN_IF_ERROR(ValidateInnerGraphLinearScanStructure(inner_linear_scan));
+      if (i < composite_queries.size() - 1) {
+        VALIDATOR_RET_CHECK(!inner_linear_scan->scan_list().empty());
+        VALIDATOR_RET_CHECK(
+            !inner_linear_scan->scan_list().back()->Is<ResolvedFinishScan>())
+            << "Non-final linear query in a graph query cannot end with "
+               "ResolvedFinishScan";
+      }
     }
   }
   return absl::OkStatus();
@@ -10173,19 +10280,28 @@ absl::Status Validator::ValidateResolvedGraphDMLPropertyItem(
   RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
   PushErrorContext push(this, node);
   VALIDATOR_RET_CHECK(!node->property_name().empty());
-  VALIDATOR_RET_CHECK_NE(node->property_value(), nullptr);
+
   if (node->property() != nullptr) {
-    VALIDATOR_RET_CHECK(
-        node->property()->Type()->Equals(node->property_value()->type()))
-        << "Property type mismatch for " << node->property_name()
-        << ": expected " << node->property()->Type()->DebugString()
-        << " but found " << node->property_value()->type()->DebugString();
     VALIDATOR_RET_CHECK(
         googlesql_base::CaseEqual(node->property()->Name(), node->property_name()))
         << "Property name mismatch: catalog object says "
         << node->property()->Name() << " but field says "
         << node->property_name();
   }
+
+  // For REMOVE property items, `property_value` is nullptr.
+  if (node->property_value() == nullptr) {
+    return absl::OkStatus();
+  }
+
+  if (node->property() != nullptr) {
+    VALIDATOR_RET_CHECK(
+        node->property()->Type()->Equals(node->property_value()->type()))
+        << "Property type mismatch for " << node->property_name()
+        << ": expected " << node->property()->Type()->DebugString()
+        << " but found " << node->property_value()->type()->DebugString();
+  }
+
   return ValidateResolvedExpr(visible_columns, visible_parameters,
                               node->property_value());
 }
@@ -10368,6 +10484,195 @@ absl::Status Validator::ValidateResolvedGraphInsertScan(
 
   // Validate output columns of the current scan.
   GOOGLESQL_RETURN_IF_ERROR(CheckColumnList(scan, all_available_columns));
+  return absl::OkStatus();
+}
+
+absl::Status Validator::ValidateResolvedGraphUpdateElement(
+    const std::set<ResolvedColumn>& visible_columns,
+    const std::set<ResolvedColumn>& visible_parameters,
+    const ResolvedGraphUpdateElement* node) {
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, node);
+
+  // 1. Validate the target graph element (must be a visible node or edge) and
+  // the newly created output_column.
+  VALIDATOR_RET_CHECK_NE(node->target_element(), nullptr);
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(visible_columns, visible_parameters,
+                                       node->target_element()));
+  VALIDATOR_RET_CHECK(node->target_element()->column().type()->IsGraphElement())
+      << "Target of UPDATE element must be a graph node or edge";
+
+  GOOGLESQL_RETURN_IF_ERROR(CheckUniqueColumnId(node->output_column()));
+  VALIDATOR_RET_CHECK(node->output_column().type()->Equals(
+      node->target_element()->column().type()))
+      << "output_column type must match target_element type";
+
+  // 2. Validate update mode consistency:
+  // - Modes must not be UNSPECIFIED.
+  // - Cannot mix SET/REPLACE with REMOVE.
+  // - Cannot both be NO_UPDATE.
+  VALIDATOR_RET_CHECK_NE(
+      node->property_update_mode(),
+      ResolvedGraphUpdateElement::PROPERTY_UPDATE_MODE_UNSPECIFIED);
+  VALIDATOR_RET_CHECK_NE(
+      node->label_update_mode(),
+      ResolvedGraphUpdateElement::LABEL_UPDATE_MODE_UNSPECIFIED);
+
+  bool has_set =
+      (node->property_update_mode() ==
+       ResolvedGraphUpdateElement::PROPERTY_SET) ||
+      (node->property_update_mode() ==
+       ResolvedGraphUpdateElement::PROPERTY_REPLACE) ||
+      (node->label_update_mode() == ResolvedGraphUpdateElement::LABEL_SET);
+  bool has_remove =
+      (node->property_update_mode() ==
+       ResolvedGraphUpdateElement::PROPERTY_REMOVE) ||
+      (node->label_update_mode() == ResolvedGraphUpdateElement::LABEL_REMOVE);
+  VALIDATOR_RET_CHECK(!(has_set && has_remove))
+      << "UPDATE element cannot specify both SET/REPLACE and REMOVE update "
+         "modes";
+
+  VALIDATOR_RET_CHECK((node->property_update_mode() !=
+                       ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE) ||
+                      (node->label_update_mode() !=
+                       ResolvedGraphUpdateElement::LABEL_NO_UPDATE))
+      << "UPDATE element cannot have NO_UPDATE for both property and label";
+
+  // 3. Validate property updates based on property_update_mode:
+  // - PROPERTY_NO_UPDATE: property_list must be empty.
+  // - PROPERTY_REMOVE: property_value must be null.
+  // - PROPERTY_SET / PROPERTY_REPLACE: property_value must be non-null.
+  if (node->property_update_mode() ==
+      ResolvedGraphUpdateElement::PROPERTY_NO_UPDATE) {
+    VALIDATOR_RET_CHECK(node->property_list().empty())
+        << "property_list must be empty when property_update_mode is "
+           "PROPERTY_NO_UPDATE";
+  } else {
+    if (node->property_update_mode() !=
+        ResolvedGraphUpdateElement::PROPERTY_REPLACE) {
+      VALIDATOR_RET_CHECK(!node->property_list().empty())
+          << "property_list must not be empty when property_update_mode is "
+          << node->property_update_mode();
+    }
+    for (const auto& prop : node->property_list()) {
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedGraphDMLPropertyItem(
+          visible_columns, visible_parameters, prop.get()));
+      if (node->property_update_mode() ==
+          ResolvedGraphUpdateElement::PROPERTY_REMOVE) {
+        VALIDATOR_RET_CHECK(language_options_.LanguageFeatureEnabled(
+            FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE))
+            << "Feature SQL_GRAPH_DYNAMIC_ELEMENT_TYPE is required for REMOVE "
+               "property";
+        VALIDATOR_RET_CHECK_EQ(prop->property(), nullptr)
+            << "Static properties cannot be removed; property() must be null";
+        VALIDATOR_RET_CHECK_EQ(prop->property_value(), nullptr)
+            << "REMOVE property item must not have a value";
+      } else if (node->property_update_mode() ==
+                     ResolvedGraphUpdateElement::PROPERTY_SET ||
+                 node->property_update_mode() ==
+                     ResolvedGraphUpdateElement::PROPERTY_REPLACE) {
+        VALIDATOR_RET_CHECK_NE(prop->property_value(), nullptr)
+            << "SET/REPLACE property item must have a value";
+      } else {
+        VALIDATOR_RET_CHECK_FAIL() << "Unexpected property_update_mode: "
+                                   << node->property_update_mode();
+      }
+    }
+  }
+
+  // 4. Validate label updates based on label_update_mode:
+  // - LABEL_NO_UPDATE: label_list must be empty.
+  // - LABEL_SET / LABEL_REMOVE: delegate to ValidateResolvedGraphUpdateLabel.
+  if (node->label_update_mode() ==
+      ResolvedGraphUpdateElement::LABEL_NO_UPDATE) {
+    VALIDATOR_RET_CHECK(node->label_list().empty())
+        << "label_list must be empty when label_update_mode is LABEL_NO_UPDATE";
+  } else {
+    VALIDATOR_RET_CHECK(!node->label_list().empty())
+        << "label_list must not be empty when label_update_mode is "
+        << node->label_update_mode();
+    for (const auto& label : node->label_list()) {
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedGraphUpdateLabel(
+          label.get(), node->label_update_mode()));
+    }
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status Validator::ValidateResolvedGraphUpdateLabel(
+    const ResolvedGraphLabel* label,
+    ResolvedGraphUpdateElement::LabelUpdateMode mode) {
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, label);
+  VALIDATOR_RET_CHECK_NE(label, nullptr);
+
+  if (mode == ResolvedGraphUpdateElement::LABEL_REMOVE) {
+    VALIDATOR_RET_CHECK(language_options_.LanguageFeatureEnabled(
+        FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE))
+        << "Feature SQL_GRAPH_DYNAMIC_ELEMENT_TYPE is required for REMOVE "
+           "label";
+    VALIDATOR_RET_CHECK_EQ(label->label(), nullptr)
+        << "Static labels cannot be removed; label() must be null";
+    const ResolvedExpr* label_name = label->label_name();
+    VALIDATOR_RET_CHECK_NE(label_name, nullptr)
+        << "label_name must be set for dynamic label removal";
+    GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(
+        /*visible_columns=*/{}, /*visible_parameters=*/{}, label_name));
+    VALIDATOR_RET_CHECK(label_name->Is<ResolvedLiteral>());
+    VALIDATOR_RET_CHECK(label_name->type()->IsString());
+  } else if (mode == ResolvedGraphUpdateElement::LABEL_SET) {
+    const ResolvedExpr* label_name = label->label_name();
+    if (label->label() == nullptr) {
+      VALIDATOR_RET_CHECK_NE(label_name, nullptr)
+          << "label_name must be set for dynamic label";
+    }
+    if (label_name != nullptr) {
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(
+          /*visible_columns=*/{}, /*visible_parameters=*/{}, label_name));
+      VALIDATOR_RET_CHECK(label_name->Is<ResolvedLiteral>());
+      VALIDATOR_RET_CHECK(label_name->type()->IsString());
+      if (label->label() != nullptr) {
+        VALIDATOR_RET_CHECK(googlesql_base::CaseEqual(
+            label_name->GetAs<ResolvedLiteral>()->value().string_value(),
+            label->label()->Name()))
+            << "label_name and label must match case-insensitively";
+      }
+    }
+  } else {
+    VALIDATOR_RET_CHECK_FAIL() << "Unexpected label_update_mode: " << mode;
+  }
+  return absl::OkStatus();
+}
+
+absl::Status Validator::ValidateResolvedGraphUpdateScan(
+    const ResolvedGraphUpdateScan* scan,
+    const std::set<ResolvedColumn>& visible_parameters) {
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, scan);
+  VALIDATOR_RET_CHECK_NE(scan->input_scan(), nullptr);
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedScan(scan->input_scan(), visible_parameters));
+
+  VALIDATOR_RET_CHECK(!scan->update_element_list().empty())
+      << "UPDATE scan must modify at least one element";
+
+  std::set<ResolvedColumn> visible_columns;
+  GOOGLESQL_RETURN_IF_ERROR(
+      AddColumnList(scan->input_scan()->column_list(), &visible_columns));
+
+  std::set<ResolvedColumn> available_output_columns = visible_columns;
+  absl::flat_hash_set<ResolvedColumn> seen_target_columns;
+  for (const auto& elem : scan->update_element_list()) {
+    GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedGraphUpdateElement(
+        visible_columns, visible_parameters, elem.get()));
+    VALIDATOR_RET_CHECK(
+        seen_target_columns.insert(elem->target_element()->column()).second)
+        << "Target element column in update_element_list must be unique: "
+        << elem->target_element()->column().DebugString();
+    available_output_columns.insert(elem->output_column());
+  }
+
+  GOOGLESQL_RETURN_IF_ERROR(CheckColumnList(scan, available_output_columns));
   return absl::OkStatus();
 }
 
@@ -11080,6 +11385,44 @@ absl::Status Validator::ValidateResolvedUpdateConstructor(
   return absl::OkStatus();
 }
 
+absl::Status Validator::ValidateResolvedMakeColumnListSpec(
+    const std::set<ResolvedColumn>& visible_columns,
+    const std::set<ResolvedColumn>& visible_parameters,
+    const ResolvedMakeColumnListSpec* column_list_spec) {
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, column_list_spec);
+  VALIDATOR_RET_CHECK(
+      language_options_.LanguageFeatureEnabled(FEATURE_COLUMN_LIST_SPEC));
+  VALIDATOR_RET_CHECK(column_list_spec->type()->IsColumnListSpec());
+  const ResolvedExpr* column_name_list = column_list_spec->column_name_list();
+  VALIDATOR_RET_CHECK_NE(column_name_list, nullptr);
+  GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedExpr(visible_columns, visible_parameters,
+                                       column_name_list));
+  VALIDATOR_RET_CHECK(IsStringArray(column_name_list->type()));
+  VALIDATOR_RET_CHECK(IsAnalysisConstant(column_name_list));
+
+  std::optional<Value> array_value;
+  if (column_name_list->Is<ResolvedLiteral>()) {
+    array_value = column_name_list->GetAs<ResolvedLiteral>()->value();
+  } else if (column_name_list->Is<ResolvedConstant>()) {
+    const Constant* constant =
+        column_name_list->GetAs<ResolvedConstant>()->constant();
+    if (constant->HasValue()) {
+      GOOGLESQL_ASSIGN_OR_RETURN(array_value, constant->GetValue());
+    }
+  }
+  VALIDATOR_RET_CHECK(array_value.has_value());
+  VALIDATOR_RET_CHECK(!array_value->is_null());
+  for (int i = 0; i < array_value->num_elements(); ++i) {
+    const Value& element = array_value->element(i);
+    VALIDATOR_RET_CHECK(!element.is_null());
+    VALIDATOR_RET_CHECK(element.type()->IsString());
+    VALIDATOR_RET_CHECK(!element.string_value().empty());
+  }
+
+  return absl::OkStatus();
+}
+
 absl::Status Validator::ValidateResolvedCreateSequenceStmt(
     const ResolvedCreateSequenceStmt* stmt) {
   RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
@@ -11106,6 +11449,43 @@ absl::Status Validator::ValidateTypeParametersOfResolvedType(
   }
   return type->ValidateResolvedTypeParameters(type_parameters,
                                               language_options_.product_mode());
+}
+
+absl::Status Validator::ValidateResolvedConnectionKeyValuePair(
+    const ResolvedConnectionKeyValuePair* kv_pair) {
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, kv_pair);
+  VALIDATOR_RET_CHECK(!kv_pair->key().empty());
+  VALIDATOR_RET_CHECK(kv_pair->connection() != nullptr);
+  kv_pair->connection()->connection();  // Mark field as visited.
+  return absl::OkStatus();
+}
+
+absl::Status Validator::ValidateResolvedConnectionList(
+    const ResolvedConnectionList* connection_list) {
+  if (connection_list == nullptr) {
+    return absl::OkStatus();
+  }
+  RETURN_ERROR_IF_OUT_OF_STACK_SPACE();
+  PushErrorContext push(this, connection_list);
+  VALIDATOR_RET_CHECK(connection_list->connection() != nullptr ||
+                      !connection_list->connection_kv_list().empty())
+      << "At least one of connection or connection_kv_list must be set";
+  VALIDATOR_RET_CHECK(connection_list->connection() == nullptr ||
+                      connection_list->connection_kv_list().empty())
+      << "Both connection and connection_kv_list are set";
+  if (connection_list->connection() != nullptr) {
+    connection_list->connection()->connection();  // Mark field as visited.
+  }
+  if (!connection_list->connection_kv_list().empty()) {
+    VALIDATOR_RET_CHECK(
+        language_options_.LanguageFeatureEnabled(FEATURE_MULTI_CONNECTIONS))
+        << "Multiple connections in CONNECTION clause is not supported";
+    for (const auto& kv_pair : connection_list->connection_kv_list()) {
+      GOOGLESQL_RETURN_IF_ERROR(ValidateResolvedConnectionKeyValuePair(kv_pair.get()));
+    }
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace googlesql

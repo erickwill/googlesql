@@ -179,6 +179,11 @@ absl::StatusOr<ConstnessLevel> GetConstnessLevel(const ResolvedNode* node) {
       return GetConstnessLevel(node->GetAs<ResolvedGetProtoField>()->expr());
     case RESOLVED_GET_JSON_FIELD:
       return GetConstnessLevel(node->GetAs<ResolvedGetJsonField>()->expr());
+    case RESOLVED_GET_VARIANT_FIELD:
+      return GetConstnessLevel(node->GetAs<ResolvedGetVariantField>()->expr());
+    case RESOLVED_MAKE_COLUMN_LIST_SPEC:
+      return GetConstnessLevel(
+          node->GetAs<ResolvedMakeColumnListSpec>()->column_name_list());
 
     case RESOLVED_SUBQUERY_EXPR: {
       const ResolvedSubqueryExpr* subquery_expr =

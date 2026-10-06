@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "googlesql/common/errors.h"
-#include "googlesql/common/string_util.h"
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/options.pb.h"
 #include "googlesql/public/type.pb.h"
@@ -130,7 +129,7 @@ absl::Status DeclarativeType::ValidateResolvedTypeParameters(
       descriptor().type_params_strategy());
 }
 
-std::vector<const Type*> DeclarativeType::ComponentTypes() const { return {}; }
+TypeListView DeclarativeType::ComponentTypes() const { return {}; }
 
 // Returns true if the descriptor allows the given coercion.
 // This helper function is used only for the coercion to/from the backing type,

@@ -25,7 +25,6 @@
 #include <variant>
 #include <vector>
 
-#include "googlesql/base/logging.h"
 #include "googlesql/public/simple_token_list.h"
 #include "googlesql/public/interval_value.h"
 #include "googlesql/public/json_value.h"
@@ -35,11 +34,10 @@
 #include "googlesql/public/value_content.h"
 #include "googlesql/base/case.h"
 #include "absl/container/btree_map.h"
+#include "absl/hash/hash.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "absl/types/variant.h"
 #include "googlesql/base/compact_reference_counted.h"
 
 // This file contains classes that are used to represent values of GoogleSQL
@@ -57,6 +55,7 @@ namespace googlesql {
 class ProtoType;
 class Type;
 class StructType;
+class Value;
 
 struct ValueEqualityCheckOptions;
 
@@ -564,6 +563,36 @@ class ValueContentMeasureRef final
 
  private:
   const std::unique_ptr<ValueContentMeasure> measure_value_content_;
+};
+
+// Represents the internal storage for a VARIANT value.
+// It acts as a reference-counted wrapper around an underlying GoogleSQL Value.
+// This allows VARIANT to hold values of any type dynamically.
+class VariantRefImpl;
+
+class VariantRef {
+ public:
+  virtual ~VariantRef() = default;
+
+  // Increments the reference count.
+  virtual void Ref() const = 0;
+
+  // Decrements the reference count.
+  virtual void Unref() const = 0;
+
+  // Returns the underlying value held by this Variant.
+  virtual const Value& inner_value() const = 0;
+
+  // Returns the physical byte size of this VariantRef, including the size of
+  // the inner value.
+  virtual uint64_t physical_byte_size() const = 0;
+
+  // Compares this VariantRef with another for equivalence.
+  virtual bool Equals(const VariantRef* other,
+                      const ValueEqualityCheckOptions& options) const = 0;
+
+  // Hashes this VariantRef.
+  virtual absl::HashState Hash(absl::HashState state) const = 0;
 };
 
 }  // namespace internal

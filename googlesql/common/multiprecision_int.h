@@ -274,7 +274,7 @@ class FixedUint final {
   explicit FixedUint(const FixedUint<k, n>& src)
       : number_(
             multiprecision_int_impl::Convert<kNumBitsPerWord, kNumWords, k, n>(
-                src.number(), false)) {}
+                src.number(), /*negative=*/false)) {}
   explicit constexpr FixedUint(
       const std::array<Word, kNumWords>& little_endian_number)
       : number_(little_endian_number) {}
@@ -531,7 +531,7 @@ class FixedUint final {
   // write the number into the FixedUint. Returns true iff str is valid.
   // If false is returned, the state of *this is undefined.
   bool ParseFromStringStrict(absl::string_view str) {
-    return !str.empty() && ParseOrAppendDigits(str, false);
+    return !str.empty() && ParseOrAppendDigits(str, /*append=*/false);
   }
   // Equivalent to ParseFromStringStrict(absl::StrCat(<all segments>)),
   // except that no temporary string is created, and first_segment cannot be

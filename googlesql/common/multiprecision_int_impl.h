@@ -629,7 +629,7 @@ inline uint64_t ShortDivModConstant(const std::array<uint64_t, n>& dividend,
     // The first division's quotient is always zero, so we throw it away.
     DivModWordNormalizedConstant<divisor>(
         remainder, ShiftLeftAndGetHighWord(0, dividend.back(), kShiftAmount),
-        nullptr, &remainder);
+        /*quotient=*/nullptr, &remainder);
   }
   for (int i = n - 1; i > 0; --i) {
     DivModWordNormalizedConstant<divisor>(

@@ -1148,8 +1148,27 @@ object to drop.
 
 **Optional Clauses**
 
-+   `IF EXISTS`: If no object exists at `object_path`, the `DROP` statement will
-    have no effect.
++   `IF EXISTS`: If no object exists at `object_path`, the statement has no
+    effect.
+
+    If an object exists at `object_path` but its type doesn't match
+    `object_type`, the statement produces an error. `IF EXISTS` doesn't
+    suppress errors caused by object type mismatches. For example, running
+    `DROP VIEW IF EXISTS books` produces an error if `books` is a table rather
+    than a view.
+
+    To safely drop an object only when its type matches `object_type`, you can
+    verify the object type before you run the `DROP` statement (for example,
+    by querying the `INFORMATION_SCHEMA.TABLES` view in procedural SQL or an
+    application script).
+
+**Example**
+
+Drop a table if it exists:
+
+```googlesql
+DROP TABLE IF EXISTS books;
+```
 
 ## `DROP PROPERTY GRAPH`
 

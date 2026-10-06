@@ -12,6 +12,47 @@
 # When UNPIVOT is used on a single table FROM clause, the behavior is identical
 # for the standard syntax suffix operator and the pipe operator.  Several tests
 # show this by using an alternation {{ | \|> }} that includes a pipe or not.
+[default language_features=MAXIMUM]
+[language_features=NONE,+PIPES{{|,+UNPIVOT}}]
+FROM KeyValue
+{{  \|>|}}
+  UNPIVOT(a for b in (Key))
+--
+ALTERNATION GROUPS:
+      |>
+    <empty>
+--
+ERROR: UNPIVOT is not supported [at 3:3]
+  UNPIVOT(a for b in (Key))
+  ^
+--
+ALTERNATION GROUPS:
+    ,+UNPIVOT,  |>
+    ,+UNPIVOT,
+--
+QueryStmt
++-output_column_list=
+| +-$unpivot.Value#5 AS Value [STRING]
+| +-$unpivot.a#3 AS a [INT64]
+| +-$unpivot.b#4 AS b [STRING]
++-query=
+  +-UnpivotScan
+    +-column_list=$unpivot.[Value#5, a#3, b#4]
+    +-input_scan=
+    | +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+    +-value_column_list=[$unpivot.a#3]
+    +-label_column=$unpivot.b#4
+    +-label_list=
+    | +-Literal(type=STRING, value="Key")
+    +-unpivot_arg_list=
+    | +-UnpivotArg
+    |   +-column_list=
+    |     +-ColumnRef(type=INT64, column=KeyValue.Key#1)
+    +-projected_input_column_list=
+    | +-Value#5 := ColumnRef(type=STRING, column=KeyValue.Value#2)
+    +-include_nulls=FALSE
+==
+
 [default language_features=MAXIMUM,+PIPES,+PIPE_STATIC_DESCRIBE,+UNPIVOT,+TABLE_VALUED_FUNCTIONS]
 # Output with or without an alias is the same, except for
 # whether the range variable appears.
@@ -135,6 +176,107 @@ QueryStmt
         +-include_nulls=FALSE
 ==
 
+# UNPIVOT pipe operator produces same output as UNPIVOT suffix operator.
+# Having an alias doesn't change the output if it is never referenced.
+FROM MultipleColumns
+{{\|>|}} UNPIVOT INCLUDE NULLS((a, b) for c in ((int_a, int_b))){{| AS pt}}
+--
+QueryStmt
++-output_column_list=
+| +-$unpivot.string_a#10 AS string_a [STRING]
+| +-$unpivot.string_b#11 AS string_b [STRING]
+| +-$unpivot.int_c#12 AS int_c [INT64]
+| +-$unpivot.int_d#13 AS int_d [INT64]
+| +-$unpivot.a#7 AS a [INT64]
+| +-$unpivot.b#8 AS b [INT64]
+| +-$unpivot.c#9 AS c [STRING]
++-query=
+  +-UnpivotScan
+    +-column_list=$unpivot.[string_a#10, string_b#11, int_c#12, int_d#13, a#7, b#8, c#9]
+    +-input_scan=
+    | +-TableScan(column_list=MultipleColumns.[int_a#1, string_a#2, int_b#3, string_b#4, int_c#5, int_d#6], table=MultipleColumns, column_index_list=[0, 1, 2, 3, 4, 5])
+    +-value_column_list=$unpivot.[a#7, b#8]
+    +-label_column=$unpivot.c#9
+    +-label_list=
+    | +-Literal(type=STRING, value="int_a_int_b")
+    +-unpivot_arg_list=
+    | +-UnpivotArg
+    |   +-column_list=
+    |     +-ColumnRef(type=INT64, column=MultipleColumns.int_a#1)
+    |     +-ColumnRef(type=INT64, column=MultipleColumns.int_b#3)
+    +-projected_input_column_list=
+    | +-string_a#10 := ColumnRef(type=STRING, column=MultipleColumns.string_a#2)
+    | +-string_b#11 := ColumnRef(type=STRING, column=MultipleColumns.string_b#4)
+    | +-int_c#12 := ColumnRef(type=INT64, column=MultipleColumns.int_c#5)
+    | +-int_d#13 := ColumnRef(type=INT64, column=MultipleColumns.int_d#6)
+    +-include_nulls=TRUE
+==
+
+FROM MultipleColumns
+{{\|>|}} UNPIVOT EXCLUDE NULLS((a, b) for c in ((int_a, int_b)))
+--
+QueryStmt
++-output_column_list=
+| +-$unpivot.string_a#10 AS string_a [STRING]
+| +-$unpivot.string_b#11 AS string_b [STRING]
+| +-$unpivot.int_c#12 AS int_c [INT64]
+| +-$unpivot.int_d#13 AS int_d [INT64]
+| +-$unpivot.a#7 AS a [INT64]
+| +-$unpivot.b#8 AS b [INT64]
+| +-$unpivot.c#9 AS c [STRING]
++-query=
+  +-UnpivotScan
+    +-column_list=$unpivot.[string_a#10, string_b#11, int_c#12, int_d#13, a#7, b#8, c#9]
+    +-input_scan=
+    | +-TableScan(column_list=MultipleColumns.[int_a#1, string_a#2, int_b#3, string_b#4, int_c#5, int_d#6], table=MultipleColumns, column_index_list=[0, 1, 2, 3, 4, 5])
+    +-value_column_list=$unpivot.[a#7, b#8]
+    +-label_column=$unpivot.c#9
+    +-label_list=
+    | +-Literal(type=STRING, value="int_a_int_b")
+    +-unpivot_arg_list=
+    | +-UnpivotArg
+    |   +-column_list=
+    |     +-ColumnRef(type=INT64, column=MultipleColumns.int_a#1)
+    |     +-ColumnRef(type=INT64, column=MultipleColumns.int_b#3)
+    +-projected_input_column_list=
+    | +-string_a#10 := ColumnRef(type=STRING, column=MultipleColumns.string_a#2)
+    | +-string_b#11 := ColumnRef(type=STRING, column=MultipleColumns.string_b#4)
+    | +-int_c#12 := ColumnRef(type=INT64, column=MultipleColumns.int_c#5)
+    | +-int_d#13 := ColumnRef(type=INT64, column=MultipleColumns.int_d#6)
+    +-include_nulls=FALSE
+==
+
+# UNPIVOT on value tables is not allowed.
+FROM {{UNNEST([1,2])|TestExtraValueTable}}
+{{  #|\|>#}} (comment to avoid trailing whitespace)
+  UNPIVOT(a for b in (Key))
+--
+ALTERNATION GROUP: UNNEST([1,2]),  #
+--
+ERROR: UNPIVOT is not allowed with array scans [at 3:3]
+  UNPIVOT(a for b in (Key))
+  ^
+--
+ALTERNATION GROUPS:
+    UNNEST([1,2]),|>#
+    TestExtraValueTable,  #
+    TestExtraValueTable,|>#
+--
+ERROR: UNPIVOT is not allowed on value tables [at 3:3]
+  UNPIVOT(a for b in (Key))
+  ^
+==
+
+# Unpivot with column not present in input source
+FROM KeyValue
+{{  |\|>}}
+  UNPIVOT(a for b in (x))
+--
+ERROR: Unrecognized name: x [at 3:23]
+  UNPIVOT(a for b in (x))
+                      ^
+==
+
 # UNPIVOT on a standard syntax query, feeding output into of a TVF.
 SELECT Key, Value
 FROM KeyValue
@@ -182,6 +324,65 @@ QueryStmt
     |   +-argument_column_list=$unpivot.[Value#7, a#5, b#6]
     +-column_index_list=[0, 1, 2]
     +-function_call_signature=(ANY TABLE) -> ANY TABLE
+==
+
+# Unpivot with multiple output value columns.
+# One label is auto-generated by concatenating column names.
+# One label is explicitly assigned.
+FROM MultipleColumns
+{{|\|>}} UNPIVOT((x,y) for z in ((int_a,int_b),
+                                 (int_c,int_d) as "Label"))
+|> STATIC_DESCRIBE
+--
+QueryStmt
++-output_column_list=
+| +-$unpivot.string_a#10 AS string_a [STRING]
+| +-$unpivot.string_b#11 AS string_b [STRING]
+| +-$unpivot.x#7 AS x [INT64]
+| +-$unpivot.y#8 AS y [INT64]
+| +-$unpivot.z#9 AS z [STRING]
++-query=
+  +-StaticDescribeScan
+    +-column_list=$unpivot.[string_a#10, string_b#11, x#7, y#8, z#9]
+    +-describe_text=
+    |   """
+    |   NameList:
+    |     string_a STRING $unpivot.string_a#10
+    |     string_b STRING $unpivot.string_b#11
+    |     x INT64 $unpivot.x#7
+    |     y INT64 $unpivot.y#8
+    |     z STRING $unpivot.z#9
+    |   NameScope:
+    |     Names:
+    |       string_a -> STRING ($unpivot.string_a#10)
+    |       string_b -> STRING ($unpivot.string_b#11)
+    |       x -> INT64 ($unpivot.x#7)
+    |       y -> INT64 ($unpivot.y#8)
+    |       z -> STRING ($unpivot.z#9)
+    |   """
+    +-input_scan=
+      +-UnpivotScan
+        +-column_list=$unpivot.[string_a#10, string_b#11, x#7, y#8, z#9]
+        +-input_scan=
+        | +-TableScan(column_list=MultipleColumns.[int_a#1, string_a#2, int_b#3, string_b#4, int_c#5, int_d#6], table=MultipleColumns, column_index_list=[0, 1, 2, 3, 4, 5])
+        +-value_column_list=$unpivot.[x#7, y#8]
+        +-label_column=$unpivot.z#9
+        +-label_list=
+        | +-Literal(type=STRING, value="int_a_int_b")
+        | +-Literal(type=STRING, value="Label")
+        +-unpivot_arg_list=
+        | +-UnpivotArg
+        | | +-column_list=
+        | |   +-ColumnRef(type=INT64, column=MultipleColumns.int_a#1)
+        | |   +-ColumnRef(type=INT64, column=MultipleColumns.int_b#3)
+        | +-UnpivotArg
+        |   +-column_list=
+        |     +-ColumnRef(type=INT64, column=MultipleColumns.int_c#5)
+        |     +-ColumnRef(type=INT64, column=MultipleColumns.int_d#6)
+        +-projected_input_column_list=
+        | +-string_a#10 := ColumnRef(type=STRING, column=MultipleColumns.string_a#2)
+        | +-string_b#11 := ColumnRef(type=STRING, column=MultipleColumns.string_b#4)
+        +-include_nulls=FALSE
 ==
 
 # UNPIVOT query with all columns pruned.

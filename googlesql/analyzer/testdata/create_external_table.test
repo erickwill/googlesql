@@ -523,8 +523,10 @@ CreateExternalTableStmt
 | +-x := Literal(type=STRING, value="foo")
 +-column_definition_list=
 | +-ColumnDefinition(name="x", type=INT64, column=projectid.datasetid.tablename.x#1)
-+-connection=
-  +-Connection(connection=$connection_default)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=$connection_default)
 ==
 
 [no_java]
@@ -562,8 +564,10 @@ CreateExternalTableStmt
 | +-x := Literal(type=STRING, value="foo")
 +-column_definition_list=
 | +-ColumnDefinition(name="x", type=INT64, column=projectid.datasetid.tablename.x#1)
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 [language_features=NONE,+CREATE_EXTERNAL_TABLE_WITH_CONNECTION,+CREATE_EXTERNAL_TABLE_WITH_TABLE_ELEMENT_LIST,+CREATE_EXTERNAL_TABLE_WITH_PARTITION_COLUMNS]
@@ -591,8 +595,10 @@ CreateExternalTableStmt
 | +-x := Literal(type=STRING, value="bar")
 +-column_definition_list=
 | +-ColumnDefinition(name="x", type=INT64, column=projectid.datasetid.tablename.x#1)
-+-connection=
-| +-Connection(connection=connection2)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection2)
 +-with_partition_columns=
   +-WithPartitionColumns
 ==
@@ -612,8 +618,10 @@ CreateExternalTableStmt
 | +-x := Literal(type=STRING, value="baz")
 +-column_definition_list=
 | +-ColumnDefinition(name="x", type=INT64, column=t.x#1)
-+-connection=
-| +-Connection(connection=connection2)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection2)
 +-with_partition_columns=
   +-WithPartitionColumns
     +-column_definition_list=
@@ -635,8 +643,10 @@ CreateExternalTableStmt
 | +-x := Literal(type=STRING, value="baz")
 +-column_definition_list=
 | +-ColumnDefinition(name="x", type=INT64, column=t.x#1)
-+-connection=
-| +-Connection(connection=connection2)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection2)
 +-with_partition_columns=
   +-WithPartitionColumns
     +-column_definition_list=

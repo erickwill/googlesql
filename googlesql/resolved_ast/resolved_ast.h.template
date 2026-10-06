@@ -439,6 +439,36 @@ inline std::unique_ptr<ResolvedWithExpr> MakeResolvedWithExpr(
   return with_expr;
 }
 
+// Special overload for backward compatibility with external callers that pass a
+// single ResolvedConnection instead of a ResolvedConnectionList.
+// ConnectionPtrT is templated (rather than taking
+// std::unique_ptr<const ResolvedConnection> directly) so that callers passing
+// `nullptr` as the first argument unambiguously resolve to the primary
+// MakeResolvedExportDataStmt(std::unique_ptr<const ResolvedConnectionList>, ...)
+// overload, and output_column_list_t is templated for callers passing
+// std::vector<std::unique_ptr<ResolvedOutputColumn>> (non-const elements).
+template <
+    typename ConnectionPtrT,
+    typename output_column_list_t =
+        std::vector<std::unique_ptr<const ResolvedOutputColumn>>,
+    typename = std::enable_if_t<
+        std::is_same_v<ConnectionPtrT, std::unique_ptr<ResolvedConnection>> ||
+        std::is_same_v<ConnectionPtrT,
+                       std::unique_ptr<const ResolvedConnection>>>>
+ABSL_DEPRECATED("Inline me!")
+inline std::unique_ptr<ResolvedExportDataStmt> MakeResolvedExportDataStmt(
+    ConnectionPtrT connection,
+    std::vector<std::unique_ptr<const ResolvedOption>> option_list,
+    output_column_list_t output_column_list,
+    bool is_value_table,
+    std::unique_ptr<const ResolvedScan> query) {
+  return MakeResolvedExportDataStmt(
+      connection != nullptr ? MakeResolvedConnectionList(std::move(connection))
+                            : nullptr,
+      std::move(option_list), std::move(output_column_list), is_value_table,
+      std::move(query));
+}
+
 // This is here for backward compatibility because we added a field
 // generic_argument_list. May be removed in the future.
 //
@@ -550,11 +580,14 @@ inline std::unique_ptr<ResolvedTVFArgument> MakeResolvedTVFArgument(
     std::unique_ptr<const ResolvedConnection> connection,
     std::unique_ptr<const ResolvedDescriptor> descriptor_arg,
     const std::vector<ResolvedColumn>& argument_column_list) {
+  std::unique_ptr<const ResolvedConnectionList> connection_list =
+      connection != nullptr ? MakeResolvedConnectionList(std::move(connection))
+                            : nullptr;
   return MakeResolvedFunctionArgument(
         std::move(expr),
         std::move(scan),
         std::move(model),
-        std::move(connection),
+        std::move(connection_list),
         std::move(descriptor_arg),
         argument_column_list,
         /*inline_lambda=*/nullptr,
@@ -574,11 +607,14 @@ inline std::unique_ptr<ResolvedFunctionArgument> MakeResolvedFunctionArgument(
     std::unique_ptr<const ResolvedDescriptor> descriptor_arg,
     const std::vector<ResolvedColumn>& argument_column_list,
     std::unique_ptr<ResolvedInlineLambda> inline_lambda) {
+  std::unique_ptr<const ResolvedConnectionList> connection_list =
+      connection != nullptr ? MakeResolvedConnectionList(std::move(connection))
+                            : nullptr;
   return MakeResolvedFunctionArgument(
         std::move(expr),
         std::move(scan),
         std::move(model),
-        std::move(connection),
+        std::move(connection_list),
         std::move(descriptor_arg),
         argument_column_list,
         std::move(inline_lambda),
@@ -599,11 +635,14 @@ inline std::unique_ptr<ResolvedFunctionArgument> MakeResolvedFunctionArgument(
     const std::vector<ResolvedColumn>& argument_column_list,
     std::unique_ptr<ResolvedInlineLambda> inline_lambda,
     std::unique_ptr<ResolvedSequence> sequence) {
+  std::unique_ptr<const ResolvedConnectionList> connection_list =
+      connection != nullptr ? MakeResolvedConnectionList(std::move(connection))
+                            : nullptr;
   return MakeResolvedFunctionArgument(
         std::move(expr),
         std::move(scan),
         std::move(model),
-        std::move(connection),
+        std::move(connection_list),
         std::move(descriptor_arg),
         argument_column_list,
         std::move(inline_lambda),

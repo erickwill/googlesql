@@ -3493,10 +3493,58 @@ absl::StatusOr<std::unique_ptr<ValueExpr>> Algebrizer::AlgebrizeColumnRef(
   return DerefExpr::Create(variable_id, column_ref->type());
 }
 
+int Algebrizer::GetBaseTableColumnIndex(const Table* table,
+                                        const Column* column) {
+  for (int idx = 0; idx < table->NumColumns(); ++idx) {
+    if (table->GetColumn(idx) == column) {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::GetRowStructFieldValueExpr(VariableId row_var,
+                                       const StructType* row_struct_type,
+                                       int col_idx) {
+  GOOGLESQL_ASSIGN_OR_RETURN(auto row_deref, DerefExpr::Create(row_var, row_struct_type));
+  return FieldValueExpr::Create(col_idx, std::move(row_deref));
+}
+
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::AlgebrizeExpressionOverRowStruct(const ResolvedExpr* expr,
+                                             VariableId row_var,
+                                             const StructType* row_struct_type,
+                                             const Table* table) {
+  auto prev = std::move(catalog_column_row_variable_);
+  absl::Cleanup restore = [this, &prev]() {
+    catalog_column_row_variable_ = std::move(prev);
+  };
+  catalog_column_row_variable_ = CatalogColumnRowVariable{
+      .row_var = row_var,
+      .row_struct_type = row_struct_type,
+      .table = table,
+  };
+  return AlgebrizeExpression(expr);
+}
+
 absl::StatusOr<std::unique_ptr<ValueExpr>>
 Algebrizer::AlgebrizeCatalogColumnRef(
     const ResolvedCatalogColumnRef* column_ref) {
   const Column* catalog_column = column_ref->column();
+
+  // If we are algebrizing an expression over a scoped row struct, we can
+  // dereference the column from the row struct variable.
+  if (catalog_column_row_variable_.has_value()) {
+    int col_idx = GetBaseTableColumnIndex(catalog_column_row_variable_->table,
+                                          catalog_column);
+    GOOGLESQL_RET_CHECK_NE(col_idx, -1);
+    return GetRowStructFieldValueExpr(
+        catalog_column_row_variable_->row_var,
+        catalog_column_row_variable_->row_struct_type, col_idx);
+  }
+
+  // Otherwise, dereference the column from a catalog column variable.
   GOOGLESQL_RET_CHECK(catalog_column_ref_variables_.has_value());
   const auto& it = catalog_column_ref_variables_->find(catalog_column);
   GOOGLESQL_RET_CHECK(it != catalog_column_ref_variables_->end()) << absl::StrFormat(
@@ -3560,6 +3608,12 @@ Algebrizer::AlgebrizeExpressionColumn(
     return MeasureFieldValueExpr::Create(expr_column->name(),
                                          expr_column->type(),
                                          std::move(deref_measure_column_op));
+  } else if (expression_column_variables_.has_value()) {
+    auto it = expression_column_variables_->find(expr_column->name());
+    GOOGLESQL_RET_CHECK(it != expression_column_variables_->end())
+        << "Cannot find expression column " << expr_column->name()
+        << " of type " << expr_column->type()->DebugString();
+    return DerefExpr::Create(it->second, expr_column->type());
   } else {
     return DerefExpr::Create(variable_gen_->GetVariableNameFromParameter(
                                  expr_column->name(), column_map_),
@@ -7400,6 +7454,7 @@ Algebrizer::InitializeScanMap() {
           ALGEBRIZE_SCAN_WITH_CTX(FilterScan),
           ALGEBRIZE_SCAN_WITH_CTX(GraphCallScan),
           ALGEBRIZE_SCAN_WITH_CTX(GraphEdgeScan),
+          ALGEBRIZE_SCAN_WITH_CTX(GraphInsertScan),
           ALGEBRIZE_SCAN_WITH_CTX(GraphLinearScan),
           ALGEBRIZE_SCAN_WITH_CTX(GraphNodeScan),
           ALGEBRIZE_SCAN_WITH_CTX(GraphPathScan),
@@ -8112,6 +8167,126 @@ static absl::Status VerifyParameters(const Parameters* parameters) {
   return absl::OkStatus();
 }
 
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::AlgebrizeQueryStatementInfo(
+    const ResolvedScan* scan,
+    const std::vector<std::unique_ptr<const ResolvedOutputColumn>>&
+        output_columns,
+    bool is_value_table, IdStringPool& id_string_pool) {
+  GOOGLESQL_RETURN_IF_ERROR(CheckHints(scan->hint_list()));
+  ResolvedColumnList output_column_list;
+  for (const auto& it : output_columns) {
+    // TODO IdString conversion shouldn't be needed here.
+    // We should have IdStrings in ResolvedOutputColumn.
+    output_column_list.emplace_back(
+        it->column().column_id(), it->column().table_name_id(),
+        id_string_pool.Make(it->name()), it->column().type());
+  }
+  return AlgebrizeRootScanAsValueExpr(output_column_list, is_value_table, scan);
+}
+
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::AlgebrizeTerminalQueryStatementInfo(const ResolvedScan* scan) {
+  GOOGLESQL_RETURN_IF_ERROR(CheckHints(scan->hint_list()));
+  GOOGLESQL_RET_CHECK_EQ(scan->column_list().size(), 0);
+  ResolvedColumnList output_column_list;
+  std::unique_ptr<ValueExpr> scan_expr;
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      scan_expr, AlgebrizeRootScanAsValueExpr(output_column_list,
+                                              /*is_value_table=*/false, scan));
+  GOOGLESQL_RET_CHECK(scan_expr->output_type()->IsArray());
+  const Type* element_type =
+      scan_expr->output_type()->AsArray()->element_type();
+  GOOGLESQL_RET_CHECK(element_type->IsStruct());
+  GOOGLESQL_RET_CHECK_EQ(element_type->AsStruct()->num_fields(), 0);
+  // We use a DiscardResultExpr to make an invalid Value() representing
+  // "no result table".
+  return DiscardResultExpr::Create(std::move(scan_expr));
+}
+
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::AlgebrizeGeneralizedQueryStatement(
+    const ResolvedGeneralizedQueryStmt* stmt, IdStringPool& id_string_pool) {
+  // A generalized query statement can contain pipe operator or GQL DML
+  // operators.
+  // Only GQL DML operators are supported natively (e.g. INSERT).
+  GOOGLESQL_RETURN_IF_ERROR(CheckHints(stmt->hint_list()));
+
+  std::vector<const ResolvedNode*> insert_scan_nodes;
+  stmt->query()->GetDescendantsWithKinds({RESOLVED_GRAPH_INSERT_SCAN},
+                                         &insert_scan_nodes);
+  GOOGLESQL_RET_CHECK(!insert_scan_nodes.empty())
+      << "ResolvedGeneralizedQueryStmt is only supported natively in the "
+         "reference implementation when it contains GQL DML mutations";
+
+  bool has_returning = (stmt->output_schema() != nullptr);
+  std::unique_ptr<ValueExpr> scan_expr;
+  const ArrayType* returning_array_type = nullptr;
+
+  if (has_returning) {
+    ResolvedColumnList output_column_list;
+    for (const auto& it : stmt->output_schema()->output_column_list()) {
+      output_column_list.emplace_back(
+          it->column().column_id(),
+          id_string_pool.Make(it->column().table_name()),
+          id_string_pool.Make(it->name()), it->column().type());
+    }
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        scan_expr, AlgebrizeRootScanAsValueExpr(
+                       output_column_list,
+                       stmt->output_schema()->is_value_table(), stmt->query()));
+    GOOGLESQL_RET_CHECK(scan_expr->output_type()->IsArray());
+    returning_array_type = scan_expr->output_type()->AsArray();
+  } else {
+    GOOGLESQL_ASSIGN_OR_RETURN(scan_expr, AlgebrizeRootScanAsValueExpr(
+                                    /*output_columns=*/{},
+                                    /*is_value_table=*/false, stmt->query()));
+  }
+
+  // Collect the modified tables and their types.
+  std::vector<GraphTargetTableTypeInfo> modified_tables;
+  absl::flat_hash_set<const Table*> seen_tables;
+  auto collect_tables =
+      [&](absl::Span<const std::unique_ptr<const ResolvedComputedColumnBase>>
+              list) -> absl::Status {
+    for (const auto& col : list) {
+      GOOGLESQL_RET_CHECK(col->expr()->Is<ResolvedGraphInsertElement>());
+      const auto* element = col->expr()->GetAs<ResolvedGraphInsertElement>();
+      if (seen_tables.insert(element->element_table()->GetTable()).second) {
+        const Table* table = element->element_table()->GetTable();
+        std::vector<const Column*> columns;
+        columns.reserve(table->NumColumns());
+        for (int i = 0; i < table->NumColumns(); ++i) {
+          const Column* column = table->GetColumn(i);
+          columns.push_back(column);
+        }
+        GOOGLESQL_ASSIGN_OR_RETURN(const ArrayType* table_type,
+                         CreateTableArrayType(columns, table->IsValueTable(),
+                                              type_factory_));
+        modified_tables.push_back({table->Name(), table_type});
+      }
+    }
+    return absl::OkStatus();
+  };
+
+  for (const auto* node : insert_scan_nodes) {
+    const auto* insert_scan = node->GetAs<ResolvedGraphInsertScan>();
+    GOOGLESQL_RETURN_IF_ERROR(collect_tables(insert_scan->insert_node_list()));
+    GOOGLESQL_RETURN_IF_ERROR(collect_tables(insert_scan->insert_edge_list()));
+  }
+  absl::c_sort(modified_tables,
+               [](const auto& a, const auto& b) { return a.name < b.name; });
+  GOOGLESQL_ASSIGN_OR_RETURN(const StructType* output_type,
+                   CreateGraphDMLOutputType(
+                       modified_tables, returning_array_type, type_factory_));
+
+  // Wrap `scan_expr` in DMLGraphOutputExpr to evaluate mutations and package
+  // the multi-table DML result struct (see header for details).
+  return DMLGraphOutputExpr::Create(std::move(scan_expr),
+                                    std::move(modified_tables), output_type,
+                                    has_returning);
+}
+
 absl::Status Algebrizer::AlgebrizeStatementImpl(
     const ResolvedStatement* ast_root, std::unique_ptr<ValueExpr>* output) {
   // Weirdly, the output_column_list of the statement may contain column
@@ -8157,20 +8332,9 @@ absl::Status Algebrizer::AlgebrizeStatementImpl(
     case RESOLVED_QUERY_STMT: {
       const ResolvedQueryStmt* stmt = ast_root->GetAs<ResolvedQueryStmt>();
       GOOGLESQL_RETURN_IF_ERROR(CheckHints(stmt->hint_list()));
-      const ResolvedScan* scan = stmt->query();
-      GOOGLESQL_RETURN_IF_ERROR(CheckHints(scan->hint_list()));
-      ResolvedColumnList output_column_list;
-      for (const auto& it : stmt->output_column_list()) {
-        // TODO IdString conversion shouldn't be needed here.
-        // We should have IdStrings in ResolvedOutputColumn.
-        output_column_list.emplace_back(
-            it->column().column_id(),
-            id_string_pool.Make(it->column().table_name()),
-            id_string_pool.Make(it->name()), it->column().type());
-      }
-      GOOGLESQL_ASSIGN_OR_RETURN(
-          *output, AlgebrizeRootScanAsValueExpr(output_column_list,
-                                                stmt->is_value_table(), scan));
+      GOOGLESQL_ASSIGN_OR_RETURN(*output, AlgebrizeQueryStatementInfo(
+                                    stmt->query(), stmt->output_column_list(),
+                                    stmt->is_value_table(), id_string_pool));
       GOOGLESQL_RETURN_IF_ERROR(ast_root->CheckFieldsAccessed());
       break;
     }
@@ -8178,23 +8342,8 @@ absl::Status Algebrizer::AlgebrizeStatementImpl(
       const ResolvedTerminalQueryStmt* stmt =
           ast_root->GetAs<ResolvedTerminalQueryStmt>();
       GOOGLESQL_RETURN_IF_ERROR(CheckHints(stmt->hint_list()));
-      const ResolvedScan* scan = stmt->query();
-      GOOGLESQL_RETURN_IF_ERROR(CheckHints(scan->hint_list()));
-      GOOGLESQL_RET_CHECK_EQ(scan->column_list().size(), 0);
-      ResolvedColumnList output_column_list;
-      std::unique_ptr<ValueExpr> scan_expr;
-      GOOGLESQL_ASSIGN_OR_RETURN(scan_expr, AlgebrizeRootScanAsValueExpr(
-                                      output_column_list,
-                                      /*is_value_table=*/false, scan));
-      GOOGLESQL_RET_CHECK(scan_expr->output_type()->IsArray());
-      const Type* element_type =
-          scan_expr->output_type()->AsArray()->element_type();
-      GOOGLESQL_RET_CHECK(element_type->IsStruct());
-      GOOGLESQL_RET_CHECK_EQ(element_type->AsStruct()->num_fields(), 0);
-      // We use a DiscardResultExpr to make an invalid Value() representing
-      // "no result table".
       GOOGLESQL_ASSIGN_OR_RETURN(*output,
-                       DiscardResultExpr::Create(std::move(scan_expr)));
+                       AlgebrizeTerminalQueryStatementInfo(stmt->query()));
       GOOGLESQL_RETURN_IF_ERROR(ast_root->CheckFieldsAccessed());
       break;
     }
@@ -8210,6 +8359,14 @@ absl::Status Algebrizer::AlgebrizeStatementImpl(
     case RESOLVED_INSERT_STMT: {
       GOOGLESQL_ASSIGN_OR_RETURN(*output,
                        AlgebrizeDMLStatement(ast_root, &id_string_pool));
+      break;
+    }
+    case RESOLVED_GENERALIZED_QUERY_STMT: {
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          *output,
+          AlgebrizeGeneralizedQueryStatement(
+              ast_root->GetAs<ResolvedGeneralizedQueryStmt>(), id_string_pool));
+      GOOGLESQL_RETURN_IF_ERROR(ast_root->CheckFieldsAccessed());
       break;
     }
     case RESOLVED_MULTI_STMT: {

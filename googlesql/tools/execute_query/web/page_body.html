@@ -84,81 +84,86 @@
                 </span>
               </fieldset>
 
-              <span class="select-options">
-                <label for="catalog-select">Catalog:</label>
-                <select name="catalog" id="catalog-select">
-                  {{#catalogs}}
-                  <option value="{{name}}" {{selected}}>{{label}}</option>
-                  {{/catalogs}}
-                </select>
-              </span>
-
-              <details>
-                <summary>Advanced Options</summary>
-                <fieldset>
-                  <legend>SQL Mode</legend>
-                  <input type="radio" name="sql_mode" value="query" id="sql-mode-query"
-                      {{#sql_mode_query}}checked{{/sql_mode_query}}>
-                  <label for="sql-mode-query">Query</label>
-
-                  <input type="radio" name="sql_mode" value="expression" id="sql-mode-expression"
-                    {{#sql_mode_expression}}checked{{/sql_mode_expression}}>
-                  <label for="sql-mode-expression">Expression</label>
-
-                  <input type="radio" name="sql_mode" value="script" id="sql-mode-script"
-                    {{#sql_mode_script}}checked{{/sql_mode_script}}>
-                  <label for="sql-mode-script">Script</label>
-                </fieldset>
-                <fieldset>
-                  <legend>Unanalyze Syntax Mode</legend>
-                  <input type="radio" name="target_syntax_mode" value="standard" id="target-syntax-mode-standard"
-                      {{#target_syntax_mode_standard}}checked{{/target_syntax_mode_standard}}>
-                  <label for="target-syntax-mode-standard">Standard</label>
-
-                  <input type="radio" name="target_syntax_mode" value="pipe" id="target-syntax-mode-pipe"
-                    {{#target_syntax_mode_pipe}}checked{{/target_syntax_mode_pipe}}>
-                  <label for="target-syntax-mode-pipe">Pipe</label>
-                </fieldset>
-                <fieldset>
-                  <legend>Resolved AST Mode</legend>
-                  <input type="radio" name="resolved_ast_render_mode" value="tree" id="resolved-ast-render-mode-tree"
-                      {{#resolved_ast_render_mode_tree}}checked{{/resolved_ast_render_mode_tree}}>
-                  <label for="resolved-ast-render-mode-tree">Tree</label>
-
-                  <input type="radio" name="resolved_ast_render_mode" value="linear" id="resolved-ast-render-mode-linear"
-                    {{#resolved_ast_render_mode_linear}}checked{{/resolved_ast_render_mode_linear}}>
-                  <label for="resolved-ast-render-mode-linear">Linear</label>
-                </fieldset>
-
-                <fieldset>
-                  <legend>Enabled Language Features</legend>
-                  <span class="select-options">
-                    <select name="language-features" id="language-features-select">
-                      {{#language_features}}
-                      <option value="{{name}}" {{selected}}>{{name}}</option>
-                      {{/language_features}}
-                    </select>
-                    <input type="text" name="language-features-text" id="language-features-text" value="{{language_features_text}}" placeholder="+FEATURE1,-FEATURE2">
-                  </span>
-                </fieldset>
-
-                <fieldset>
-                  <legend>Enabled AST Rewrites</legend>
-                  <span class="select-options">
-                    <select name="ast-rewrites" id="ast-rewrites-select">
-                      {{#ast_rewrites}}
-                      <option value="{{name}}" {{selected}}>{{name}}</option>
-                      {{/ast_rewrites}}
-                    </select>
-                    <input type="text" name="ast-rewrites-text" id="ast-rewrites-text" value="{{ast_rewrites_text}}" placeholder="+REWRITE1,-REWRITE2">
-                  </span>
-                </fieldset>
-              </details>
-
+              <div>
+                <span class="select-options">
+                  <label for="catalog-select">Catalog:</label>
+                  <select name="catalog" id="catalog-select">
+                    {{#catalogs}}
+                    <option value="{{name}}" {{selected}}>{{label}}</option>
+                    {{/catalogs}}
+                  </select>
+                </span>
+              </div>
             </div>
 
             <input type="submit" id="submit" value="Submit">
           </div>
+
+          <details>
+            <summary>Advanced Options</summary>
+            <div>
+              <fieldset>
+                <legend>SQL Mode</legend>
+                <input type="radio" name="sql_mode" value="query" id="sql-mode-query"
+                    {{#sql_mode_query}}checked{{/sql_mode_query}}>
+                <label for="sql-mode-query">Query</label>
+
+                <input type="radio" name="sql_mode" value="expression" id="sql-mode-expression"
+                  {{#sql_mode_expression}}checked{{/sql_mode_expression}}>
+                <label for="sql-mode-expression">Expression</label>
+
+                <input type="radio" name="sql_mode" value="script" id="sql-mode-script"
+                  {{#sql_mode_script}}checked{{/sql_mode_script}}>
+                <label for="sql-mode-script">Script</label>
+              </fieldset>
+              <fieldset>
+                <legend>Unanalyze Syntax Mode</legend>
+                <input type="radio" name="target_syntax_mode" value="standard" id="target-syntax-mode-standard"
+                    {{#target_syntax_mode_standard}}checked{{/target_syntax_mode_standard}}>
+                <label for="target-syntax-mode-standard">Standard</label>
+
+                <input type="radio" name="target_syntax_mode" value="pipe" id="target-syntax-mode-pipe"
+                  {{#target_syntax_mode_pipe}}checked{{/target_syntax_mode_pipe}}>
+                <label for="target-syntax-mode-pipe">Pipe</label>
+              </fieldset>
+              <fieldset>
+                <legend>Resolved AST Mode</legend>
+                <input type="radio" name="resolved_ast_render_mode" value="tree" id="resolved-ast-render-mode-tree"
+                    {{#resolved_ast_render_mode_tree}}checked{{/resolved_ast_render_mode_tree}}>
+                <label for="resolved-ast-render-mode-tree">Tree</label>
+
+                <input type="radio" name="resolved_ast_render_mode" value="linear" id="resolved-ast-render-mode-linear"
+                  {{#resolved_ast_render_mode_linear}}checked{{/resolved_ast_render_mode_linear}}>
+                <label for="resolved-ast-render-mode-linear">Linear</label>
+              </fieldset>
+            </div>
+
+            <div>
+              <fieldset>
+                <legend>Enabled Language Features</legend>
+                <span class="select-options">
+                  <select name="language-features" id="language-features-select">
+                    {{#language_features}}
+                    <option value="{{name}}" {{selected}}>{{name}}</option>
+                    {{/language_features}}
+                  </select>
+                  <input type="text" name="language-features-text" id="language-features-text" value="{{language_features_text}}" placeholder="+FEATURE1,-FEATURE2">
+                </span>
+              </fieldset>
+
+              <fieldset>
+                <legend>Enabled AST Rewrites</legend>
+                <span class="select-options">
+                  <select name="ast-rewrites" id="ast-rewrites-select">
+                    {{#ast_rewrites}}
+                    <option value="{{name}}" {{selected}}>{{name}}</option>
+                    {{/ast_rewrites}}
+                  </select>
+                  <input type="text" name="ast-rewrites-text" id="ast-rewrites-text" value="{{ast_rewrites_text}}" placeholder="+REWRITE1,-REWRITE2">
+                </span>
+              </fieldset>
+            </div>
+          </details>
         </form>
       </div>
 
@@ -208,11 +213,39 @@
                     <span class="rewrite-step-separator">&gt;</span>
                     <span class="rewrite-step-item" data-step="{{step_index}}">{{rewriter_name}}</span>
                   {{/result_analyzed_rewrites}}
+                  <span class="rewrite-step-separator">&gt;</span>
+                  <span class="rewrite-step-item" data-step="final">Post-rewrite</span>
+                  <span class="diff-mode-selector" style="display: none;">
+                    <span class="diff-mode-label">Diffs:</span>
+                    <button type="button"
+                            class="diff-mode-btn"
+                            data-mode="none">None</button>
+                    <button type="button"
+                            class="diff-mode-btn active"
+                            data-mode="inline">Inline</button>
+                    <button type="button"
+                            class="diff-mode-btn"
+                            data-mode="side-by-side">Side-by-side</button>
+                  </span>
                 </div>
                 <pre class="output analyzed rewrite-ast-panel" data-step="0"><code class="language-less">{{{result_analyzed}}}</code></pre>
                 {{#result_analyzed_rewrites}}
-                  <pre class="output analyzed rewrite-ast-panel" data-step="{{step_index}}"><code class="language-less">{{{ast}}}</code></pre>
+                  <div class="analyzed rewrite-ast-panel" data-step="{{step_index}}">
+                    <pre class="output rewrite-ast-none" style="display: none;"><code class="language-less">{{{ast}}}</code></pre>
+                    <pre class="output rewrite-ast-inline"><code class="language-less hljs"></code></pre>
+                    <div class="diff-side-by-side" style="display: none;">
+                      <div class="diff-pane-wrapper">
+                        <div class="diff-pane-header">Before</div>
+                        <pre class="output diff-pane diff-pane-before"><code class="language-less hljs"></code></pre>
+                      </div>
+                      <div class="diff-pane-wrapper">
+                        <div class="diff-pane-header">After</div>
+                        <pre class="output diff-pane diff-pane-after"><code class="language-less hljs"></code></pre>
+                      </div>
+                    </div>
+                  </div>
                 {{/result_analyzed_rewrites}}
+                <pre class="output analyzed rewrite-ast-panel" data-step="final"><code class="language-less">{{{result_analyzed_final}}}</code></pre>
               </div>
             {{/has_rewrites}}
             {{^has_rewrites}}
@@ -251,7 +284,5 @@
       </div>
     </main>
     <script>
-      var goog = goog || { module: function() {} };
-      var exports = exports || {};
       {{> inline_js}}
     </script>

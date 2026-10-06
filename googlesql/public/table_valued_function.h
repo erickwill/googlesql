@@ -25,6 +25,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "googlesql/common/errors.h"
@@ -47,6 +48,7 @@
 #include "googlesql/resolved_ast/resolved_ast_enums.pb.h"
 #include "absl/base/attributes.h"
 #include "absl/base/macros.h"
+#include "absl/container/flat_hash_set.h"
 #include "googlesql/base/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -64,6 +66,7 @@ namespace googlesql {
 class AnalyzerOptions;
 class ResolvedExpr;
 class SignatureMatchResult;
+class TVFConnectionProto;
 class TVFInputArgumentType;
 class TVFRelationColumnProto;
 class TVFRelationProto;
@@ -871,19 +874,67 @@ class TVFModelArgument {
 };
 
 // This represents a connection passed as an input argument to a TVF. It
-// contains a pointer to the connection object in the catalog.
+// contains a pointer to the connection object in the catalog, or a list
+// of key-value pairs of connections.
 class TVFConnectionArgument {
  public:
+  struct KeyValuePair {
+    std::string key;
+    const Connection* connection = nullptr;  // Not owned.
+    bool operator==(const KeyValuePair& other) const = default;
+  };
+
   // Creates a new TVFConnectionArgument using a connection catalog object.
   // Does not take ownership of <connection>, which must outlive this class.
   explicit TVFConnectionArgument(const Connection* connection)
-      : connection_(connection) {}
+      : value_(connection) {}
 
-  const Connection* connection() const { return connection_; }
+  // Creates a new TVFConnectionArgument using a list of connection key-value
+  // pairs. Does not take ownership of Connection objects in
+  // <connection_kv_list>, which must outlive this class.
+  explicit TVFConnectionArgument(std::vector<KeyValuePair> connection_kv_list)
+      : value_(std::move(connection_kv_list)) {
+    ABSL_DCHECK(!std::get<std::vector<KeyValuePair>>(value_).empty());
+#ifndef NDEBUG
+    absl::flat_hash_set<std::string> seen_keys;
+    for (const auto& kv : std::get<std::vector<KeyValuePair>>(value_)) {
+      ABSL_DCHECK(!kv.key.empty());
+      ABSL_DCHECK(kv.connection != nullptr);
+      ABSL_DCHECK(seen_keys.insert(absl::AsciiStrToLower(kv.key)).second)
+          << "Duplicate key in TVFConnectionArgument: " << kv.key;
+    }
+#endif
+  }
+
+  const Connection* connection() const {
+    if (std::holds_alternative<const Connection*>(value_)) {
+      return std::get<const Connection*>(value_);
+    }
+    return nullptr;
+  }
+  const std::vector<KeyValuePair>& connection_kv_list() const {
+    if (std::holds_alternative<std::vector<KeyValuePair>>(value_)) {
+      return std::get<std::vector<KeyValuePair>>(value_);
+    }
+    static const auto* const kEmptyList = new std::vector<KeyValuePair>();
+    return *kEmptyList;
+  }
   std::string DebugString() const;
 
+  bool operator==(const TVFConnectionArgument& other) const = default;
+
+  // Serializes this connection argument to <proto>.
+  absl::Status Serialize(TVFConnectionProto* proto) const;
+
+  // Deserializes a TVFConnectionProto into a TVFConnectionArgument.
+  // <catalog> is used to resolve connections and must outlive the returned
+  // object.
+  static absl::StatusOr<TVFConnectionArgument> Deserialize(
+      const TVFConnectionProto& proto, Catalog* catalog);
+
  private:
-  const Connection* connection_;  // Not owned.
+  std::variant<const Connection*, std::vector<KeyValuePair>> value_ =
+      static_cast<const Connection*>(nullptr);
 };
 
 // This represents a descriptor passed as an input argument to a TVF. It

@@ -2690,8 +2690,8 @@ ST_HAUSDORFFDISTANCE(
 **Description**
 
 Gets the discrete [Hausdorff distance][h-distance], which is the greatest of all
-the distances from a discrete point in one geography to the closest
-discrete point in another geography.
+the distances from a discrete point in one geography to the closest point in
+another geography.
 
 **Definitions**
 

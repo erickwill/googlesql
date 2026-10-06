@@ -347,6 +347,13 @@ absl::StatusOr<Value> RegExp::ExtractGroups(absl::string_view str,
     GOOGLESQL_RET_CHECK(struct_type->field(i).type == field_type);
   }
 
+  if (str.data() == nullptr) {
+    // A group that matched the empty string is told apart from one that did
+    // not participate by its null data pointer, and RE2 derives submatch
+    // pointers from `str.data()`. A null `str` would conflate the two.
+    str = absl::string_view("", 0);
+  }
+
   // The groups vector contains the entire match at index 0, followed by the
   // groups in order. We do an unanchored match; if the user wants an anchored
   // match, they should include ^ and/or $ in the regexp.

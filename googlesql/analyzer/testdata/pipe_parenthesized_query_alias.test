@@ -578,6 +578,116 @@ ERROR: Unrecognized name: q2 [at 5:14]
              ^
 ==
 
+# The output is the same for a top-level aliased query, an
+# aliased table subquery in a FROM clause.
+# The output is also the same for pipe AS, except the internal
+# table name in the ResolvedColumns is different.
+{{FROM|}} (select 1 x, 2 y) {{AS q| \|> AS q}}
+|> STATIC_DESCRIBE
+|> SELECT x, q.y
+--
+ALTERNATION GROUPS:
+    FROM,AS q
+    AS q
+--
+QueryStmt
++-output_column_list=
+| +-q.x#1 AS x [INT64]
+| +-q.y#2 AS y [INT64]
++-query=
+  +-ProjectScan
+    +-column_list=q.[x#1, y#2]
+    +-input_scan=
+      +-StaticDescribeScan
+        +-column_list=q.[x#1, y#2]
+        +-describe_text=
+        |   """
+        |   NameList:
+        |     x INT64 q.x#1
+        |     y INT64 q.y#2
+        |   NameScope:
+        |     Names:
+        |       x -> INT64 (q.x#1)
+        |       y -> INT64 (q.y#2)
+        |     Range variables:
+        |       q -> RANGE_VARIABLE<x#1,y#2>
+        |   """
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=q.[x#1, y#2]
+            +-expr_list=
+            | +-x#1 := Literal(type=INT64, value=1)
+            | +-y#2 := Literal(type=INT64, value=2)
+            +-input_scan=
+              +-SingleRowScan
+--
+ALTERNATION GROUP: FROM, |> AS q
+--
+QueryStmt
++-output_column_list=
+| +-$subquery1.x#1 AS x [INT64]
+| +-$subquery1.y#2 AS y [INT64]
++-query=
+  +-ProjectScan
+    +-column_list=$subquery1.[x#1, y#2]
+    +-input_scan=
+      +-StaticDescribeScan
+        +-column_list=$subquery1.[x#1, y#2]
+        +-describe_text=
+        |   """
+        |   NameList:
+        |     x INT64 $subquery1.x#1
+        |     y INT64 $subquery1.y#2
+        |   NameScope:
+        |     Names:
+        |       x -> INT64 ($subquery1.x#1)
+        |       y -> INT64 ($subquery1.y#2)
+        |     Range variables:
+        |       q -> RANGE_VARIABLE<x#1,y#2>
+        |   """
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=$subquery1.[x#1, y#2]
+            +-expr_list=
+            | +-x#1 := Literal(type=INT64, value=1)
+            | +-y#2 := Literal(type=INT64, value=2)
+            +-input_scan=
+              +-SingleRowScan
+--
+ALTERNATION GROUP:  |> AS q
+--
+QueryStmt
++-output_column_list=
+| +-$query.x#1 AS x [INT64]
+| +-$query.y#2 AS y [INT64]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[x#1, y#2]
+    +-input_scan=
+      +-StaticDescribeScan
+        +-column_list=$query.[x#1, y#2]
+        +-describe_text=
+        |   """
+        |   NameList:
+        |     x INT64 $query.x#1
+        |     y INT64 $query.y#2
+        |   NameScope:
+        |     Names:
+        |       x -> INT64 ($query.x#1)
+        |       y -> INT64 ($query.y#2)
+        |     Range variables:
+        |       q -> RANGE_VARIABLE<x#1,y#2>
+        |   """
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=$query.[x#1, y#2]
+            +-expr_list=
+            | +-x#1 := Literal(type=INT64, value=1)
+            | +-y#2 := Literal(type=INT64, value=2)
+            +-input_scan=
+              +-SingleRowScan
+==
+
 # Test that ExtractTableNames understands tt is a range variable.
 (FROM TestTable) AS tt
 |> JOIN tt.KitchenSink.repeated_int32_val

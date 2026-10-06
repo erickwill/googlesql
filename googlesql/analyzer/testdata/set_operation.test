@@ -3707,3 +3707,277 @@ QueryStmt
             |       +-input_scan=
             |         +-SingleRowScan
             +-output_column_list=[$union_all2_cast.$col1#6]
+==
+
+# VARIANT is not a supertype of any type except itself. Literals, query
+# parameters, untyped NULL and untyped [] coerce to a VARIANT column. Other
+# columns must be explicitly cast to VARIANT.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select variant_col from VariantTable
+union all
+select {{2|'abc'|null|[]|@test_param_int64|cast(`int64` as VARIANT) from SimpleTypes}}
+--
+ALTERNATION GROUP: 2
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#3 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#3]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2_cast.$col1#4]
+        |   +-expr_list=
+        |   | +-$col1#4 := Literal(type=VARIANT, value=<Variant formatting not supported>)
+        |   +-input_scan=
+        |     +-ProjectScan
+        |       +-column_list=[$union_all2.$col1#2]
+        |       +-expr_list=
+        |       | +-$col1#2 := Literal(type=INT64, value=2)
+        |       +-input_scan=
+        |         +-SingleRowScan
+        +-output_column_list=[$union_all2_cast.$col1#4]
+--
+ALTERNATION GROUP: 'abc'
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#3 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#3]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2_cast.$col1#4]
+        |   +-expr_list=
+        |   | +-$col1#4 := Literal(type=VARIANT, value=<Variant formatting not supported>)
+        |   +-input_scan=
+        |     +-ProjectScan
+        |       +-column_list=[$union_all2.$col1#2]
+        |       +-expr_list=
+        |       | +-$col1#2 := Literal(type=STRING, value="abc")
+        |       +-input_scan=
+        |         +-SingleRowScan
+        +-output_column_list=[$union_all2_cast.$col1#4]
+--
+ALTERNATION GROUP: null
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#3 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#3]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2_cast.$col1#4]
+        |   +-expr_list=
+        |   | +-$col1#4 := Literal(type=VARIANT, value=NULL)
+        |   +-input_scan=
+        |     +-ProjectScan
+        |       +-column_list=[$union_all2.$col1#2]
+        |       +-expr_list=
+        |       | +-$col1#2 := Literal(type=INT64, value=NULL)
+        |       +-input_scan=
+        |         +-SingleRowScan
+        +-output_column_list=[$union_all2_cast.$col1#4]
+--
+ALTERNATION GROUP: []
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#3 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#3]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2_cast.$col1#4]
+        |   +-expr_list=
+        |   | +-$col1#4 := Literal(type=VARIANT, value=<Variant formatting not supported>)
+        |   +-input_scan=
+        |     +-ProjectScan
+        |       +-column_list=[$union_all2.$col1#2]
+        |       +-expr_list=
+        |       | +-$col1#2 := Literal(type=ARRAY<INT64>, value=[])
+        |       +-input_scan=
+        |         +-SingleRowScan
+        +-output_column_list=[$union_all2_cast.$col1#4]
+--
+ALTERNATION GROUP: @test_param_int64
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#3 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#3]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2_cast.$col1#4]
+        |   +-expr_list=
+        |   | +-$col1#4 :=
+        |   |   +-Cast(INT64 -> VARIANT)
+        |   |     +-ColumnRef(type=INT64, column=$union_all2.$col1#2)
+        |   +-input_scan=
+        |     +-ProjectScan
+        |       +-column_list=[$union_all2.$col1#2]
+        |       +-expr_list=
+        |       | +-$col1#2 := Parameter(type=INT64, name="test_param_int64")
+        |       +-input_scan=
+        |         +-SingleRowScan
+        +-output_column_list=[$union_all2_cast.$col1#4]
+--
+ALTERNATION GROUP: cast(`int64` as VARIANT) from SimpleTypes
+--
+QueryStmt
++-output_column_list=
+| +-$union_all.variant_col#22 AS variant_col [VARIANT]
++-query=
+  +-SetOperationScan
+    +-column_list=[$union_all.variant_col#22]
+    +-op_type=UNION_ALL
+    +-input_item_list=
+      +-SetOperationItem
+      | +-scan=
+      | | +-ProjectScan
+      | |   +-column_list=[VariantTable.variant_col#1]
+      | |   +-input_scan=
+      | |     +-TableScan(column_list=[VariantTable.variant_col#1], table=VariantTable, column_index_list=[0])
+      | +-output_column_list=[VariantTable.variant_col#1]
+      +-SetOperationItem
+        +-scan=
+        | +-ProjectScan
+        |   +-column_list=[$union_all2.$col1#21]
+        |   +-expr_list=
+        |   | +-$col1#21 :=
+        |   |   +-Cast(INT64 -> VARIANT)
+        |   |     +-ColumnRef(type=INT64, column=SimpleTypes.int64#3)
+        |   +-input_scan=
+        |     +-TableScan(column_list=[SimpleTypes.int64#3], table=SimpleTypes, column_index_list=[1])
+        +-output_column_list=[$union_all2.$col1#21]
+==
+
+# A non-literal, including a literal with an explicit type, does not coerce to
+# VARIANT in UNION ALL.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select variant_col from VariantTable
+union all
+select {{`int64` from SimpleTypes|cast(2 as INT64)|DATE '2020-01-01'|STRUCT(1 as a)|[1, 2]}}
+--
+ALTERNATION GROUP: `int64` from SimpleTypes
+--
+ERROR: Column 1 in UNION ALL has incompatible types: VARIANT, INT64 [at 3:1]
+select `int64` from SimpleTypes
+^
+--
+ALTERNATION GROUP: cast(2 as INT64)
+--
+ERROR: Column 1 in UNION ALL has incompatible types: VARIANT, INT64 [at 3:1]
+select cast(2 as INT64)
+^
+--
+ALTERNATION GROUP: DATE '2020-01-01'
+--
+ERROR: Column 1 in UNION ALL has incompatible types: VARIANT, DATE [at 3:1]
+select DATE '2020-01-01'
+^
+--
+ALTERNATION GROUP: STRUCT(1 as a)
+--
+ERROR: Column 1 in UNION ALL has incompatible types: VARIANT, STRUCT<a INT64> [at 3:1]
+select STRUCT(1 as a)
+^
+--
+ALTERNATION GROUP: [1, 2]
+--
+ERROR: Column 1 in UNION ALL has incompatible types: VARIANT, ARRAY<INT64> [at 3:1]
+select [1, 2]
+^
+==
+
+# With VARIANT enabled, VARIANT is still not the supertype of unrelated types.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select {{2|`int64` from SimpleTypes}}
+union all
+select {{'abc'|`string` from SimpleTypes}}
+
+--
+ALTERNATION GROUPS:
+    2,'abc'
+    `int64` from SimpleTypes,'abc'
+--
+ERROR: Column 1 in UNION ALL has incompatible types: INT64, STRING [at 3:1]
+select 'abc'
+^
+--
+ALTERNATION GROUPS:
+    2,`string` from SimpleTypes
+    `int64` from SimpleTypes,`string` from SimpleTypes
+--
+ERROR: Column 1 in UNION ALL has incompatible types: INT64, STRING [at 3:1]
+select `string` from SimpleTypes
+^

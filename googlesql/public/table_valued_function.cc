@@ -50,6 +50,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "google/protobuf/descriptor.h"
@@ -621,6 +622,51 @@ std::string TVFModelArgument::DebugString() const { return "ANY MODEL"; }
 
 std::string TVFConnectionArgument::DebugString() const {
   return "ANY CONNECTION";
+}
+
+absl::Status TVFConnectionArgument::Serialize(TVFConnectionProto* proto) const {
+  if (connection() != nullptr) {
+    proto->set_name(connection()->Name());
+    proto->set_full_name(connection()->FullName());
+  }
+  for (const auto& kv_pair : connection_kv_list()) {
+    auto* pair_proto = proto->add_connection_kv_pair();
+    pair_proto->set_key(kv_pair.key);
+    if (kv_pair.connection != nullptr) {
+      pair_proto->set_name(kv_pair.connection->Name());
+      pair_proto->set_full_name(kv_pair.connection->FullName());
+    }
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<TVFConnectionArgument> TVFConnectionArgument::Deserialize(
+    const TVFConnectionProto& proto, Catalog* catalog) {
+  if (!proto.connection_kv_pair().empty()) {
+    std::vector<TVFConnectionArgument::KeyValuePair> connection_kv_list;
+    connection_kv_list.reserve(proto.connection_kv_pair_size());
+    for (const auto& pair_proto : proto.connection_kv_pair()) {
+      GOOGLESQL_RET_CHECK(!pair_proto.full_name().empty());
+      const std::vector<std::string> path =
+          absl::StrSplit(pair_proto.full_name(), '.');
+      const Connection* connection = nullptr;
+      GOOGLESQL_RET_CHECK(catalog != nullptr);
+      GOOGLESQL_RETURN_IF_ERROR(
+          catalog->FindConnection(path, &connection, Catalog::FindOptions()));
+      GOOGLESQL_RET_CHECK(connection != nullptr);
+      connection_kv_list.push_back({pair_proto.key(), connection});
+    }
+    return TVFConnectionArgument(std::move(connection_kv_list));
+  }
+  const Connection* connection = nullptr;
+  if (!proto.full_name().empty()) {
+    const std::vector<std::string> path =
+        absl::StrSplit(proto.full_name(), '.');
+    GOOGLESQL_RET_CHECK(catalog != nullptr);
+    GOOGLESQL_RETURN_IF_ERROR(
+        catalog->FindConnection(path, &connection, Catalog::FindOptions()));
+  }
+  return TVFConnectionArgument(connection);
 }
 
 std::string TVFDescriptorArgument::DebugString() const {

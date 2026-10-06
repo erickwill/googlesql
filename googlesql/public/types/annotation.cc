@@ -54,6 +54,8 @@ std::string GetAnnotationKindName(AnnotationKind kind) {
       return "IsVersioned";
     case AnnotationKind::kVectorLength:
       return "VectorLength";
+    case AnnotationKind::kVectorEncoding:
+      return "VectorEncoding";
     case AnnotationKind::kSampleAnnotation:
       return "SampleAnnotation";
     case AnnotationKind::kMaxBuiltinAnnotationKind:
@@ -159,7 +161,7 @@ std::unique_ptr<AnnotationMap> AnnotationMap::Clone() const {
 }
 
 bool AnnotationMap::HasCompatibleStructure(const Type* type) const {
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   if (component_types.empty()) {
     return !IsStructMap();
   }
@@ -308,7 +310,7 @@ std::unique_ptr<AnnotationMap> AnnotationMap::Create(const Type* type) {
   if (type->IsStruct()) {
     return absl::WrapUnique(new StructAnnotationMap(type->AsStruct()));
   }
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   return component_types.empty()
              ? absl::WrapUnique(new AnnotationMap())
              : absl::WrapUnique(new StructAnnotationMap(component_types));

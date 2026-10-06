@@ -36,6 +36,7 @@
 #include "googlesql/public/functions/array_zip_mode.pb.h"
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/simple_catalog.h"
+#include "googlesql/public/simple_property_graph.h"
 #include "googlesql/public/table_valued_function.h"
 #include "googlesql/public/type.h"
 #include "googlesql/public/types/struct_type.h"
@@ -5461,6 +5462,154 @@ TEST(BarrierScanTest, WrappedBarrierScanOp) {
                           IsTupleSlotWith(Int64(20), IsNull()),
                           IsTupleSlotWith(Int64(22), IsNull()),
                           IsTupleSlotWith(String("string"), IsNull()), _));
+}
+
+TEST(RelationalOpTest, GraphInsertApplyOpWithGeneratedColumns) {
+  TypeFactory type_factory;
+  LanguageOptions language_options;
+
+  // 1. Setup base table and graph node table.
+  // Base table columns: id (int64), c1 (int64), gen_a (int64), gen_b (int64)
+  const StructType* row_struct_type;
+  GOOGLESQL_ASSERT_OK(type_factory.MakeStructType({{"id", types::Int64Type()},
+                                         {"c1", types::Int64Type()},
+                                         {"gen_a", types::Int64Type()},
+                                         {"gen_b", types::Int64Type()}},
+                                        &row_struct_type));
+
+  SimpleTable base_table("MyNodeTable", {{"id", types::Int64Type()},
+                                         {"c1", types::Int64Type()},
+                                         {"gen_a", types::Int64Type()},
+                                         {"gen_b", types::Int64Type()}});
+
+  SimpleGraphNodeTable graph_node_table(
+      base_table.Name(), {"graph"}, &base_table, /*key_cols=*/{0},
+      /*labels=*/{}, /*property_definitions=*/{});
+
+  // 2. Setup expressions for generated columns:
+  // gen_b = c1 + 1
+  // gen_a = gen_b * 2
+  VariableId c1_var("c1");
+  VariableId gen_b_var("gen_b");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto deref_c1,
+                       DerefExpr::Create(c1_var, types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto one, ConstExpr::Create(Int64(1)));
+  std::vector<std::unique_ptr<ValueExpr>> add_args;
+  add_args.push_back(std::move(deref_c1));
+  add_args.push_back(std::move(one));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto add_expr,
+      BuiltinScalarFunction::CreateCall(
+          FunctionKind::kAdd, language_options, types::Int64Type(),
+          ConvertValueExprsToAlgebraArgs(std::move(add_args)),
+          ResolvedFunctionCallBase::DEFAULT_ERROR_MODE));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto deref_gen_b,
+                       DerefExpr::Create(gen_b_var, types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto two, ConstExpr::Create(Int64(2)));
+  std::vector<std::unique_ptr<ValueExpr>> mul_args;
+  mul_args.push_back(std::move(deref_gen_b));
+  mul_args.push_back(std::move(two));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto mul_expr,
+      BuiltinScalarFunction::CreateCall(
+          FunctionKind::kMultiply, language_options, types::Int64Type(),
+          ConvertValueExprsToAlgebraArgs(std::move(mul_args)),
+          ResolvedFunctionCallBase::DEFAULT_ERROR_MODE));
+
+  std::vector<GraphInsertApplyOp::GeneratedColumnInfo> generated_columns;
+  // Topologically sorted: gen_b evaluated first, gen_a second.
+  GraphInsertApplyOp::GeneratedColumnInfo gen_b_info;
+  gen_b_info.target_column = base_table.GetColumn(3);
+  gen_b_info.target_col_idx = 3;
+  gen_b_info.expr = std::move(add_expr);
+  generated_columns.push_back(std::move(gen_b_info));
+
+  GraphInsertApplyOp::GeneratedColumnInfo gen_a_info;
+  gen_a_info.target_column = base_table.GetColumn(2);
+  gen_a_info.target_col_idx = 2;
+  gen_a_info.expr = std::move(mul_expr);
+  generated_columns.push_back(std::move(gen_a_info));
+
+  // Static properties: id=1, c1=10
+  std::vector<GraphInsertApplyOp::PropertyToInsert> properties;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto id_val, ConstExpr::Create(Int64(1)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto c1_val, ConstExpr::Create(Int64(10)));
+  GraphInsertApplyOp::PropertyToInsert id_prop;
+  id_prop.name = "id";
+  id_prop.target_column = base_table.GetColumn(0);
+  id_prop.target_col_idx = 0;
+  id_prop.expr = std::move(id_val);
+  properties.push_back(std::move(id_prop));
+
+  GraphInsertApplyOp::PropertyToInsert c1_prop;
+  c1_prop.name = "c1";
+  c1_prop.target_column = base_table.GetColumn(1);
+  c1_prop.target_col_idx = 1;
+  c1_prop.expr = std::move(c1_val);
+  properties.push_back(std::move(c1_prop));
+
+  VariableId row_var("row_n");
+  std::vector<GraphInsertApplyOp::ElementToInsert> nodes_to_insert;
+  GraphInsertApplyOp::ElementToInsert node_to_insert;
+  node_to_insert.table = &graph_node_table;
+  node_to_insert.row_variable = row_var;
+  node_to_insert.static_properties = std::move(properties);
+  node_to_insert.table_variables = {VariableId("id"), VariableId("c1"),
+                                    VariableId("gen_a"), VariableId("gen_b")};
+  node_to_insert.generated_columns = std::move(generated_columns);
+  nodes_to_insert.push_back(std::move(node_to_insert));
+
+  // 3. Create GraphInsertApplyOp with an EnumerateOp(1) input.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto count_expr, ConstExpr::Create(Int64(1)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto enumerate_op,
+                       EnumerateOp::Create(std::move(count_expr)));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto insert_op,
+                       GraphInsertApplyOp::Create(std::move(nodes_to_insert),
+                                                  /*edges_to_insert=*/{},
+                                                  std::move(enumerate_op)));
+
+  GOOGLESQL_ASSERT_OK(insert_op->SetSchemasForEvaluation({}));
+
+  // 4. Setup EvaluationContext with empty initial table.
+  const ArrayType* table_array_type;
+  GOOGLESQL_ASSERT_OK(type_factory.MakeArrayType(row_struct_type, &table_array_type));
+  Value initial_table = Value::EmptyArray(table_array_type);
+
+  EvaluationContext context((EvaluationOptions()));
+  GOOGLESQL_ASSERT_OK(context.AddTableAsArray(base_table.Name(), /*is_value_table=*/false,
+                                    initial_table, language_options));
+
+  // 5. Execute iterator.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TupleIterator> iter,
+      insert_op->CreateIterator({}, /*num_extra_slots=*/0, &context));
+
+  TupleData* tuple = iter->Next();
+  ASSERT_NE(tuple, nullptr);
+
+  // The output schema has row_n as its last variable slot.
+  std::optional<int> row_slot_idx =
+      iter->Schema().FindIndexForVariable(row_var);
+  ASSERT_TRUE(row_slot_idx.has_value());
+
+  Value row_val = tuple->slot(*row_slot_idx).value();
+  EXPECT_TRUE(row_val.type()->IsStruct());
+  EXPECT_EQ(row_val.field(0), Int64(1));   // id
+  EXPECT_EQ(row_val.field(1), Int64(10));  // c1
+  EXPECT_EQ(row_val.field(2), Int64(22));  // gen_a = gen_b * 2 = 11 * 2 = 22
+  EXPECT_EQ(row_val.field(3), Int64(11));  // gen_b = c1 + 1 = 10 + 1 = 11
+
+  // Advancing to end triggers CommitInsertions().
+  EXPECT_EQ(iter->Next(), nullptr);
+  GOOGLESQL_EXPECT_OK(iter->Status());
+
+  // Verify that base table in context was updated with the new row.
+  Value committed_table = context.GetTableAsArray(base_table.Name());
+  EXPECT_EQ(committed_table.num_elements(), 1);
+  EXPECT_EQ(committed_table.element(0), row_val);
+  EXPECT_EQ(context.GetNumRowsModified(base_table.Name()), 1);
 }
 
 // Tests PivotOp behavior when grouping by array columns.

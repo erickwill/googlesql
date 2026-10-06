@@ -299,6 +299,17 @@ statement.
       <td>Binary</td>
     </tr>
 
+  <tr>
+    <td>&nbsp;</td>
+    <td>General quantified comparisons</td>
+    <td>Any comparable types. See
+    <a href="https://github.com/google/googlesql/blob/master/docs/data-types.md">Data Types</a>
+
+    for a complete list.</td>
+    <td>Compares a search value to a set of values.</td>
+    <td>Binary</td>
+  </tr>
+
     <tr>
       <td>&nbsp;</td>
       <td><code>IS [NOT] DISTINCT FROM</code></td>
@@ -590,6 +601,12 @@ ambiguity. For example:
   <td><a href="#like_operator_quantified">Quantified <code>LIKE</code> operator</a>
 </td>
   <td>Checks a search value for matches against several patterns.</td>
+</tr>
+
+<tr>
+  <td><a href="#general_quantified_comparisons">General quantified comparisons</a>
+</td>
+  <td>Compares a search value to a set of values.</td>
 </tr>
 
 <tr>
@@ -3755,6 +3772,258 @@ SELECT b'a' LIKE ALL (COLLATE('a', 'und:ci'), 'A');
 [semantic-rules-quant-like]: #semantic_rules_quant_like
 
 [reg-expressions-quant-like]: #reg_expressions_quant_like
+
+[operators-subqueries]: https://github.com/google/googlesql/blob/master/docs/subqueries.md#about_subqueries
+
+[operators-link-to-unnest]: https://github.com/google/googlesql/blob/master/docs/query-syntax.md#unnest_operator
+
+[collation]: https://github.com/google/googlesql/blob/master/docs/collation-concepts.md#collate_funcs
+
+### General quantified comparisons 
+<a id="general_quantified_comparisons"></a>
+
+General quantified comparisons support the following syntax:
+
+```googlesql
+expression comparison_operator quantifier value_set
+
+comparison_operator:
+  { = | != | <> | < | <= | > | >= }
+
+quantifier:
+  { ANY | SOME | ALL }
+
+value_set:
+  {
+    (expression[, ...])
+    | (subquery)
+    | UNNEST(array_expression)
+  }
+```
+
+**Description**
+
+Compares an expression to a set of values using a comparison operator and a
+quantifier.
+
+[Semantic rules][semantic-rules-general-quantified-comparisons] apply, but in
+general, the quantifiers behave as follows:
+
++ An `ANY` or `SOME` comparison returns `TRUE` if the comparison evaluates to
+  `TRUE` for at least one value in `value_set`, `FALSE` if the comparison
+  evaluates to `FALSE` for all values in `value_set`, or otherwise `NULL`.
++ An `ALL` comparison returns `TRUE` if the comparison evaluates to `TRUE` for
+  all values in `value_set`, `FALSE` if the comparison evaluates to `FALSE` for
+  at least one value in `value_set`, or otherwise `NULL`.
+
+**Definitions**
+
++ `expression`: The value that's compared to a set of values.
++ `comparison_operator`: The comparison operator used to compare `expression` to
+  each value in `value_set`. Supported operators include `=`, `!=`, `<>`, `<`,
+  `<=`, `>`, and `>=`.
++ `quantifier`: Condition for the comparison:
+  + `ANY`: Checks if the comparison evaluates to `TRUE` for at least one value
+    in `value_set`.
+  + `SOME`: Synonym for `ANY`.
+  + `ALL`: Checks if the comparison evaluates to `TRUE` for all values in
+    `value_set`.
++ `value_set`: One or more values to compare to `expression`. Supported forms:
+  + `(expression[, ...])`: A list of expressions.
+  + `(subquery)`: A [subquery][operators-subqueries] that returns a single
+    column. The values in that column are the set of values. If no rows are
+    produced, the set of values is empty.
+  + `UNNEST(array_expression)`: An [UNNEST operator][operators-link-to-unnest]
+    that returns a column of values from an array expression.
+
+**Collation caveats**
+
+[Collation][collation] is supported, but the following caveats apply:
+
++ If an input has no collation specification or an empty collation
+  specification and another input has an explicitly defined collation, the
+  explicitly defined collation is used for all comparisons.
++ All inputs with a non-empty, explicitly defined collation specification must
+  have the same collation specification, otherwise an error is returned.
+
+<a id="semantic_rules_general_quantified_comparisons"></a>
+
+**Semantic rules**
+
+When using a general quantified comparison with `ANY` or `SOME`, the following
+semantics apply in this order:
+
+1. Returns `FALSE` if `value_set` is empty.
+1. Returns `TRUE` if `expression comparison_operator value` evaluates to `TRUE`
+   for at least one value in `value_set`.
+1. Returns `FALSE` if `expression comparison_operator value` evaluates to
+   `FALSE` for all values in `value_set`.
+1. Returns `NULL`.
+
+When using a general quantified comparison with `ALL`, the following semantics
+apply in this order:
+
+1. Returns `TRUE` if `value_set` is empty.
+1. Returns `TRUE` if `expression comparison_operator value` evaluates to `TRUE`
+   for all values in `value_set`.
+1. Returns `FALSE` if `expression comparison_operator value` evaluates to
+   `FALSE` for at least one value in `value_set`.
+1. Returns `NULL`.
+
+Conceptually, `ANY` (or `SOME`) behaves like a chain of `OR` expressions, and
+`ALL` behaves like a chain of `AND` expressions.
+
+The semantics of:
+
+```googlesql
+x comparison_operator { ANY | SOME } (y, z, ...)
+```
+
+are defined as equivalent to:
+
+```googlesql
+FALSE OR (x comparison_operator y) OR (x comparison_operator z) OR ...
+```
+
+The semantics of:
+
+```googlesql
+x comparison_operator ALL (y, z, ...)
+```
+
+are defined as equivalent to:
+
+```googlesql
+TRUE AND (x comparison_operator y) AND (x comparison_operator z) AND ...
+```
+
+The subquery and array forms are defined similarly.
+
+**Return data type**
+
+`BOOL`
+
+**Examples**
+
+You can use this `WITH` clause to emulate a temporary table for `Numbers` in the
+following examples:
+
+```googlesql
+WITH Numbers AS (
+  SELECT 1 AS x UNION ALL
+  SELECT 2 UNION ALL
+  SELECT 3 UNION ALL
+  SELECT 4 UNION ALL
+  SELECT 5
+)
+SELECT * FROM Numbers;
+
+/*---+
+ | x |
+ +---+
+ | 1 |
+ | 2 |
+ | 3 |
+ | 4 |
+ | 5 |
+ +---*/
+```
+
+Example with `= ANY` and an expression list:
+
+```googlesql
+SELECT x FROM Numbers WHERE x = ANY (2, 4);
+
+/*---+
+ | x |
+ +---+
+ | 2 |
+ | 4 |
+ +---*/
+```
+
+Example with `> ALL` and an expression list:
+
+```googlesql
+SELECT x FROM Numbers WHERE x > ALL (2, 3);
+
+/*---+
+ | x |
+ +---+
+ | 4 |
+ | 5 |
+ +---*/
+```
+
+Example with `< ANY` and a subquery:
+
+```googlesql
+WITH
+  Numbers AS (
+    SELECT 1 AS x UNION ALL
+    SELECT 2 UNION ALL
+    SELECT 3 UNION ALL
+    SELECT 4 UNION ALL
+    SELECT 5
+  ),
+  Targets AS (
+    SELECT 3 AS target
+  )
+SELECT x FROM Numbers WHERE x < ANY (SELECT target FROM Targets);
+
+/*---+
+ | x |
+ +---+
+ | 1 |
+ | 2 |
+ +---*/
+```
+
+Example with `!= ALL` and an `UNNEST` operation:
+
+```googlesql
+SELECT x FROM Numbers WHERE x != ALL UNNEST([1, 2, 3, 4]);
+
+/*---+
+ | x |
+ +---+
+ | 5 |
+ +---*/
+```
+
+The following queries illustrate the semantic rules and three-valued logic for
+general quantified comparisons:
+
+```googlesql
+SELECT
+  5 = ANY (1, 5, 10) AS a,    -- TRUE: At least one comparison (5 = 5) is TRUE.
+  5 = ANY (1, 2, 3) AS b,     -- FALSE: All comparisons evaluate to FALSE.
+  5 = ANY (1, NULL, 5) AS c,  -- TRUE: 5 = 5 is TRUE, regardless of NULL.
+  5 = ANY (1, NULL, 2) AS d,  -- NULL: No comparison is TRUE and 5 = NULL is NULL.
+
+  5 = ALL (5, 5) AS e,        -- TRUE: All comparisons evaluate to TRUE.
+  5 = ALL (5, 10) AS f,       -- FALSE: At least one comparison (5 = 10) is FALSE.
+  5 = ALL (5, NULL) AS g,     -- NULL: No comparison is FALSE and 5 = NULL is NULL.
+  5 = ALL (1, NULL) AS h;     -- FALSE: 5 = 1 is FALSE, regardless of NULL.
+```
+
+The following queries illustrate the behavior of empty value sets:
+
+```googlesql
+SELECT
+  5 = ANY UNNEST([]) AS any_empty,  -- FALSE
+  5 = ALL UNNEST([]) AS all_empty;  -- TRUE
+```
+
+The following queries illustrate general quantified comparisons with collation:
+
+```googlesql
+SELECT
+  'a' = ANY ('A', COLLATE('B', 'und:ci')) AS a,  -- TRUE
+  'a' = ALL ('a', COLLATE('A', 'und:ci')) AS b;  -- TRUE
+```
+
+[semantic-rules-general-quantified-comparisons]: #semantic_rules_general_quantified_comparisons
 
 [operators-subqueries]: https://github.com/google/googlesql/blob/master/docs/subqueries.md#about_subqueries
 
@@ -9821,7 +10090,7 @@ FROM UNNEST([3, 4, 5]) AS start;
 ### `GENERATE_DATE_ARRAY`
 
 ```googlesql
-GENERATE_DATE_ARRAY(start_date, end_date[, INTERVAL INT64_expr date_part])
+GENERATE_DATE_ARRAY(start_date, end_date[, INTERVAL step_size step_unit])
 ```
 
 **Description**
@@ -9831,19 +10100,20 @@ parameters determine the inclusive start and end of the array.
 
 The `GENERATE_DATE_ARRAY` function accepts the following data types as inputs:
 
-+ `start_date` must be a `DATE`.
-+ `end_date` must be a `DATE`.
-+ `INT64_expr` must be an `INT64`.
-+ `date_part` must be either DAY, WEEK, MONTH, QUARTER, or YEAR.
++ `start_date`: `DATE`
++ `end_date`: `DATE`
++ `step_size`: `INT64`
++ `step_unit`: `DAY`, `WEEK`, `MONTH`, `QUARTER`, or `YEAR`.
 
-The `INT64_expr` parameter determines the increment used to generate dates. The
+The `step_size` parameter determines the increment used to generate dates. The
 default value for this parameter is 1 day.
 
 The `GENERATE_DATE_ARRAY` function returns an error if any of the following are
 true:
 
-+   `INT64_expr` is set to 0.
-+   The resulting array is too large.
++   `step_size` is set to 0.
++   The resulting array exceeds the maximum size allowed by the engine. The GoogleSQL default limit is 16,000
+    elements, though individual query engines may configure a different limit.
 
 **Return Data Type**
 
@@ -9930,7 +10200,7 @@ SELECT GENERATE_DATE_ARRAY('2016-10-05', NULL) AS example;
  +---------*/
 ```
 
-The following returns an array of dates, using MONTH as the `date_part`
+The following returns an array of dates, using MONTH as the `step_unit`
 interval:
 
 ```googlesql
@@ -9969,7 +10239,7 @@ FROM (
 
 ```googlesql
 GENERATE_TIMESTAMP_ARRAY(start_timestamp, end_timestamp,
-                         INTERVAL step_expression date_part)
+                         INTERVAL step_size step_unit)
 ```
 
 **Description**
@@ -9983,20 +10253,21 @@ inputs:
 
 + `start_timestamp`: `TIMESTAMP`
 + `end_timestamp`: `TIMESTAMP`
-+ `step_expression`: `INT64`
-+ Allowed `date_part` values are:
++ `step_size`: `INT64`
++ `step_unit`:
   `PICOSECOND`,
   `NANOSECOND`,
   `MICROSECOND`, `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, or `DAY`.
 
-The `step_expression` parameter determines the increment used to generate
+The `step_size` parameter determines the increment used to generate
 timestamps.
 
 The `GENERATE_TIMESTAMP_ARRAY` function returns an error if any of the following
 are true:
 
-+   `step_expression` evaluates to 0.
-+   The resulting array is too large.
++   `step_size` evaluates to 0.
++   The resulting array exceeds the maximum size allowed by the engine. The GoogleSQL default limit is 16,000
+    elements, though individual query engines may configure a different limit.
 
 **Return Data Type**
 
@@ -13632,14 +13903,14 @@ SELECT
 ### `DATE_ADD`
 
 ```googlesql
-DATE_ADD(date_expression, INTERVAL int64_expression date_part)
+DATE_ADD(date_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds a specified time interval to a DATE.
+Adds a specified time interval to a `DATE` object.
 
-`DATE_ADD` supports the following `date_part` values:
+`DATE_ADD` supports the following `step_unit` values:
 
 +  `DAY`
 +  `WEEK`. Equivalent to 7 `DAY`s.
@@ -13649,7 +13920,7 @@ Adds a specified time interval to a DATE.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when
 the date is at (or near) the last day of the month. If the resulting
-month has fewer days than the original date's day, then the resulting
+month has fewer days than the original `DATE` object's day, then the resulting
 date is the last date of that month.
 
 **Return Data Type**
@@ -13703,7 +13974,9 @@ Gets the number of unit boundaries between two `DATE` values (`end_date` -
 
 **Details**
 
-If `end_date` is earlier than `start_date`, the output is negative.
+If `end_date` is earlier than `start_date`, the output is 0 or negative.
+Decimals are always truncated rather than rounded. For example, both 3.9 and 3.1
+become 3, while -3.9 and -3.1 become -3 (instead of -4).
 
 Note: The behavior of the this function follows the type of arguments passed in.
 For example, `DATE_DIFF(TIMESTAMP, TIMESTAMP, PART)`
@@ -13713,7 +13986,7 @@ behaves like `TIMESTAMP_DIFF(TIMESTAMP, TIMESTAMP, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT DATE_DIFF(DATE '2010-07-07', DATE '2008-12-25', DAY) AS days_diff;
@@ -13723,6 +13996,24 @@ SELECT DATE_DIFF(DATE '2010-07-07', DATE '2008-12-25', DAY) AS days_diff;
  +-----------+
  | 559       |
  +-----------*/
+```
+
+In the following example, `DATE_DIFF` truncates the output rather than rounding
+it. Both 3 years 11 months (3.9 years) and 3 years 1 month (3.1 years)
+truncate to 3 years, and their negative counterparts truncate to -3 years:
+
+```googlesql
+SELECT
+  DATE_DIFF(DATE '2023-11-30', DATE '2020-01-01', YEAR) AS diff_3_9,
+  DATE_DIFF(DATE '2023-02-01', DATE '2020-01-01', YEAR) AS diff_3_1,
+  DATE_DIFF(DATE '2020-01-01', DATE '2023-11-30', YEAR) AS diff_negative_3_9,
+  DATE_DIFF(DATE '2020-01-01', DATE '2023-02-01', YEAR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ```googlesql
@@ -13815,14 +14106,14 @@ SELECT DATE_FROM_UNIX_DATE(14238) AS date_from_epoch;
 ### `DATE_SUB`
 
 ```googlesql
-DATE_SUB(date_expression, INTERVAL int64_expression date_part)
+DATE_SUB(date_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts a specified time interval from a DATE.
+Subtracts a specified time interval from a `DATE` object.
 
-`DATE_SUB` supports the following `date_part` values:
+`DATE_SUB` supports the following `step_unit` values:
 
 +  `DAY`
 +  `WEEK`. Equivalent to 7 `DAY`s.
@@ -13832,7 +14123,7 @@ Subtracts a specified time interval from a DATE.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when
 the date is at (or near) the last day of the month. If the resulting
-month has fewer days than the original date's day, then the resulting
+month has fewer days than the original `DATE` object's day, then the resulting
 date is the last date of that month.
 
 **Return Data Type**
@@ -14849,14 +15140,14 @@ SELECT
 ### `DATETIME_ADD`
 
 ```googlesql
-DATETIME_ADD(datetime_expression, INTERVAL int64_expression part)
+DATETIME_ADD(datetime_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds `int64_expression` units of `part` to the `DATETIME` object.
+Adds `step_size` units of `step_unit` to the `DATETIME` object.
 
-`DATETIME_ADD` supports the following values for `part`:
+`DATETIME_ADD` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -14872,7 +15163,7 @@ Adds `int64_expression` units of `part` to the `DATETIME` object.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when the
 date is at (or near) the last day of the month. If the resulting month has fewer
-days than the original DATETIME's day, then the result day is the last day of
+days than the original `DATETIME` object's day, then the result day is the last day of
 the new month.
 
 **Return Data Type**
@@ -14936,7 +15227,10 @@ Gets the number of unit boundaries between two `DATETIME` values
 
 **Details**
 
-If `end_datetime` is earlier than `start_datetime`, the output is negative.
+If `end_datetime` is earlier than `start_datetime`, the output is 0 or negative.
+Decimals are always truncated rather than rounded. For example, both 3.9 and 3.1
+become 3, while -3.9 and -3.1 become -3 (instead of -4).
+
 Produces an error if the computation overflows, such as if the difference
 in nanoseconds
 between the two `DATETIME` values overflows.
@@ -14949,7 +15243,7 @@ behaves like `TIMESTAMP_DIFF(TIMESTAMP, TIMESTAMP, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT
@@ -14963,6 +15257,29 @@ SELECT
  +----------------------------+------------------------+------------------------+
  | 2010-07-07 10:20:00        | 2008-12-25 15:30:00    | 559                    |
  +----------------------------+------------------------+------------------------*/
+```
+
+In the following example, `DATETIME_DIFF` truncates the output rather than
+rounding it. Both 3 hours 54 minutes (3.9 hours) and 3 hours 6 minutes (3.1
+hours) truncate to 3 hours, and their negative counterparts truncate to -3
+hours:
+
+```googlesql
+SELECT
+  DATETIME_DIFF(DATETIME '2021-05-01 04:54:00',
+    DATETIME '2021-05-01 01:00:00', HOUR) AS diff_3_9,
+  DATETIME_DIFF(DATETIME '2021-05-01 04:06:00',
+    DATETIME '2021-05-01 01:00:00', HOUR) AS diff_3_1,
+  DATETIME_DIFF(DATETIME '2021-05-01 01:00:00',
+    DATETIME '2021-05-01 04:54:00', HOUR) AS diff_negative_3_9,
+  DATETIME_DIFF(DATETIME '2021-05-01 01:00:00',
+    DATETIME '2021-05-01 04:06:00', HOUR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ```googlesql
@@ -15034,14 +15351,14 @@ SELECT
 ### `DATETIME_SUB`
 
 ```googlesql
-DATETIME_SUB(datetime_expression, INTERVAL int64_expression part)
+DATETIME_SUB(datetime_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts `int64_expression` units of `part` from the `DATETIME`.
+Subtracts `step_size` units of `step_unit` from the `DATETIME` object.
 
-`DATETIME_SUB` supports the following values for `part`:
+`DATETIME_SUB` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -15057,7 +15374,7 @@ Subtracts `int64_expression` units of `part` from the `DATETIME`.
 
 Special handling is required for `MONTH`, `QUARTER`, and `YEAR` parts when the
 date is at (or near) the last day of the month. If the resulting month has fewer
-days than the original `DATETIME`'s day, then the result day is the last day of
+days than the original `DATETIME` object's day, then the result day is the last day of
 the new month.
 
 **Return Data Type**
@@ -21665,8 +21982,8 @@ ST_HAUSDORFFDISTANCE(
 **Description**
 
 Gets the discrete [Hausdorff distance][h-distance], which is the greatest of all
-the distances from a discrete point in one geography to the closest
-discrete point in another geography.
+the distances from a discrete point in one geography to the closest point in
+another geography.
 
 **Definitions**
 
@@ -24201,6 +24518,10 @@ behavior:
         
         <a href="#json_contains"><code>JSON_CONTAINS</code></a><br>
         
+        <a href="#json_exists"><code>JSON_EXISTS</code></a><br>
+        <a href="#json_exists_all"><code>JSON_EXISTS_ALL</code></a><br>
+        <a href="#json_exists_any"><code>JSON_EXISTS_ANY</code></a><br>
+        
       </td>
       <td>
         Functions that return <code>BOOL</code> when checking JSON documents for
@@ -24354,6 +24675,33 @@ behavior:
 </td>
   <td>
     Checks if a JSON document contains another JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="#json_exists"><code>JSON_EXISTS</code></a>
+</td>
+  <td>
+    Checks if a JSONPath exists in a JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="#json_exists_all"><code>JSON_EXISTS_ALL</code></a>
+</td>
+  <td>
+    Checks if all JSONPaths in an array exist in a JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="#json_exists_any"><code>JSON_EXISTS_ANY</code></a>
+</td>
+  <td>
+    Checks if any JSONPaths in an array exist in a JSON document.
     
   </td>
 </tr>
@@ -26091,6 +26439,253 @@ SELECT
  |   true   |   false  |   false  |
  +----------*----------*----------*/
 ```
+
+### `JSON_EXISTS`
+
+```googlesql
+JSON_EXISTS(json_expr, json_path)
+```
+
+**Description**
+
+Checks if a [JSONPath][JSONPath-format] exists in a JSON document. Returns
+`TRUE` if the specified JSONPath matches any value (including a JSON `null`) in
+the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path`: A `STRING` literal or query-time constant
+    [JSONPath][JSONPath-format] that identifies the path to check in
+    `json_expr`.
+
+Details:
+
++   If `json_path` matches a JSON `null` value in `json_expr`, the function
+    returns `TRUE`.
++   If `json_path` is `'$'`, the function returns `TRUE` for any non-`NULL`
+    `JSON` value, including `JSON 'null'`, `JSON '[]'`, `JSON '{}'`, and JSON
+    scalar values.
++   If `json_expr` or `json_path` is SQL `NULL`, the function returns `NULL`.
++   If `json_path` isn't a valid [JSONPath][JSONPath-format], the function
+    returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether various JSONPaths exist in a JSON object,
+including a key whose value is JSON `null` (`$.b`):
+
+```googlesql
+SELECT
+  JSON_EXISTS(data, '$.a') AS has_a,
+  JSON_EXISTS(data, '$.b') AS has_b,
+  JSON_EXISTS(data, '$.c') AS has_c
+FROM UNNEST([JSON '{"a": 10, "b": null}']) AS data;
+
+/*-------+-------+-------+
+ | has_a | has_b | has_c |
+ +-------+-------+-------+
+ | true  | true  | false |
+ +-------+-------+-------*/
+```
+
+The following example checks whether array elements and nested fields exist in
+a JSON document:
+
+```googlesql
+SELECT
+  JSON_EXISTS(data, '$.class.students[0].name') AS first_student_name,
+  JSON_EXISTS(data, '$.class.students[1].age') AS second_student_age,
+  JSON_EXISTS(data, '$.class.students[2].name') AS third_student_name
+FROM
+  UNNEST(
+    [
+      JSON '{"class": {"students": [{"name": "Jane"}, {"name": "John"}]}}'
+    ]
+  ) AS data;
+
+/*--------------------+--------------------+--------------------+
+ | first_student_name | second_student_age | third_student_name |
+ +--------------------+--------------------+--------------------+
+ | true               | false              | false              |
+ +--------------------+--------------------+--------------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+### `JSON_EXISTS_ALL`
+
+```googlesql
+JSON_EXISTS_ALL(json_expr, json_path_array)
+```
+
+**Description**
+
+Checks if all [JSONPaths][JSONPath-format] in an array exist in a JSON document.
+Returns `TRUE` if every JSONPath in the array matches at least one value
+(including a JSON `null`) in the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path_array`: A literal or query-time constant `ARRAY<STRING>` of
+    [JSONPaths][JSONPath-format] that identify the paths to check in
+    `json_expr`.
+
+Details:
+
++   For a non-empty `json_path_array` (`[path1, path2, ...]`),
+    `JSON_EXISTS_ALL(json_expr, [path1, path2, ...])` is semantically equivalent
+    to `JSON_EXISTS(json_expr, path1) AND JSON_EXISTS(json_expr, path2) AND ...`
+    (see [`JSON_EXISTS`][json-exists]), following standard three-valued logic:
+    +   If any path doesn't exist in `json_expr`, the function returns `FALSE`
+        (even if another element in `json_path_array` is `NULL`).
+    +   If all non-`NULL` paths exist in `json_expr` and at least one element in
+        `json_path_array` is `NULL`, the function returns `NULL`.
++   If `json_path_array` is an empty array (`[]`) and `json_expr` isn't SQL
+    `NULL`, the function returns `TRUE`.
++   If `json_expr` or `json_path_array` is SQL `NULL`, the function returns
+    `NULL`.
++   If any non-`NULL` element in `json_path_array` isn't a valid
+    [JSONPath][JSONPath-format], the function returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether all specified JSONPaths exist in a JSON
+object:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ALL(data, ['$.a', '$.b.c']) AS all_exist,
+  JSON_EXISTS_ALL(data, ['$.a', '$.b.d']) AS missing_one
+FROM UNNEST([JSON '{"a": 10, "b": {"c": null}}']) AS data;
+
+/*-----------+-------------+
+ | all_exist | missing_one |
+ +-----------+-------------+
+ | true      | false       |
+ +-----------+-------------*/
+```
+
+The following example demonstrates three-valued logic when `json_path_array`
+contains `NULL` elements or is empty:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ALL(data, ['$.a', NULL]) AS match_and_null,
+  JSON_EXISTS_ALL(data, ['$.b', NULL]) AS no_match_and_null,
+  JSON_EXISTS_ALL(data, []) AS empty_paths
+FROM UNNEST([JSON '{"a": 10}']) AS data;
+
+/*----------------+-------------------+-------------+
+ | match_and_null | no_match_and_null | empty_paths |
+ +----------------+-------------------+-------------+
+ | NULL           | false             | true        |
+ +----------------+-------------------+-------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+[json-exists]: #json_exists
+
+### `JSON_EXISTS_ANY`
+
+```googlesql
+JSON_EXISTS_ANY(json_expr, json_path_array)
+```
+
+**Description**
+
+Checks if any [JSONPaths][JSONPath-format] in an array exist in a JSON document.
+Returns `TRUE` if at least one JSONPath in the array matches a value (including
+a JSON `null`) in the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path_array`: A literal or query-time constant `ARRAY<STRING>` of
+    [JSONPaths][JSONPath-format] that identify the paths to check in
+    `json_expr`.
+
+Details:
+
++   For a non-empty `json_path_array` (`[path1, path2, ...]`),
+    `JSON_EXISTS_ANY(json_expr, [path1, path2, ...])` is semantically equivalent
+    to `JSON_EXISTS(json_expr, path1) OR JSON_EXISTS(json_expr, path2) OR ...`
+    (see [`JSON_EXISTS`][json-exists]), following standard three-valued logic:
+    +   If at least one path exists in `json_expr`, the function returns `TRUE`
+        (even if another element in `json_path_array` is `NULL`).
+    +   If no non-`NULL` path exists in `json_expr` and at least one element in
+        `json_path_array` is `NULL`, the function returns `NULL`.
++   If `json_path_array` is an empty array (`[]`) and `json_expr` isn't SQL
+    `NULL`, the function returns `FALSE`.
++   If `json_expr` or `json_path_array` is SQL `NULL`, the function returns
+    `NULL`.
++   If any non-`NULL` element in `json_path_array` isn't a valid
+    [JSONPath][JSONPath-format], the function returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether any of the specified JSONPaths exist in a
+JSON object:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ANY(data, ['$.x', '$.b.c']) AS any_exist,
+  JSON_EXISTS_ANY(data, ['$.x', '$.y']) AS none_exist
+FROM UNNEST([JSON '{"a": 10, "b": {"c": null}}']) AS data;
+
+/*-----------+------------+
+ | any_exist | none_exist |
+ +-----------+------------+
+ | true      | false      |
+ +-----------+------------*/
+```
+
+The following example demonstrates three-valued logic when `json_path_array`
+contains `NULL` elements or is empty:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ANY(data, ['$.a', NULL]) AS match_or_null,
+  JSON_EXISTS_ANY(data, ['$.b', NULL]) AS no_match_or_null,
+  JSON_EXISTS_ANY(data, []) AS empty_paths
+FROM UNNEST([JSON '{"a": 10}']) AS data;
+
+/*---------------+------------------+-------------+
+ | match_or_null | no_match_or_null | empty_paths |
+ +---------------+------------------+-------------+
+ | true          | NULL             | false       |
+ +---------------+------------------+-------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+[json-exists]: #json_exists
 
 ### `JSON_EXTRACT`
 
@@ -49270,14 +49865,14 @@ SELECT TIME(DATETIME "2008-12-25 15:30:00.000000") AS time_dt;
 ### `TIME_ADD`
 
 ```googlesql
-TIME_ADD(time_expression, INTERVAL int64_expression part)
+TIME_ADD(time_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds `int64_expression` units of `part` to the `TIME` object.
+Adds `step_size` units of `step_unit` to the `TIME` object.
 
-`TIME_ADD` supports the following values for `part`:
+`TIME_ADD` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -49337,7 +49932,10 @@ Gets the number of unit boundaries between two `TIME` values (`end_time` -
 
 **Details**
 
-If `end_time` is earlier than `start_time`, the output is negative.
+If `end_time` is earlier than `start_time`, the output is 0 or negative.
+Decimals are always truncated rather than rounded. For example, both 3.9 and 3.1
+become 3, while -3.9 and -3.1 become -3 (instead of -4).
+
 Produces an error if the computation overflows, such as if the difference
 in nanoseconds
 between the two `TIME` values overflows.
@@ -49350,7 +49948,7 @@ behaves like `TIMESTAMP_DIFF(TIMESTAMP, TIMESTAMP, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT
@@ -49365,17 +49963,36 @@ SELECT
  +----------------------------+------------------------+------------------------*/
 ```
 
+In the following example, `TIME_DIFF` truncates the output rather than
+rounding it. Both 3 hours 54 minutes (3.9 hours) and 3 hours 6 minutes (3.1
+hours) truncate to 3 hours, and their negative counterparts truncate to -3
+hours:
+
+```googlesql
+SELECT
+  TIME_DIFF(TIME '04:54:00', TIME '01:00:00', HOUR) AS diff_3_9,
+  TIME_DIFF(TIME '04:06:00', TIME '01:00:00', HOUR) AS diff_3_1,
+  TIME_DIFF(TIME '01:00:00', TIME '04:54:00', HOUR) AS diff_negative_3_9,
+  TIME_DIFF(TIME '01:00:00', TIME '04:06:00', HOUR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
+```
+
 ### `TIME_SUB`
 
 ```googlesql
-TIME_SUB(time_expression, INTERVAL int64_expression part)
+TIME_SUB(time_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts `int64_expression` units of `part` from the `TIME` object.
+Subtracts `step_size` units of `step_unit` from the `TIME` object.
 
-`TIME_SUB` supports the following values for `part`:
+`TIME_SUB` supports the following values for `step_unit`:
 
 + `NANOSECOND`
 + `MICROSECOND`
@@ -50612,15 +51229,15 @@ SELECT TIMESTAMP(DATE "2008-12-25") AS timestamp_date;
 ### `TIMESTAMP_ADD`
 
 ```googlesql
-TIMESTAMP_ADD(timestamp_expression, INTERVAL int64_expression date_part)
+TIMESTAMP_ADD(timestamp_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds `int64_expression` units of `date_part` to the timestamp, independent of
+Adds `step_size` units of `step_unit` to the `TIMESTAMP` object, independent of
 any time zone.
 
-`TIMESTAMP_ADD` supports the following values for `date_part`:
+`TIMESTAMP_ADD` supports the following values for `step_unit`:
 
 + `PICOSECOND`
 + `NANOSECOND`
@@ -50681,10 +51298,13 @@ Gets the number of unit boundaries between two `TIMESTAMP` values
 
 **Details**
 
-If `end_timestamp` is earlier than `start_timestamp`, the output is negative.
-Produces an error if the computation overflows, such as if the difference
-in nanoseconds
-between the two `TIMESTAMP` values overflows.
+If `end_timestamp` is earlier than `start_timestamp`, the output is 0 or
+negative. Decimals are always truncated rather than rounded. For example, both
+3.9 and 3.1 become 3, while -3.9 and -3.1 become -3 (instead of -4).
+
+Produces an error if the computation overflows, such as if the difference in
+nanoseconds between
+the two `TIMESTAMP` values overflows.
 
 Note: The behavior of the this function follows the type of arguments passed in.
 For example, `TIMESTAMP_DIFF(DATE, DATE, PART)`
@@ -50694,7 +51314,7 @@ behaves like `DATE_DIFF(DATE, DATE, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT
@@ -50734,6 +51354,29 @@ SELECT TIMESTAMP_DIFF("2001-02-01 01:00:00", "2001-02-01 00:00:01", HOUR) AS dif
  +---------------+
  | 0             |
  +---------------*/
+```
+
+In the following example, `TIMESTAMP_DIFF` truncates the output rather than
+rounding it. Both 3 hours 54 minutes (3.9 hours) and 3 hours 6 minutes (3.1
+hours) truncate to 3 hours, and their negative counterparts truncate to -3
+hours:
+
+```googlesql
+SELECT
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 04:54:00+00',
+    TIMESTAMP '2021-05-01 01:00:00+00', HOUR) AS diff_3_9,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 04:06:00+00',
+    TIMESTAMP '2021-05-01 01:00:00+00', HOUR) AS diff_3_1,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 01:00:00+00',
+    TIMESTAMP '2021-05-01 04:54:00+00', HOUR) AS diff_negative_3_9,
+  TIMESTAMP_DIFF(TIMESTAMP '2021-05-01 01:00:00+00',
+    TIMESTAMP '2021-05-01 04:06:00+00', HOUR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ### `TIMESTAMP_FROM_UNIX_MICROS`
@@ -50922,15 +51565,15 @@ SELECT TIMESTAMP_SECONDS(1230219000) AS timestamp_value;
 ### `TIMESTAMP_SUB`
 
 ```googlesql
-TIMESTAMP_SUB(timestamp_expression, INTERVAL int64_expression date_part)
+TIMESTAMP_SUB(timestamp_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts `int64_expression` units of `date_part` from the timestamp,
+Subtracts `step_size` units of `step_unit` from the `TIMESTAMP` object,
 independent of any time zone.
 
-`TIMESTAMP_SUB` supports the following values for `date_part`:
+`TIMESTAMP_SUB` supports the following values for `step_unit`:
 
 + `PICOSECOND`
 + `NANOSECOND`

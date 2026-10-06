@@ -26,4 +26,5 @@ package(
 exports_files([
     "bison.bzl",
     "textmapper.bzl",
+    "ts_build_defs.bzl",
 ])

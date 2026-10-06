@@ -589,6 +589,11 @@ inline Value::Value(tokens::TokenList tokenlist)
 inline Value::Value(const UuidValue& uuid)
     : metadata_(TypeKind::TYPE_UUID), uuid_ptr_(new internal::UuidRef(uuid)) {}
 
+inline Value::Value(internal::VariantRef* /*absl_nonnull*/ variant_ptr)
+    : metadata_(TypeKind::TYPE_VARIANT), variant_ptr_(variant_ptr) {
+  ABSL_DCHECK(variant_ptr != nullptr);
+}
+
 inline absl::StatusOr<Value> Value::MakeStruct(const StructType* type,
                                                std::vector<Value>&& values) {
   return MakeStructInternal(/*already_validated=*/false, type,
@@ -825,6 +830,8 @@ inline Value Value::NullBigNumeric() {
 inline Value Value::NullJson() { return Value(TypeKind::TYPE_JSON); }
 inline Value Value::NullTokenList() { return Value(types::TokenListType()); }
 inline Value Value::NullUuid() { return Value(TypeKind::TYPE_UUID); }
+inline Value Value::NullVariant() { return Value(TypeKind::TYPE_VARIANT); }
+
 inline Value Value::EmptyGeography() {
   ABSL_CHECK(false);
   return NullGeography();
@@ -1469,6 +1476,8 @@ inline Value NullBigNumeric() { return Value::NullBigNumeric(); }
 inline Value NullJson() { return Value::NullJson(); }
 inline Value NullTokenList() { return Value::NullTokenList(); }
 inline Value NullUuid() { return Value::NullUuid(); }
+inline Value NullVariant() { return Value::NullVariant(); }
+
 inline Value Null(const Type* type) { return Value::Null(type); }
 
 inline Value Invalid() { return Value::Invalid(); }

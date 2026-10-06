@@ -73,12 +73,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#22 :=
+                  | +-grain_lock_key_0#22 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#21 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -166,12 +170,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#22 :=
+                  | +-grain_lock_key_0#22 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#19<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#21 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -274,12 +282,16 @@ QueryStmt
     |                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
     |                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"}>,_>)
     |                       +-group_by_list=
-    |                       | +-grain_lock_key#23 :=
+    |                       | +-grain_lock_key_0#23 :=
     |                       |   +-GetStructField
-    |                       |     +-type=STRUCT<key INT64>
+    |                       |     +-type=INT64
     |                       |     +-expr=
-    |                       |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"}>,_>)
-    |                       |     +-field_idx=1
+    |                       |     | +-GetStructField
+    |                       |     |   +-type=STRUCT<key INT64>
+    |                       |     |   +-expr=
+    |                       |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"}>,_>)
+    |                       |     |   +-field_idx=1
+    |                       |     +-field_idx=0
     |                       +-group_by_aggregate_list=
     |                         +-$any_value_grain_lock_0#22 :=
     |                           +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -390,12 +402,16 @@ QueryStmt
               |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
               |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
               |   +-group_by_list=
-              |   | +-grain_lock_key#24 :=
+              |   | +-grain_lock_key_0#24 :=
               |   |   +-GetStructField
-              |   |     +-type=STRUCT<key INT64>
+              |   |     +-type=INT64
               |   |     +-expr=
-              |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
-              |   |     +-field_idx=1
+              |   |     | +-GetStructField
+              |   |     |   +-type=STRUCT<key INT64>
+              |   |     |   +-expr=
+              |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
+              |   |     |   +-field_idx=1
+              |   |     +-field_idx=0
               |   +-group_by_aggregate_list=
               |     +-$any_value_grain_lock_0#23 :=
               |       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -420,12 +436,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#27 :=
+                  | +-grain_lock_key_0#27 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#21<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#26 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -554,12 +574,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#25 :=
+                  | +-grain_lock_key_0#25 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#24 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -704,12 +728,16 @@ QueryStmt
               |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
               |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
               |   +-group_by_list=
-              |   | +-grain_lock_key#26 :=
+              |   | +-grain_lock_key_0#26 :=
               |   |   +-GetStructField
-              |   |     +-type=STRUCT<key INT64>
+              |   |     +-type=INT64
               |   |     +-expr=
-              |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
-              |   |     +-field_idx=1
+              |   |     | +-GetStructField
+              |   |     |   +-type=STRUCT<key INT64>
+              |   |     |   +-expr=
+              |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
+              |   |     |   +-field_idx=1
+              |   |     +-field_idx=0
               |   +-group_by_aggregate_list=
               |     +-$any_value_grain_lock_0#25 :=
               |       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -734,12 +762,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#27<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#30 :=
+                  | +-grain_lock_key_0#30 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#27<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#27<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#29 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -869,12 +901,16 @@ QueryStmt
               |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
               |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
               |   +-group_by_list=
-              |   | +-grain_lock_key#26 :=
+              |   | +-grain_lock_key_0#26 :=
               |   |   +-GetStructField
-              |   |     +-type=STRUCT<key INT64>
+              |   |     +-type=INT64
               |   |     +-expr=
-              |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
-              |   |     +-field_idx=1
+              |   |     | +-GetStructField
+              |   |     |   +-type=STRUCT<key INT64>
+              |   |     |   +-expr=
+              |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#23<<{Collation:"und:ci"}>,_>)
+              |   |     |   +-field_idx=1
+              |   |     +-field_idx=0
               |   +-group_by_aggregate_list=
               |     +-$any_value_grain_lock_0#25 :=
               |       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -899,12 +935,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING, measure_ci STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING, measure_ci STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#28 :=
+                  | +-grain_lock_key_0#28 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING, measure_ci STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING, measure_ci STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>, column=MeasureTable_SingleKey_WithAnnotations.struct_for_measures_from_table_MeasureTable_SingleKey_WithAnnotations#20<<{Collation:"und:ci"},<<{Collation:"und:ci"}>,_>>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#27 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -1032,12 +1072,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#25 :=
+                  | +-grain_lock_key_0#25 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#24 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -1203,12 +1247,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#25<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#28 :=
+                  | +-grain_lock_key_0#28 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#25<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#25<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#27 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -1335,12 +1383,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#25 :=
+                  | +-grain_lock_key_0#25 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#24 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)
@@ -1478,12 +1530,16 @@ QueryStmt
                   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
                   +-group_by_list=
-                  | +-grain_lock_key#25 :=
+                  | +-grain_lock_key_0#25 :=
                   |   +-GetStructField
-                  |     +-type=STRUCT<key INT64>
+                  |     +-type=INT64
                   |     +-expr=
-                  |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
-                  |     +-field_idx=1
+                  |     | +-GetStructField
+                  |     |   +-type=STRUCT<key INT64>
+                  |     |   +-expr=
+                  |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<col_ci STRING>, key_columns STRUCT<key INT64>>, type_annotation_map=<<{Collation:"und:ci"}>,_>, column=$aggregate.dep_closure#22<<{Collation:"und:ci"}>,_>)
+                  |     |   +-field_idx=1
+                  |     +-field_idx=0
                   +-group_by_aggregate_list=
                     +-$any_value_grain_lock_0#24 :=
                       +-AggregateFunctionCall(GoogleSQL:any_value(STRING) -> STRING)

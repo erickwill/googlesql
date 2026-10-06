@@ -628,3 +628,43 @@ QueryStmt
         +-input_scan=
           +-TableScan(column_list=[TestStructValueTable.value#1], table=TestStructValueTable, column_index_list=[0])
 ==
+
+# This drops the column `a` and also makes the value table struct
+# field `a` inaccessible.
+FROM TestStructValueTable
+|> EXTEND 1 a
+|> DROP a
+|> STATIC_DESCRIBE
+{{|\|> WHERE a is not null}}
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStmt
++-output_column_list=
+| +-TestStructValueTable.value#1 AS TestStructValueTable [STRUCT<a INT32, b STRING>]
++-query=
+  +-StaticDescribeScan
+    +-column_list=[TestStructValueTable.value#1, $pipe_extend.a#2]
+    +-describe_text=
+    |   """
+    |   NameList:
+    |     TestStructValueTable STRUCT<a INT32, b STRING> TestStructValueTable.value#1 (value table) (excluded_field_names a)
+    |   NameScope:
+    |     Range variables:
+    |       TestStructValueTable -> RANGE_VARIABLE<value#1> (value table)
+    |     Value table columns:
+    |       TestStructValueTable.value#1 (excluded_field_names a)
+    |   """
+    +-input_scan=
+      +-ProjectScan
+        +-column_list=[TestStructValueTable.value#1, $pipe_extend.a#2]
+        +-expr_list=
+        | +-a#2 := Literal(type=INT64, value=1)
+        +-input_scan=
+          +-TableScan(column_list=[TestStructValueTable.value#1], table=TestStructValueTable, column_index_list=[0])
+--
+ALTERNATION GROUP: |> WHERE a is not null
+--
+ERROR: Unrecognized name: a [at 5:10]
+|> WHERE a is not null
+         ^

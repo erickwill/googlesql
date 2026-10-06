@@ -488,6 +488,66 @@ QueryStmt
           +-TestExtraValueTable.RowId#3 AS rowid [BYTES]
 ==
 
+# LOG with hints.
+FROM KeyValue
+|> LOG @{hint=1} {{|()|( \|> WHERE key=5 )}}
+--
+ALTERNATION GROUPS:
+    <empty>
+    ()
+--
+QueryStmt
++-output_column_list=
+| +-KeyValue.Key#1 AS Key [INT64]
+| +-KeyValue.Value#2 AS Value [STRING]
++-query=
+  +-LogScan
+    +-column_list=KeyValue.[Key#1, Value#2]
+    +-hint_list=
+    | +-hint := Literal(type=INT64, value=1)
+    +-input_scan=
+    | +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+    +-subpipeline=
+    | +-Subpipeline
+    |   +-scan=
+    |     +-SubpipelineInputScan(column_list=KeyValue.[Key#1, Value#2])
+    +-output_schema=
+      +-OutputSchema
+        +-output_column_list=
+          +-KeyValue.Key#1 AS Key [INT64]
+          +-KeyValue.Value#2 AS Value [STRING]
+--
+ALTERNATION GROUP: ( |> WHERE key=5 )
+--
+QueryStmt
++-output_column_list=
+| +-KeyValue.Key#1 AS Key [INT64]
+| +-KeyValue.Value#2 AS Value [STRING]
++-query=
+  +-LogScan
+    +-column_list=KeyValue.[Key#1, Value#2]
+    +-hint_list=
+    | +-hint := Literal(type=INT64, value=1)
+    +-input_scan=
+    | +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+    +-subpipeline=
+    | +-Subpipeline
+    |   +-scan=
+    |     +-FilterScan
+    |       +-column_list=KeyValue.[Key#1, Value#2]
+    |       +-input_scan=
+    |       | +-SubpipelineInputScan(column_list=KeyValue.[Key#1, Value#2])
+    |       +-filter_expr=
+    |         +-FunctionCall(GoogleSQL:$equal(INT64, INT64) -> BOOL)
+    |           +-ColumnRef(type=INT64, column=KeyValue.Key#1)
+    |           +-Literal(type=INT64, value=5)
+    +-output_schema=
+      +-OutputSchema
+        +-output_column_list=
+          +-KeyValue.Key#1 AS Key [INT64]
+          +-KeyValue.Value#2 AS Value [STRING]
+==
+
 # Test a nested LOG call.
 # This tests validation of a stack of nested subpipelines.
 FROM KeyValue

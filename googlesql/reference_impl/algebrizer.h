@@ -56,6 +56,7 @@
 #include "googlesql/resolved_ast/resolved_collation.h"
 #include "googlesql/resolved_ast/resolved_column.h"
 #include "googlesql/resolved_ast/resolved_node_kind.pb.h"
+#include "googlesql/base/case.h"
 #include "gtest/gtest_prod.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -290,6 +291,49 @@ class Algebrizer {
 
   absl::StatusOr<std::unique_ptr<NewGraphElementExpr>>
   AlgebrizeGraphMakeElement(const ResolvedGraphMakeElement* make_graph_element);
+
+  // Algebrize a graph element to be inserted to a target element table.
+  absl::StatusOr<GraphInsertApplyOp::ElementToInsert>
+  AlgebrizeGraphInsertElement(VariableId row_var,
+                              const ResolvedGraphInsertElement* insert_element);
+
+  // Returns the index of the given column in the given table, or -1 if the
+  // column is not found in the table.
+  static int GetBaseTableColumnIndex(const Table* table, const Column* column);
+
+  // Helper to create a FieldValueExpr accessing a field from a STRUCT typed row
+  // variable. The row struct type is built from a base table's schema.
+  static absl::StatusOr<std::unique_ptr<ValueExpr>> GetRowStructFieldValueExpr(
+      VariableId row_var, const StructType* row_struct_type, int col_idx);
+
+  // Algebrizes an expression over a base table row STRUCT typed variable.
+  // `expr` is the expression to algebrize.
+  // `row_var` is the variable representing the row struct.
+  // `row_struct_type` is the type of the row struct.
+  // `table` is the base table of the row struct.
+  absl::StatusOr<std::unique_ptr<ValueExpr>> AlgebrizeExpressionOverRowStruct(
+      const ResolvedExpr* expr, VariableId row_var,
+      const StructType* row_struct_type, const Table* table);
+
+  // Algebrize a graph element to be returned from a graph insert scan.
+  absl::StatusOr<std::unique_ptr<ValueExpr>> AlgebrizeGraphElementReturningExpr(
+      const GraphInsertApplyOp::ElementToInsert& element,
+      const GraphElementType* element_type);
+
+  // Information about the base table and generated columns for a target element
+  // table in a graph insert scan.
+  struct TopologicallySortedColumnsInfo {
+    // An ordered list of variables corresponding to the columns in the base
+    // table.
+    std::vector<VariableId> table_variables;
+    // A sorted list of generated columns.
+    std::vector<GraphInsertApplyOp::GeneratedColumnInfo> generated_columns;
+  };
+
+  // Returns the base table variables and generated columns in topological order
+  // for the given table.
+  absl::StatusOr<TopologicallySortedColumnsInfo>
+  AlgebrizeBaseTableAndTopologicallySortGeneratedColumns(const Table* table);
 
   absl::StatusOr<std::unique_ptr<ScalarFunctionCallExpr>> AlgebrizeGetJsonField(
       const ResolvedGetJsonField* get_json_field);
@@ -661,6 +705,11 @@ class Algebrizer {
   absl::StatusOr<std::unique_ptr<RelationalOp>> AlgebrizeFinishScan(
       const ResolvedFinishScan* resolved_finish);
 
+  // Algebrizes a Graph INSERT operator.
+  absl::StatusOr<std::unique_ptr<RelationalOp>> AlgebrizeGraphInsertScan(
+      const ResolvedGraphInsertScan* graph_insert_scan,
+      std::vector<FilterConjunctInfo*>* active_conjuncts);
+
   absl::StatusOr<std::unique_ptr<RelationalOp>> AlgebrizeGraphTableScan(
       const ResolvedGraphTableScan* graph_table_scan,
       std::vector<FilterConjunctInfo*>* active_conjuncts);
@@ -968,6 +1017,53 @@ class Algebrizer {
       const ResolvedQueryStmt* query, ResolvedColumnList* output_column_list,
       std::vector<std::string>* output_column_names,
       std::vector<VariableId>* output_column_variables);
+
+  // Algebrizes the root scan of a query statement into a top-level ValueExpr.
+  //
+  // Although `scan` represents a relational pipeline (producing tuples via a
+  // RelationalOp), top-level query execution in the reference implementation
+  // evaluates to a single ValueExpr (an ArrayValue containing the result rows
+  // as structs or value table elements). This function converts `scan` into a
+  // RelationalOp using `output_columns` and nests it inside an ArrayNestExpr
+  // ValueExpr.
+  absl::StatusOr<std::unique_ptr<ValueExpr>> AlgebrizeQueryStatementInfo(
+      const ResolvedScan* scan,
+      const std::vector<std::unique_ptr<const ResolvedOutputColumn>>&
+          output_columns,
+      bool is_value_table, IdStringPool& id_string_pool);
+
+  // Algebrizes the root scan of a terminal query statement into a top-level
+  // ValueExpr.
+  //
+  // Terminal query statements produce no output columns, but their relational
+  // scans must still be executed for side effects. This function algebrizes
+  // `scan` into an array ValueExpr (producing an array of 0-field structs) and
+  // wraps it in a DiscardResultExpr ValueExpr so that executing the statement
+  // runs the scan and discards the empty result set.
+  absl::StatusOr<std::unique_ptr<ValueExpr>>
+  AlgebrizeTerminalQueryStatementInfo(const ResolvedScan* scan);
+
+  // Algebrizes a ResolvedGeneralizedQueryStmt into a top-level ValueExpr.
+  //
+  // Currently, only generalized query statements containing GQL DML mutations
+  // (e.g. GRAPH INSERT) are supported natively in the reference implementation.
+  //
+  // Unlike standard SQL DML statements which mutate a single target table and
+  // produce a single DML result struct, a single Graph DML statement can mutate
+  // multiple target tables simultaneously (e.g. node and edge tables).
+  // The mutations are executed as side effects during relational evaluation of
+  // the query scan. This function algebrizes the query scan (including optional
+  // RETURNING projection), collects the set of modified target tables, and
+  // wraps the scan in a dedicated DMLGraphOutputExpr. Upon evaluation,
+  // DMLGraphOutputExpr executes the scan, retrieves the updated table rows and
+  // modified row counts for all affected tables from the EvaluationContext, and
+  // packages them along with any optional RETURNING rows into a composite
+  // output struct:
+  //   STRUCT<table1 STRUCT<num_rows_modified, all_rows>,
+  //          ...,
+  //          [returning_rows ARRAY<STRUCT<...>>]>
+  absl::StatusOr<std::unique_ptr<ValueExpr>> AlgebrizeGeneralizedQueryStatement(
+      const ResolvedGeneralizedQueryStmt* stmt, IdStringPool& id_string_pool);
 
   absl::StatusOr<std::unique_ptr<ValueExpr>> AlgebrizeDMLStatement(
       const ResolvedStatement* ast_root, IdStringPool* id_string_pool);
@@ -1554,6 +1650,32 @@ class Algebrizer {
   // ResolvedCatalogColumnRef.
   std::optional<absl::flat_hash_map<const Column*, VariableId>>
       catalog_column_ref_variables_;
+
+  using CaseInsensitiveStringVariableMap =
+      absl::flat_hash_map<std::string, VariableId,
+                          googlesql_base::StringViewCaseHash,
+                          googlesql_base::StringViewCaseEqual>;
+
+  // The list of variables to use when algebrizing a ResolvedExpressionColumn
+  // for a generated column in a table.
+  //
+  // Key = column name, value = variable id.
+  //
+  // This is used when the base table of a graph element table contains a
+  // generated column whose resolved expression contains
+  // ResolvedExpressionColumn that references another generated column.
+  // The variable id points to the dependency column that is topologically
+  // sorted in the algebrizer and will be evaluated first.
+  std::optional<CaseInsensitiveStringVariableMap> expression_column_variables_;
+
+  // Struct row variable to use when algebrizing a ResolvedCatalogColumnRef
+  // as a field access on a struct row (e.g. during DML INSERT RETURNING).
+  struct CatalogColumnRowVariable {
+    VariableId row_var;
+    const StructType* row_struct_type = nullptr;
+    const Table* table = nullptr;
+  };
+  std::optional<CatalogColumnRowVariable> catalog_column_row_variable_;
 
   // The top of the stack represents the algebrized input scan for the
   // subpipeline being resolved.  It'll be used for the

@@ -415,6 +415,61 @@ ARRAY<STRUCT<borg_job STRING, ts TIMESTAMP>>[unknown order:
 ]
 ==
 
+# TODO: Figure out if we can add a deterministic test case for
+# origin calculation when using relative lower/upper OUTPUT WITHIN bounds. For
+# such cases the origin, and consequently the aligned timestamps, will depend
+# on the current_timestamp.
+[name=align_origin_from_output_within_upper_bound]
+SELECT * FROM TimeseriesData ALIGN (
+  TIMESTAMP ts
+  PERIOD INTERVAL 1 MINUTE
+  OUTPUT WITHIN RANGE TO TIMESTAMP '2020-01-01 00:02:15+00'
+  PARTITION BY borg_job
+  METRICS SUM(requests) WITHIN (1 PERIOD PRECEDING) as sum_requests
+);
+--
+ARRAY<STRUCT<borg_job STRING, sum_requests INT64, ts TIMESTAMP>>[
+  {
+    "job_A",
+    111,
+    2020-01-01 00:01:15+00
+  }
+]
+==
+
+[name=align_origin_fallback_to_epoch_when_both_output_bounds_unbounded]
+SELECT * FROM TimeseriesData ALIGN (
+  TIMESTAMP ts
+  PERIOD INTERVAL 1 MINUTE
+  OUTPUT WITHIN RANGE FROM UNBOUNDED PRECEDING TO UNBOUNDED FOLLOWING
+  PARTITION BY borg_job
+  METRICS SUM(requests) WITHIN (1 PERIOD PRECEDING) as sum_requests
+);
+--
+ARRAY<STRUCT<borg_job STRING, sum_requests INT64, ts TIMESTAMP>>[unknown order:
+  {
+    "job_A",
+    1000,
+    2020-01-01 00:02:00+00
+  },
+  {
+    "job_B",
+    100000,
+    2020-01-01 00:03:00+00
+  },
+  {
+    "job_A",
+    111,
+    2020-01-01 00:01:00+00
+  },
+  {
+    "job_B",
+    10000,
+    2020-01-01 00:02:00+00
+  }
+]
+==
+
 [name=align_output_within_negative_interval_bound_error]
 SELECT * FROM TimeseriesData ALIGN (
   TIMESTAMP ts
@@ -1239,6 +1294,50 @@ ARRAY<STRUCT<
                  2020-01-01 00:01:35+00,
                  2020-01-01 00:02:05+00,
                  2020-01-01 00:02:00+00
+               }]
+==
+
+# The identifier `timestamp` can be used to refer to the timestamp expression
+# even if a different alias is provided.
+[name=align_timestamp_expr_alias_and_timestamp_identifier_in_estimator_function_call]
+SELECT * FROM TimeseriesData ALIGN (
+  TIMESTAMP TIMESTAMP_ADD(ts, INTERVAL 1 DAY) as timestamp_alias
+  PERIOD INTERVAL 1 MINUTE
+  OUTPUT WITHIN RANGE FROM TIMESTAMP '2020-01-02 00:01:00+00' TO TIMESTAMP '2020-01-02 00:03:00+00'
+  PARTITION BY borg_job
+  METRICS
+    MAX(TIMESTAMP_ADD(timestamp, INTERVAL 5 SECOND)) WITHIN (1 PERIOD PRECEDING) AS m1,
+    MAX(TIMESTAMP_ADD(timestamp_alias, INTERVAL 5 SECOND)) WITHIN (1 PERIOD PRECEDING) AS m2,
+    MAX(TIMESTAMP_ADD(aligned_timestamp, INTERVAL 5 SECOND)) WITHIN (1 PERIOD PRECEDING) AS m3
+);
+--
+ARRAY<STRUCT<
+        borg_job STRING,
+        m1 TIMESTAMP,
+        m2 TIMESTAMP,
+        m3 TIMESTAMP,
+        timestamp_alias TIMESTAMP
+      >>
+[unknown order:{
+                 "job_A",
+                 2020-01-02 00:01:35+00,
+                 2020-01-02 00:01:35+00,
+                 2020-01-02 00:02:05+00,
+                 2020-01-02 00:02:00+00
+               },
+               {
+                 "job_A",
+                 2020-01-02 00:01:05+00,
+                 2020-01-02 00:01:05+00,
+                 2020-01-02 00:01:05+00,
+                 2020-01-02 00:01:00+00
+               },
+               {
+                 "job_B",
+                 2020-01-02 00:02:05+00,
+                 2020-01-02 00:02:05+00,
+                 2020-01-02 00:02:05+00,
+                 2020-01-02 00:02:00+00
                }]
 ==
 

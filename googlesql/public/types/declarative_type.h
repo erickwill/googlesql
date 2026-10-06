@@ -454,7 +454,7 @@ class DeclarativeType final : public Type {
   absl::Status ValidateResolvedTypeParameters(
       const TypeParameters& type_parameters, ProductMode mode) const override;
 
-  std::vector<const Type*> ComponentTypes() const final;
+  TypeListView ComponentTypes() const final;
 
   const DeclarativeType* AsDeclarativeType() const override { return this; }
 

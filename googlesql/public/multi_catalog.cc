@@ -301,4 +301,19 @@ std::string MultiCatalog::SuggestConstant(
   return "";
 }
 
+absl::Status MultiCatalog::GetMacro(const std::string& name,
+                                    const Macro** macro,
+                                    const FindOptions& options) {
+  *macro = nullptr;
+  for (Catalog* catalog : catalog_list_) {
+    const Macro* found_macro = nullptr;
+    GOOGLESQL_RETURN_IF_ERROR(catalog->GetMacro(name, &found_macro, options));
+    if (found_macro != nullptr) {
+      *macro = found_macro;
+      return absl::OkStatus();
+    }
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace googlesql

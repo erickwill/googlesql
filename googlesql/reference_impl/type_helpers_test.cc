@@ -143,5 +143,61 @@ TEST(CreateDMLOutputType, ValueTableTest) {
             dml_output_type->DebugString());
 }
 
+TEST(CreateGraphDMLOutputType, MultipleTablesTest) {
+  const ResolvedColumnList columns1 = GetValueTableColumnList();
+  const ResolvedColumnList columns2 = GetAllTypesColumnList();
+
+  TypeFactory type_factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const ArrayType* table_type1,
+      CreateTableArrayType(columns1, /*is_value_table=*/true, &type_factory));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const ArrayType* table_type2,
+      CreateTableArrayType(columns2, /*is_value_table=*/false, &type_factory));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const StructType* dml_output_type,
+                       CreateGraphDMLOutputType(
+                           {{"Table1", table_type1}, {"Table2", table_type2}},
+                           /*returning_array_type=*/nullptr, &type_factory));
+
+  EXPECT_EQ(
+      "STRUCT<"
+      "Table1 STRUCT<num_rows_modified INT64, all_rows ARRAY<INT32>>, "
+      "Table2 STRUCT<num_rows_modified INT64, "
+      "all_rows ARRAY<STRUCT<col_int32 INT32, col_uint32 UINT32, "
+      "col_int64 INT64, col_uint64 UINT64, col_string STRING, "
+      "col_bool BOOL, col_double DOUBLE>>>>",
+      dml_output_type->DebugString());
+}
+
+TEST(CreateGraphDMLOutputType, MultipleTablesWithReturningTest) {
+  const ResolvedColumnList columns1 = GetValueTableColumnList();
+  const ResolvedColumnList columns2 = GetAllTypesColumnList();
+
+  TypeFactory type_factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const ArrayType* table_type1,
+      CreateTableArrayType(columns1, /*is_value_table=*/true, &type_factory));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const ArrayType* table_type2,
+      CreateTableArrayType(columns2, /*is_value_table=*/false, &type_factory));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const StructType* dml_output_type,
+      CreateGraphDMLOutputType(
+          {{"Table1", table_type1}, {"Table2", table_type2}},
+          /*returning_array_type=*/table_type1, &type_factory));
+
+  EXPECT_EQ(
+      "STRUCT<"
+      "Table1 STRUCT<num_rows_modified INT64, all_rows ARRAY<INT32>>, "
+      "Table2 STRUCT<num_rows_modified INT64, "
+      "all_rows ARRAY<STRUCT<col_int32 INT32, col_uint32 UINT32, "
+      "col_int64 INT64, col_uint64 UINT64, col_string STRING, "
+      "col_bool BOOL, col_double DOUBLE>>>, "
+      "returning_rows ARRAY<INT32>>",
+      dml_output_type->DebugString());
+}
+
 }  // namespace
 }  // namespace googlesql

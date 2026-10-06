@@ -7179,6 +7179,105 @@ TEST_P(JsonFlattenTest, Success) {
   EXPECT_THAT(JsonFlatten(GetJsonInput()), Pointwise(JsonEq(), GetExpected()));
 }
 
+absl::StatusOr<std::unique_ptr<JsonPathEvaluator>> CreateJsonPathEvaluator(
+    absl::string_view json_path) {
+  return JsonPathEvaluator::Create(
+      json_path, /*sql_standard_mode=*/true,
+      /*enable_special_character_escaping_in_values=*/true,
+      /*enable_special_character_escaping_in_keys=*/true);
+}
+
+TEST(JsonExistsTest, Basic) {
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      JSONValue val,
+      JSONValue::ParseJSONString(R"({"a": 1, "b": null, "c": [1, 2]})"));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_a, CreateJsonPathEvaluator("$.a"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_b, CreateJsonPathEvaluator("$.b"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_c0, CreateJsonPathEvaluator("$.c[0]"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_d, CreateJsonPathEvaluator("$.d"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_c2, CreateJsonPathEvaluator("$.c[2]"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_root, CreateJsonPathEvaluator("$"));
+
+  // Existing keys
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_a), IsOkAndHolds(true));
+
+  // Existing key with null value
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_b), IsOkAndHolds(true));
+
+  // Existing array index
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_c0), IsOkAndHolds(true));
+
+  // Non-existing key
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_d), IsOkAndHolds(false));
+
+  // Non-existing array index
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_c2), IsOkAndHolds(false));
+
+  // Root path
+  EXPECT_THAT(JsonExists(val.GetConstRef(), *eval_root), IsOkAndHolds(true));
+
+  // Root path on JSON null
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue null_val, JSONValue::ParseJSONString("null"));
+  EXPECT_THAT(JsonExists(null_val.GetConstRef(), *eval_root),
+              IsOkAndHolds(true));
+
+  // Invalid JSONPath syntax returns error during evaluator creation
+  EXPECT_FALSE(CreateJsonPathEvaluator("invalid").ok());
+  EXPECT_FALSE(CreateJsonPathEvaluator("").ok());
+}
+
+TEST(JsonExistsAnyTest, Basic) {
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      JSONValue val,
+      JSONValue::ParseJSONString(R"({"a": 1, "b": null, "c": [1, 2]})"));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_a, CreateJsonPathEvaluator("$.a"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_b, CreateJsonPathEvaluator("$.b"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_d, CreateJsonPathEvaluator("$.d"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_e, CreateJsonPathEvaluator("$.e"));
+
+  // Any of [existing, non-existing] -> true
+  std::vector<const JsonPathEvaluator*> evals1 = {eval_a.get(), eval_d.get()};
+  EXPECT_THAT(JsonExistsAny(val.GetConstRef(), evals1), IsOkAndHolds(true));
+
+  // Any of [non-existing, non-existing] -> false
+  std::vector<const JsonPathEvaluator*> evals2 = {eval_d.get(), eval_e.get()};
+  EXPECT_THAT(JsonExistsAny(val.GetConstRef(), evals2), IsOkAndHolds(false));
+
+  // Any of [existing (null value)] -> true
+  std::vector<const JsonPathEvaluator*> evals3 = {eval_b.get()};
+  EXPECT_THAT(JsonExistsAny(val.GetConstRef(), evals3), IsOkAndHolds(true));
+
+  // Empty evaluators -> false
+  std::vector<const JsonPathEvaluator*> evals_empty;
+  EXPECT_THAT(JsonExistsAny(val.GetConstRef(), evals_empty),
+              IsOkAndHolds(false));
+}
+
+TEST(JsonExistsAllTest, Basic) {
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      JSONValue val,
+      JSONValue::ParseJSONString(R"({"a": 1, "b": null, "c": [1, 2]})"));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_a, CreateJsonPathEvaluator("$.a"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_b, CreateJsonPathEvaluator("$.b"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto eval_d, CreateJsonPathEvaluator("$.d"));
+
+  // All of [existing, existing] -> true
+  std::vector<const JsonPathEvaluator*> evals1 = {eval_a.get(), eval_b.get()};
+  EXPECT_THAT(JsonExistsAll(val.GetConstRef(), evals1), IsOkAndHolds(true));
+
+  // All of [existing, non-existing] -> false
+  std::vector<const JsonPathEvaluator*> evals2 = {eval_a.get(), eval_d.get()};
+  EXPECT_THAT(JsonExistsAll(val.GetConstRef(), evals2), IsOkAndHolds(false));
+
+  // Empty evaluators -> true
+  std::vector<const JsonPathEvaluator*> evals_empty;
+  EXPECT_THAT(JsonExistsAll(val.GetConstRef(), evals_empty),
+              IsOkAndHolds(true));
+}
+
 }  // namespace
 
 }  // namespace json_internal

@@ -1629,6 +1629,11 @@ SHARDED_TEST_F(ComplianceCodebasedTests, TestJsonFlatten, 1) {
   RunFunctionCalls(Shard(GetFunctionTestsJsonFlatten()));
 }
 
+SHARDED_TEST_F(ComplianceCodebasedTests, TestJsonExists, 1) {
+  SetNamePrefix("JsonExists");
+  RunFunctionCalls(Shard(GetFunctionTestsJsonExists()));
+}
+
 SHARDED_TEST_F(ComplianceCodebasedTests, TestHash, 1) {
   SetNamePrefix("Hash");
   RunFunctionCalls(Shard(GetFunctionTestsHash()));

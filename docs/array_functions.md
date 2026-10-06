@@ -1837,7 +1837,7 @@ FROM UNNEST([3, 4, 5]) AS start;
 ## `GENERATE_DATE_ARRAY`
 
 ```googlesql
-GENERATE_DATE_ARRAY(start_date, end_date[, INTERVAL INT64_expr date_part])
+GENERATE_DATE_ARRAY(start_date, end_date[, INTERVAL step_size step_unit])
 ```
 
 **Description**
@@ -1847,19 +1847,20 @@ parameters determine the inclusive start and end of the array.
 
 The `GENERATE_DATE_ARRAY` function accepts the following data types as inputs:
 
-+ `start_date` must be a `DATE`.
-+ `end_date` must be a `DATE`.
-+ `INT64_expr` must be an `INT64`.
-+ `date_part` must be either DAY, WEEK, MONTH, QUARTER, or YEAR.
++ `start_date`: `DATE`
++ `end_date`: `DATE`
++ `step_size`: `INT64`
++ `step_unit`: `DAY`, `WEEK`, `MONTH`, `QUARTER`, or `YEAR`.
 
-The `INT64_expr` parameter determines the increment used to generate dates. The
+The `step_size` parameter determines the increment used to generate dates. The
 default value for this parameter is 1 day.
 
 The `GENERATE_DATE_ARRAY` function returns an error if any of the following are
 true:
 
-+   `INT64_expr` is set to 0.
-+   The resulting array is too large.
++   `step_size` is set to 0.
++   The resulting array exceeds the maximum size allowed by the engine. The GoogleSQL default limit is 16,000
+    elements, though individual query engines may configure a different limit.
 
 **Return Data Type**
 
@@ -1946,7 +1947,7 @@ SELECT GENERATE_DATE_ARRAY('2016-10-05', NULL) AS example;
  +---------*/
 ```
 
-The following returns an array of dates, using MONTH as the `date_part`
+The following returns an array of dates, using MONTH as the `step_unit`
 interval:
 
 ```googlesql
@@ -1985,7 +1986,7 @@ FROM (
 
 ```googlesql
 GENERATE_TIMESTAMP_ARRAY(start_timestamp, end_timestamp,
-                         INTERVAL step_expression date_part)
+                         INTERVAL step_size step_unit)
 ```
 
 **Description**
@@ -1999,20 +2000,21 @@ inputs:
 
 + `start_timestamp`: `TIMESTAMP`
 + `end_timestamp`: `TIMESTAMP`
-+ `step_expression`: `INT64`
-+ Allowed `date_part` values are:
++ `step_size`: `INT64`
++ `step_unit`:
   `PICOSECOND`,
   `NANOSECOND`,
   `MICROSECOND`, `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, or `DAY`.
 
-The `step_expression` parameter determines the increment used to generate
+The `step_size` parameter determines the increment used to generate
 timestamps.
 
 The `GENERATE_TIMESTAMP_ARRAY` function returns an error if any of the following
 are true:
 
-+   `step_expression` evaluates to 0.
-+   The resulting array is too large.
++   `step_size` evaluates to 0.
++   The resulting array exceeds the maximum size allowed by the engine. The GoogleSQL default limit is 16,000
+    elements, though individual query engines may configure a different limit.
 
 **Return Data Type**
 

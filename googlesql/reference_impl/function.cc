@@ -657,6 +657,11 @@ FunctionMap::FunctionMap() {
                      "json_extract_string_array", "JsonExtractStringArray");
     RegisterFunction(FunctionKind::kJsonQuery, "json_query", "JsonQuery");
     RegisterFunction(FunctionKind::kJsonValue, "json_value", "JsonValue");
+    RegisterFunction(FunctionKind::kJsonExists, "json_exists", "JsonExists");
+    RegisterFunction(FunctionKind::kJsonExistsAny, "json_exists_any",
+                     "JsonExistsAny");
+    RegisterFunction(FunctionKind::kJsonExistsAll, "json_exists_all",
+                     "JsonExistsAll");
     RegisterFunction(FunctionKind::kJsonQueryArray, "json_query_array",
                      "JsonQueryArray");
     RegisterFunction(FunctionKind::kJsonValueArray, "json_value_array",
@@ -5740,9 +5745,8 @@ bool IsFunction::Eval(absl::Span<const TupleData* const> params,
 // static
 bool CastFunction::HasPotentialNondeterminism(const Type* input_type,
                                               const Type* output_type) {
-  std::vector<const Type*> input_type_components = input_type->ComponentTypes();
-  std::vector<const Type*> output_type_components =
-      output_type->ComponentTypes();
+  TypeListView input_type_components = input_type->ComponentTypes();
+  TypeListView output_type_components = output_type->ComponentTypes();
 
   // These are the only valid cases where the number of components differs.
   if (input_type_components.size() != output_type_components.size()) {

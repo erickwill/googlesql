@@ -364,6 +364,8 @@ void ExecuteQueryWebWriter::FlushStatement(bool at_end, std::string error_msg) {
       }
       current_statement_params_["result_analyzed_rewrites"] =
           mstch::array(current_rewrites_.begin(), current_rewrites_.end());
+      current_statement_params_.emplace("result_analyzed_final",
+                                        current_rewrites_.back()["ast"]);
     }
 
     // This would be preferred, but I can't get it work on these boost

@@ -720,7 +720,9 @@ class AnalyzerTestRunner {
 
     if (options.parameter_mode() == PARAMETER_NAMED) {
       // Adding some fixed query parameters for testing purposes only.
-      for (const auto& name_and_type : GetQueryParameters(&type_factory)) {
+      GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto query_parameters,
+                           GetQueryParameters(&type_factory));
+      for (const auto& name_and_type : query_parameters) {
         if (name_and_type.second->IsSupportedType(options.language())) {
           GOOGLESQL_EXPECT_OK(options.AddQueryParameter(name_and_type.first,
                                               name_and_type.second));
@@ -729,15 +731,16 @@ class AnalyzerTestRunner {
     }
 
     if (!test_case_options_.GetString(kPositionalParameters).empty()) {
-      // Add positional parameters based on test options.
-      auto catalog =
-          std::make_unique<googlesql::SimpleCatalog>("empty_catalog");
+      // Add positional parameters based on test options. Resolve the type
+      // names against the test catalog so that catalog-provided types (e.g.
+      // VECTOR) can be used.
+      auto catalog_holder = CreateCatalog(options);
       const std::vector<std::string> positional_parameter_names =
           absl::StrSplit(test_case_options_.GetString(kPositionalParameters),
                          ',', absl::SkipEmpty());
       for (const std::string& parameter_name : positional_parameter_names) {
         const Type* parameter_type = nullptr;
-        GOOGLESQL_ASSERT_OK(AnalyzeType(parameter_name, options, catalog.get(),
+        GOOGLESQL_ASSERT_OK(AnalyzeType(parameter_name, options, catalog_holder.catalog(),
                               &type_factory, &parameter_type));
         GOOGLESQL_EXPECT_OK(options.AddPositionalQueryParameter(parameter_type));
       }
@@ -3863,8 +3866,11 @@ void ValidateRuntimeInfo(const AnalyzerRuntimeInfo& info) {
 bool RunAllTests(TestDumperCallback callback) {
   AnalyzerTestRunner runner(std::move(callback));
   std::string filename = absl::GetFlag(FLAGS_test_file);
+  file_based_test_driver::FileBasedTestDriverConfig config;
+
   bool result = file_based_test_driver::RunTestCasesFromFiles(
-      filename, absl::bind_front(&AnalyzerTestRunner::RunTest, &runner));
+      filename, absl::bind_front(&AnalyzerTestRunner::RunTest, &runner),
+      config);
 
   AnalyzerRuntimeInfo aggregate_info;
   for (const AnalyzerRuntimeInfo& info : runner.runtime_info_list()) {

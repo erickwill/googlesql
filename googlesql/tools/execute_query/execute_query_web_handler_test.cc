@@ -662,8 +662,13 @@ TEST(ExecuteQueryWebHandlerTest, TestAstRewritesDefaultTemplateMarkup) {
       QueryWebTemplates::Default(), result));
   EXPECT_THAT(result, HasSubstr("data-step=\"0\""));
   EXPECT_THAT(result, HasSubstr("data-step=\"1\""));
+  EXPECT_THAT(result, HasSubstr("data-step=\"final\""));
+  EXPECT_THAT(result, HasSubstr("Post-rewrite"));
   EXPECT_THAT(result, HasSubstr("rewrite-step-item"));
   EXPECT_THAT(result, HasSubstr("rewrite-ast-panel"));
+  EXPECT_THAT(result, HasSubstr("diff-mode-selector"));
+  EXPECT_THAT(result, HasSubstr("Side-by-side"));
+  EXPECT_THAT(result, HasSubstr("diff-side-by-side"));
 }
 
 TEST(ExecuteQueryWebHandlerTest, TestEnabledAstRewritesTextError) {

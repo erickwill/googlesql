@@ -25,6 +25,7 @@
 #include "googlesql/public/analyzer_options.h"
 #include "googlesql/public/annotation/collation.h"
 #include "googlesql/public/annotation/is_versioned.h"
+#include "googlesql/public/annotation/vector_encoding.h"
 #include "googlesql/public/annotation/vector_length.h"
 #include "googlesql/public/function.h"
 #include "googlesql/public/options.pb.h"
@@ -70,6 +71,8 @@ void AnnotationPropagator::InitializeAnnotationSpecs(
   if (analyzer_options.language().LanguageFeatureEnabled(FEATURE_VECTOR_TYPE)) {
     owned_annotation_specs_.push_back(
         std::make_unique<VectorLengthAnnotation>());
+    owned_annotation_specs_.push_back(
+        std::make_unique<VectorEncodingAnnotation>());
   }
 
   // Copy GoogleSQL annotation specs to combined_annotation_specs_
@@ -103,6 +106,11 @@ static absl::Status CheckAndPropagateAnnotationsImpl(
         // should be the same.)
         GOOGLESQL_RET_CHECK_FAIL() << "Should have propagated all annotations on ArgRef";
       }
+      case RESOLVED_PARAMETER: {
+        auto* parameter = resolved_node->GetAs<ResolvedParameter>();
+        GOOGLESQL_RETURN_IF_ERROR(annotation_spec->CheckAndPropagateForParameter(
+            *parameter, annotation_map));
+      } break;
       case RESOLVED_GET_STRUCT_FIELD: {
         auto* get_struct_field = resolved_node->GetAs<ResolvedGetStructField>();
         GOOGLESQL_RETURN_IF_ERROR(annotation_spec->CheckAndPropagateForGetStructField(

@@ -1521,6 +1521,23 @@ void GetSubscriptFunctions(TypeFactory* type_factory,
     subscript_function_signatures.push_back(
         {json_type, {json_type, string_type}, FN_JSON_SUBSCRIPT_STRING});
   }
+  if (options.language_options.LanguageFeatureEnabled(FEATURE_VARIANT_TYPE)) {
+    const Type* int64_type = type_factory->get_int64();
+    const Type* variant_type = types::VariantType();
+    const Type* string_type = type_factory->get_string();
+    subscript_function_signatures.push_back(
+        {variant_type,
+         {variant_type, int64_type},
+         FN_VARIANT_SUBSCRIPT_INT64,
+         FunctionSignatureOptions().AddRequiredLanguageFeature(
+             FEATURE_VARIANT_TYPE)});
+    subscript_function_signatures.push_back(
+        {variant_type,
+         {variant_type, string_type},
+         FN_VARIANT_SUBSCRIPT_STRING,
+         FunctionSignatureOptions().AddRequiredLanguageFeature(
+             FEATURE_VARIANT_TYPE)});
+  }
   if (options.language_options.LanguageFeatureEnabled(FEATURE_MAP_TYPE)) {
     subscript_function_signatures.push_back(
         {ARG_KIND_EXPR_ANY_2,
@@ -1635,6 +1652,10 @@ namespace {
 static const Type* GetUnsupportedTypeForJsonConversion(
     const Type* /*absl_nonnull*/ type) {
   if (type->IsMap()) {
+    return type;
+  }
+
+  if (type->IsTokenList()) {
     return type;
   }
 
@@ -3503,6 +3524,51 @@ void GetEncryptionFunctions(TypeFactory* type_factory,
                  fpe_decrypt_signatures, FunctionOptions(encryption_required));
 }
 
+// Compute the result type for ST_NEAREST_NEIGHBORS.
+// The output type is
+//   ARRAY<
+//     STRUCT<`neighbor` <arguments[0].type>,
+//            `distance` Double> >
+static absl::StatusOr<const Type*> ComputeResultTypeForNearestNeighborsStruct(
+    Catalog* catalog, TypeFactory* type_factory, CycleDetector* cycle_detector,
+    const FunctionSignature& /*signature*/,
+    absl::Span<const InputArgumentType> arguments,
+    const AnalyzerOptions& analyzer_options) {
+  const Type* element_type = nullptr;
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
+      {{"neighbor", arguments[0].type()}, {"distance", types::DoubleType()}},
+      &element_type));
+  return type_factory->MakeArrayType(element_type, analyzer_options.language());
+}
+
+// Compute the result annotations for ST_NEAREST_NEIGHBORS.
+static absl::StatusOr<const AnnotationMap*>
+ComputeResultAnnotationsForNearestNeighborsStruct(
+    const ResolvedFunctionCallBase& function_call, TypeFactory& type_factory) {
+  GOOGLESQL_RET_CHECK_EQ(function_call.argument_list_size(), 4);
+  const AnnotationMap* input_annotations =
+      function_call.argument_list(0)->type_annotation_map();
+  if (AnnotationMap::IsNullOrEmpty(input_annotations)) {
+    return nullptr;
+  }
+
+  const Type* result_type = function_call.type();
+  GOOGLESQL_RET_CHECK(result_type->IsArray());
+  GOOGLESQL_RET_CHECK(result_type->AsArray()->element_type()->IsStruct());
+  auto annotation_map = AnnotationMap::Create(function_call.type());
+
+  GOOGLESQL_RET_CHECK(annotation_map->IsStructMap());
+  GOOGLESQL_ASSIGN_OR_RETURN(AnnotationMap * struct_annotations,
+                   annotation_map->AsStructMap()->mutable_child(0));
+
+  GOOGLESQL_RET_CHECK(struct_annotations != nullptr);
+  GOOGLESQL_RET_CHECK(struct_annotations->IsStructMap());
+  GOOGLESQL_RETURN_IF_ERROR(
+      struct_annotations->AsStructMap()->CloneIntoField(0, input_annotations));
+
+  return type_factory.TakeOwnership(std::move(annotation_map));
+}
+
 void GetGeographyFunctions(TypeFactory* type_factory,
                            const GoogleSQLBuiltinFunctionOptions& options,
                            NameToFunctionMap* functions) {
@@ -3921,11 +3987,13 @@ void GetGeographyFunctions(TypeFactory* type_factory,
       functions, options, "st_centroid_agg", AGGREGATE,
       {{geography_type, {geography_type}, FN_ST_CENTROID_AGG}},
       aggregate_analytic_function_options_and_geography_required);
-  InsertSimpleFunction(
+  InsertFunction(
       functions, options, "st_nearest_neighbors", AGGREGATE,
-      {{ARG_KIND_EXPR_ANY_1,  //  Return type will be overridden.
+      {{ARG_KIND_EXPR_ARBITRARY,  //  Return type will be overridden.
         {ARG_KIND_EXPR_ANY_1, geography_type, geography_type, int64_type},
-        FN_ST_NEAREST_NEIGHBORS}},
+        FN_ST_NEAREST_NEIGHBORS,
+        FunctionSignatureOptions().set_compute_result_annotations_callback(
+            &ComputeResultAnnotationsForNearestNeighborsStruct)}},
       FunctionOptions(
           aggregate_analytic_function_options_and_geography_required)
           .set_compute_result_type_callback(

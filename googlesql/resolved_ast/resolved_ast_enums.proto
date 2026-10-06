@@ -402,6 +402,31 @@ message ResolvedGraphPathSearchPrefixEnums {
   }
 }
 
+message ResolvedGraphUpdateElementEnums {
+  enum PropertyUpdateMode {
+    PROPERTY_UPDATE_MODE_UNSPECIFIED = 0;
+    // No properties are modified.
+    PROPERTY_NO_UPDATE = 1;
+    // Update existing properties or add dynamic properties.
+    PROPERTY_SET = 2;
+    // Replace all properties, setting unlisted static properties to NULL and
+    // discarding unlisted dynamic properties.
+    PROPERTY_REPLACE = 3;
+    // Delete specified dynamic properties.
+    PROPERTY_REMOVE = 4;
+  }
+
+  enum LabelUpdateMode {
+    LABEL_UPDATE_MODE_UNSPECIFIED = 0;
+    // No labels are modified.
+    LABEL_NO_UPDATE = 1;
+    // Add specified labels.
+    LABEL_SET = 2;
+    // Delete specified dynamic labels.
+    LABEL_REMOVE = 3;
+  }
+}
+
 message ResolvedDropIndexStmtEnums {
   enum IndexType {
     INDEX_DEFAULT = 0;

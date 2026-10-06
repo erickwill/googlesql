@@ -51,9 +51,17 @@ def _http_archive_deps_impl(_):
 
     http_archive(
         name = "com_google_file_based_test_driver",
-        sha256 = "b564acb6f083ce6e91fc2734bdad259cc4edf1a95766f93750a16784ff86218a",
-        strip_prefix = "file-based-test-driver-fd7661b168f640f68da39f97dad26e426eb6c339",
-        url = "https://github.com/google/file-based-test-driver/archive/fd7661b168f640f68da39f97dad26e426eb6c339.tar.gz",
+        # The GitHub archive at ec67daf4282c uses `absl::Nonnull<T>`, which was
+        # removed in abseil-cpp 20260107.0 (in favor of `T /*absl_nonnull*/`). Strip
+        # the `absl::Nonnull<...>` wrapper down to the underlying pointer type
+        # `T` so it compiles against newer Abseil without triggering
+        # -Wnullability-completeness warnings.
+        patch_cmds = [
+            "sed -i.bak 's/absl::Nonnull<\\([^>]*\\)>/\\1/g' file_based_test_driver/file_based_test_driver.h file_based_test_driver/file_based_test_driver.cc && rm -f file_based_test_driver/*.bak",
+        ],
+        sha256 = "de4a12e88731198ef89ce3438b8c57ccea9185ac30ece9da1165f224ec02c8b1",
+        strip_prefix = "file-based-test-driver-ec67daf4282c1bbe025e1b88512d540b03687efd",
+        url = "https://github.com/google/file-based-test-driver/archive/ec67daf4282c1bbe025e1b88512d540b03687efd.tar.gz",
     )
 
     http_archive(

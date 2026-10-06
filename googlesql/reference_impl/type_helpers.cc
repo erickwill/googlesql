@@ -141,8 +141,41 @@ absl::StatusOr<const StructType*> CreateDMLOutputTypeWithReturning(
   if (returning_array_type != nullptr) {
     fields.emplace_back(kDMLOutputReturningColumnName, returning_array_type);
   }
+  const StructType* dml_output_type = nullptr;
+  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(fields, &dml_output_type));
+  return dml_output_type;
+}
 
-  const StructType* dml_output_type;
+absl::StatusOr<const StructType*> CreateGraphDMLOutputType(
+    const std::vector<GraphTargetTableTypeInfo>& table_types,
+    const ArrayType* returning_array_type, TypeFactory* type_factory) {
+  GOOGLESQL_RET_CHECK(!table_types.empty())
+      << "At least one table must be specified for Graph DML output type";
+
+  std::vector<StructType::StructField> fields;
+
+  for (const auto& table_info : table_types) {
+    GOOGLESQL_RET_CHECK(!table_info.name.empty())
+        << "Table name cannot be empty for DML output type";
+
+    std::vector<StructType::StructField> nested_fields;
+    nested_fields.emplace_back(kDMLOutputNumRowsModifiedColumnName,
+                               types::Int64Type());
+    nested_fields.emplace_back(kDMLOutputAllRowsColumnName,
+                               table_info.table_type);
+
+    const StructType* nested_struct_type = nullptr;
+    GOOGLESQL_RETURN_IF_ERROR(
+        type_factory->MakeStructType(nested_fields, &nested_struct_type));
+
+    fields.emplace_back(table_info.name, nested_struct_type);
+  }
+
+  if (returning_array_type != nullptr) {
+    fields.emplace_back(kDMLOutputReturningColumnName, returning_array_type);
+  }
+
+  const StructType* dml_output_type = nullptr;
   GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(fields, &dml_output_type));
   return dml_output_type;
 }

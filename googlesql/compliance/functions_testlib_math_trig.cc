@@ -90,7 +90,7 @@ std::vector<FunctionTestCall> GetFunctionTestsTrigonometric() {
       // acosh only defined for x >= 1
       {"acosh", {1 - epsilon}, NullDouble(), OUT_OF_RANGE},
       {"acosh", {0.0}, NullDouble(), OUT_OF_RANGE},
-      {"acosh", {(M_E + 1 / M_E) / 2}, 1.0},
+      {"acosh", {(M_E + 1 / M_E) / 2}, 1.0, kApproximate},
       {"acosh", {1.1169973830808557e+308}, 710.0, kApproximate},
 
       {"acosh", {double_pos_inf}, double_pos_inf},

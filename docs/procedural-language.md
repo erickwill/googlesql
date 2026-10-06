@@ -475,9 +475,9 @@ END CASE;
 
 <pre class="lang-sql prettyprint">
 IF condition THEN [sql_statement_list]
-  [<span class="kwd">ELSEIF</span> condition THEN sql_statement_list]
+  [<span class="kwd">ELSEIF</span> condition THEN [sql_statement_list]]
   [...]
-  [ELSE sql_statement_list]
+  [ELSE [sql_statement_list]]
 END IF;
 </pre>
 
@@ -485,6 +485,13 @@ END IF;
 
 Executes the first `sql_statement_list` where the condition is true, or the
 optional <code>ELSE</code> `sql_statement_list` if no conditions match.
+
+Each `sql_statement_list` in the `THEN`, `ELSEIF`, or `ELSE` branches is a list
+of zero or more SQL statements ending with semicolons. To do nothing in a
+branch, leave `sql_statement_list` empty (optionally with an explanatory
+comment). Don't use a bare semicolon (`;`) to indicate an empty branch or
+statement. Empty statements aren't valid in a multi-statement query and produce
+a syntax error.
 
 There is a maximum nesting level of 50 for blocks and conditional statements
 such as `BEGIN`/`END`, `IF`/`ELSE`/`END IF`, and `WHILE`/`END WHILE`.
@@ -513,6 +520,18 @@ IF EXISTS(SELECT 1 FROM schema.products
   CAST(target_product_id AS STRING));
 ELSE
   SELECT CONCAT('did not find product ', CAST(target_product_id AS STRING));
+END IF;
+</pre>
+
+The following example leaves the `THEN` statement list empty to do nothing when
+the condition is met:
+
+<pre class="lang-sql prettyprint">
+DECLARE target_product_id INT64 DEFAULT 103;
+IF target_product_id IS NULL THEN
+  -- Do nothing.
+ELSE
+  SELECT CONCAT('Product ID: ', CAST(target_product_id AS STRING));
 END IF;
 </pre>
 

@@ -56,6 +56,7 @@
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "googlesql/base/ret_check.h"
 
 namespace googlesql {
@@ -231,21 +232,6 @@ absl::Status HasUnsupportedQueryShape(const ResolvedNode* input,
 
 namespace {
 
-// Validates the struct field names in `key_columns_struct_type` are the same
-// as those in `row_identity_column_names`.
-static absl::Status CheckEqualRowIdentityColumnNames(
-    const StructType* key_columns_struct_type,
-    const absl::btree_set<std::string, googlesql_base::CaseLess>&
-        row_identity_column_names) {
-  absl::btree_set<std::string, googlesql_base::CaseLess>
-      key_columns_field_names;
-  for (const StructField& field : key_columns_struct_type->fields()) {
-    GOOGLESQL_RET_CHECK(key_columns_field_names.insert(field.name).second);
-  }
-  GOOGLESQL_RET_CHECK(key_columns_field_names == row_identity_column_names);
-  return absl::OkStatus();
-}
-
 // `MultiLevelAggregateRewriter` is a visitor that rewrites aggregate function
 // calls to use multi-level aggregation to grain-lock and avoid overcounting.
 //
@@ -256,14 +242,13 @@ class MultiLevelAggregateRewriter : public ResolvedASTRewriteVisitor {
   MultiLevelAggregateRewriter(
       const Function* any_value_fn, FunctionCallBuilder& function_call_builder,
       const LanguageOptions& language_options, ColumnFactory& column_factory,
-      TypeFactory& type_factory, const ResolvedColumnRef* closure_struct_ref,
+      const ResolvedColumnRef* closure_struct_ref,
       const absl::btree_set<std::string, googlesql_base::CaseLess>&
           row_identity_column_names)
       : any_value_fn_(any_value_fn),
         function_call_builder_(function_call_builder),
         language_options_(language_options),
         column_factory_(column_factory),
-        type_factory_(type_factory),
         closure_struct_ref_(closure_struct_ref),
         row_identity_column_names_(row_identity_column_names) {};
   MultiLevelAggregateRewriter(const MultiLevelAggregateRewriter&) = delete;
@@ -364,17 +349,20 @@ class MultiLevelAggregateRewriter : public ResolvedASTRewriteVisitor {
           any_value_column.type(), any_value_column, /*is_correlated=*/false));
     }
 
-    // Step 2: Compute the `group_by_list`. This should be based on
-    // `GetStructField` accessing the `kKeyColumnsFieldIndex` field of the
-    // `struct_column_`.
+    // Step 2: Compute the `group_by_list`, one grouping key per row identity
+    // column the measure needs.
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        std::vector<std::unique_ptr<const ResolvedExpr>> grain_lock_key_exprs,
+        CreateGrainLockingKeys());
     std::vector<std::unique_ptr<const ResolvedComputedColumn>> group_by_list;
-    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> grain_lock_key_expr,
-                     CreateGrainLockingKey());
-    const Type* grain_lock_key_type = grain_lock_key_expr->type();
-    group_by_list.push_back(MakeResolvedComputedColumn(
-        column_factory_.MakeCol("$groupbymod", "grain_lock_key",
-                                grain_lock_key_type),
-        std::move(grain_lock_key_expr)));
+    group_by_list.reserve(grain_lock_key_exprs.size());
+    for (int i = 0; i < grain_lock_key_exprs.size(); ++i) {
+      const ResolvedColumn grain_lock_key_column = column_factory_.MakeCol(
+          "$groupbymod", absl::StrCat("grain_lock_key_", i),
+          grain_lock_key_exprs[i]->type());
+      group_by_list.push_back(MakeResolvedComputedColumn(
+          grain_lock_key_column, std::move(grain_lock_key_exprs[i])));
+    }
 
     // Step 3: Set the `group_by_aggregate_list`, `group_by_list` and
     // `argument_list` on the rewritten aggregate function call.
@@ -406,87 +394,58 @@ class MultiLevelAggregateRewriter : public ResolvedASTRewriteVisitor {
   }
 
  private:
-  // Returns an expression that will serve as the grain locking key.
+  // Returns one grain locking key per row identity column the measure needs,
+  // each a `GetStructField` reaching a field of the "key_columns" sub-struct.
   //
-  // If all row identity columns of `struct_column_` are needed for grain
-  // locking, e.g., when the measure column uses the source table's row identity
-  // columns, this function returns a GetStructField expression that
-  // accesses the `kKeyColumnsFieldIndex` field of `struct_column_`.
+  // Grouping by the columns rather than by a single STRUCT packing them is a
+  // performance choice: not every engine groups on a synthesized STRUCT key as
+  // cheaply as on the columns inside it.
   //
-  // If only a subset of row identity columns are needed, then this function
-  // returns a MakeStruct expression that creates a new struct containing only
-  // the needed row identity columns.
-  absl::StatusOr<std::unique_ptr<const ResolvedExpr>> CreateGrainLockingKey() {
+  // The two forms group the input identically except on a NULL closure --
+  // grouping by `STRUCT(a, b)` keeps it in a group of its own, grouping by
+  // `a, b` merges it into `(NULL, NULL)`. A NULL closure never reaches here:
+  // the closure is a `MakeStruct`, so it is only NULL if the measure
+  // propagated past an OUTER JOIN, and that is either discarded by the WHERE
+  // modifier `MaybeInjectWhereModifier` injects under
+  // `FEATURE_AGGREGATE_FILTERING` or, without that feature, rejected by the
+  // resolver before the rewriter runs.
+  absl::StatusOr<std::vector<std::unique_ptr<const ResolvedExpr>>>
+  CreateGrainLockingKeys() const {
     GOOGLESQL_RET_CHECK(closure_struct_ref_->type()->IsStruct());
-    GOOGLESQL_RET_CHECK(closure_struct_ref_->type()->AsStruct()->num_fields() == 2);
-
-    const StructField& key_columns_field =
-        closure_struct_ref_->type()->AsStruct()->field(kKeyColumnsFieldIndex);
-
-    const StructType* key_columns_struct_type =
-        key_columns_field.type->AsStruct();
-
-    std::unique_ptr<const ResolvedExpr> grain_lock_key_expr;
-    GOOGLESQL_RET_CHECK_GE(key_columns_struct_type->num_fields(),
+    const StructType* closure_struct = closure_struct_ref_->type()->AsStruct();
+    GOOGLESQL_RET_CHECK(closure_struct->num_fields() == 2);
+    GOOGLESQL_RET_CHECK(closure_struct->field(kKeyColumnsFieldIndex).type->IsStruct());
+    const StructType* key_columns_struct =
+        closure_struct->field(kKeyColumnsFieldIndex).type->AsStruct();
+    GOOGLESQL_RET_CHECK_GE(key_columns_struct->num_fields(),
                  row_identity_column_names_.size());
-    if (key_columns_struct_type->num_fields() ==
-        row_identity_column_names_.size()) {
-      // All available row identity columns are needed; use the "key_columns"
-      // sub-struct directly.
-      //
-      // Correctness check: the field names and the row identity columns
-      // must match.
-      GOOGLESQL_DCHECK_OK(CheckEqualRowIdentityColumnNames(key_columns_struct_type,
-                                                 row_identity_column_names_));
+
+    // The keys are emitted in `row_identity_column_names_` order, i.e. sorted
+    // by name, whether the measure needs every key column or only some.
+    std::vector<std::unique_ptr<const ResolvedExpr>> grain_lock_key_exprs;
+    grain_lock_key_exprs.reserve(row_identity_column_names_.size());
+    for (absl::string_view field_name : row_identity_column_names_) {
+      bool is_ambiguous = false;
+      int field_idx = -1;
+      const StructField* field =
+          key_columns_struct->FindField(field_name, &is_ambiguous, &field_idx);
+      GOOGLESQL_RET_CHECK(field != nullptr) << "Cannot find field " << field_name
+                                  << " from the key_columns struct: "
+                                  << key_columns_struct->DebugString();
+      GOOGLESQL_RET_CHECK(!is_ambiguous)
+          << field_name << " is ambiguous, key_columns struct: "
+          << key_columns_struct->DebugString();
+
       GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ResolvedColumnRef> struct_ref_copy,
                        ResolvedASTDeepCopyVisitor::Copy(closure_struct_ref_));
-      grain_lock_key_expr = MakeResolvedGetStructField(
-          key_columns_field.type, std::move(struct_ref_copy),
-          kKeyColumnsFieldIndex);
-    } else {
-      // This measure column only needs some of the row identity columns;
-      std::vector<StructField> grain_lock_struct_fields;
-      std::vector<std::unique_ptr<const ResolvedExpr>>
-          grain_lock_struct_field_exprs;
-      for (const std::string& field_name : row_identity_column_names_) {
-        bool is_ambiguous = false;
-        int field_idx = -1;
-        const StructField* field = key_columns_struct_type->FindField(
-            field_name, &is_ambiguous, &field_idx);
-        GOOGLESQL_RET_CHECK(field != nullptr) << "Cannot find field " << field_name
-                                    << " from the key_columns struct: "
-                                    << key_columns_struct_type->DebugString();
-        GOOGLESQL_RET_CHECK(!is_ambiguous)
-            << field_name << " is ambiguous, key_columns struct: "
-            << key_columns_struct_type->DebugString();
-
-        grain_lock_struct_fields.push_back(
-            StructField(field_name, field->type));
-        GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ResolvedColumnRef> struct_ref_copy,
-                         ResolvedASTDeepCopyVisitor::Copy(closure_struct_ref_));
-        grain_lock_struct_field_exprs.push_back(MakeResolvedGetStructField(
-            field->type,
-            MakeResolvedGetStructField(key_columns_field.type,
-                                       std::move(struct_ref_copy),
-                                       kKeyColumnsFieldIndex),
-            field_idx));
-      }
-
-      if (row_identity_column_names_.size() == 1) {
-        // If there is only one row identity column name, we access it directly
-        // via GetStructField.
-        grain_lock_key_expr = std::move(grain_lock_struct_field_exprs[0]);
-      } else {
-        // Create a new struct out of those needed row identity columns and use
-        // it as the grain locking key.
-        const StructType* grain_lock_struct_type = nullptr;
-        GOOGLESQL_RETURN_IF_ERROR(type_factory_.MakeStructTypeFromVector(
-            grain_lock_struct_fields, &grain_lock_struct_type));
-        grain_lock_key_expr = MakeResolvedMakeStruct(
-            grain_lock_struct_type, std::move(grain_lock_struct_field_exprs));
-      }
+      grain_lock_key_exprs.push_back(MakeResolvedGetStructField(
+          field->type,
+          MakeResolvedGetStructField(key_columns_struct,
+                                     std::move(struct_ref_copy),
+                                     kKeyColumnsFieldIndex),
+          field_idx));
     }
-    return grain_lock_key_expr;
+    return grain_lock_key_exprs;
   }
 
   // Modify the aggregate function call to inject a WHERE modifier to discard
@@ -535,11 +494,6 @@ class MultiLevelAggregateRewriter : public ResolvedASTRewriteVisitor {
   const LanguageOptions& language_options_;
   // Used to create new columns.
   ColumnFactory& column_factory_;
-
-  // Used to create new types, e.g., in `CreateGrainLockingKey()` to create
-  // struct types for the grain locking key if a measure column uses
-  // column-level row identity columns.
-  TypeFactory& type_factory_;
 
   // The ColumnRef to the special STRUCT-typed column that contains the grouping
   // keys needed for grain-locking.
@@ -764,11 +718,10 @@ static absl::StatusOr<std::unique_ptr<const ResolvedExpr>> GrainLock(
     const absl::btree_set<std::string, googlesql_base::CaseLess>&
         row_identity_column_names,
     const Function* any_value_fn, FunctionCallBuilder& function_call_builder,
-    const LanguageOptions& language_options, ColumnFactory& column_factory,
-    TypeFactory& type_factory) {
+    const LanguageOptions& language_options, ColumnFactory& column_factory) {
   MultiLevelAggregateRewriter rewriter(
       any_value_fn, function_call_builder, language_options, column_factory,
-      type_factory, closure_struct_ref, row_identity_column_names);
+      closure_struct_ref, row_identity_column_names);
 
   GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedNode> rewritten,
                    rewriter.VisitAll(std::move(expr)));
@@ -900,11 +853,10 @@ absl::StatusOr<RewriteMeasureExprResult> RewriteMeasureExpr(
       GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> expr,
                        RewriteReferences(builder.expr(), closure_struct_ref,
                                          annotation_propagator));
-      GOOGLESQL_ASSIGN_OR_RETURN(
-          expr, GrainLock(std::move(expr), closure_struct_ref,
-                          measure_info.row_identity_column_names, any_value_fn,
-                          function_call_builder, language_options,
-                          column_factory, type_factory));
+      GOOGLESQL_ASSIGN_OR_RETURN(expr, GrainLock(std::move(expr), closure_struct_ref,
+                                       measure_info.row_identity_column_names,
+                                       any_value_fn, function_call_builder,
+                                       language_options, column_factory));
       GOOGLESQL_ASSIGN_OR_RETURN(auto grain_locked_aggregate,
                        std::move(builder).set_expr(std::move(expr)).Build());
       aggregates.push_back(std::move(grain_locked_aggregate));

@@ -5944,3 +5944,395 @@ select -9223372036854775809::int64;
 ERROR: Invalid integer literal: -9223372036854775809 [at 1:8]
 select -9223372036854775809::int64;
        ^
+==
+
+# Cast empty array to VARIANT.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features={{NONE|NONE,+VARIANT_TYPE}}]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select cast([] as VARIANT)
+--
+ALTERNATION GROUP: NONE
+--
+ERROR: Type not found: VARIANT [at 1:19]
+select cast([] as VARIANT)
+                  ^
+--
+ALTERNATION GROUP: NONE,+VARIANT_TYPE
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#1 AS `$col1` [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#1]
+    +-expr_list=
+    | +-$col1#1 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    +-input_scan=
+      +-SingleRowScan
+==
+
+# CAST from empty array<DATE> to VARIANT.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features={{NONE|NONE,+VARIANT_TYPE}}]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select cast(cast([] as array<DATE>) as VARIANT)
+--
+ALTERNATION GROUP: NONE
+--
+ERROR: Type not found: VARIANT [at 1:40]
+select cast(cast([] as array<DATE>) as VARIANT)
+                                       ^
+--
+ALTERNATION GROUP: NONE,+VARIANT_TYPE
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#1 AS `$col1` [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#1]
+    +-expr_list=
+    | +-$col1#1 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    +-input_scan=
+      +-SingleRowScan
+==
+
+# Comprehensive tests for VARIANT casts - Simple types from SimpleTypes.
+# TODO: Remove [no_run_sqlbuilder] and [no_run_deserializer] once VARIANT support is implemented in SQLBuilder and serializer.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+select
+  cast(`int32` as VARIANT) as c_int32,
+  cast(`int64` as VARIANT) as c_int64,
+  cast(`uint32` as VARIANT) as c_uint32,
+  cast(`uint64` as VARIANT) as c_uint64,
+  cast(`bool` as VARIANT) as c_bool,
+  cast(`float` as VARIANT) as c_float,
+  cast(`double` as VARIANT) as c_double,
+  cast(`string` as VARIANT) as c_string,
+  cast(`bytes` as VARIANT) as c_bytes,
+  cast(`date` as VARIANT) as c_date,
+  cast(`timestamp` as VARIANT) as c_timestamp,
+  cast(`numeric` as VARIANT) as c_numeric,
+  cast(`bignumeric` as VARIANT) as c_bignumeric,
+  cast(`json` as VARIANT) as c_json,
+  cast(`uuid` as VARIANT) as c_uuid
+from SimpleTypes;
+--
+QueryStmt
++-output_column_list=
+| +-$query.c_int32#20 AS c_int32 [VARIANT]
+| +-$query.c_int64#21 AS c_int64 [VARIANT]
+| +-$query.c_uint32#22 AS c_uint32 [VARIANT]
+| +-$query.c_uint64#23 AS c_uint64 [VARIANT]
+| +-$query.c_bool#24 AS c_bool [VARIANT]
+| +-$query.c_float#25 AS c_float [VARIANT]
+| +-$query.c_double#26 AS c_double [VARIANT]
+| +-$query.c_string#27 AS c_string [VARIANT]
+| +-$query.c_bytes#28 AS c_bytes [VARIANT]
+| +-$query.c_date#29 AS c_date [VARIANT]
+| +-$query.c_timestamp#30 AS c_timestamp [VARIANT]
+| +-$query.c_numeric#31 AS c_numeric [VARIANT]
+| +-$query.c_bignumeric#32 AS c_bignumeric [VARIANT]
+| +-$query.c_json#33 AS c_json [VARIANT]
+| +-$query.c_uuid#34 AS c_uuid [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[c_int32#20, c_int64#21, c_uint32#22, c_uint64#23, c_bool#24, c_float#25, c_double#26, c_string#27, c_bytes#28, c_date#29, c_timestamp#30, c_numeric#31, c_bignumeric#32, c_json#33, c_uuid#34]
+    +-expr_list=
+    | +-c_int32#20 :=
+    | | +-Cast(INT32 -> VARIANT)
+    | |   +-ColumnRef(type=INT32, column=SimpleTypes.int32#1)
+    | +-c_int64#21 :=
+    | | +-Cast(INT64 -> VARIANT)
+    | |   +-ColumnRef(type=INT64, column=SimpleTypes.int64#2)
+    | +-c_uint32#22 :=
+    | | +-Cast(UINT32 -> VARIANT)
+    | |   +-ColumnRef(type=UINT32, column=SimpleTypes.uint32#3)
+    | +-c_uint64#23 :=
+    | | +-Cast(UINT64 -> VARIANT)
+    | |   +-ColumnRef(type=UINT64, column=SimpleTypes.uint64#4)
+    | +-c_bool#24 :=
+    | | +-Cast(BOOL -> VARIANT)
+    | |   +-ColumnRef(type=BOOL, column=SimpleTypes.bool#7)
+    | +-c_float#25 :=
+    | | +-Cast(FLOAT -> VARIANT)
+    | |   +-ColumnRef(type=FLOAT, column=SimpleTypes.float#8)
+    | +-c_double#26 :=
+    | | +-Cast(DOUBLE -> VARIANT)
+    | |   +-ColumnRef(type=DOUBLE, column=SimpleTypes.double#9)
+    | +-c_string#27 :=
+    | | +-Cast(STRING -> VARIANT)
+    | |   +-ColumnRef(type=STRING, column=SimpleTypes.string#5)
+    | +-c_bytes#28 :=
+    | | +-Cast(BYTES -> VARIANT)
+    | |   +-ColumnRef(type=BYTES, column=SimpleTypes.bytes#6)
+    | +-c_date#29 :=
+    | | +-Cast(DATE -> VARIANT)
+    | |   +-ColumnRef(type=DATE, column=SimpleTypes.date#10)
+    | +-c_timestamp#30 :=
+    | | +-Cast(TIMESTAMP -> VARIANT)
+    | |   +-ColumnRef(type=TIMESTAMP, column=SimpleTypes.timestamp#15)
+    | +-c_numeric#31 :=
+    | | +-Cast(NUMERIC -> VARIANT)
+    | |   +-ColumnRef(type=NUMERIC, column=SimpleTypes.numeric#16)
+    | +-c_bignumeric#32 :=
+    | | +-Cast(BIGNUMERIC -> VARIANT)
+    | |   +-ColumnRef(type=BIGNUMERIC, column=SimpleTypes.bignumeric#17)
+    | +-c_json#33 :=
+    | | +-Cast(JSON -> VARIANT)
+    | |   +-ColumnRef(type=JSON, column=SimpleTypes.json#18)
+    | +-c_uuid#34 :=
+    |   +-Cast(UUID -> VARIANT)
+    |     +-ColumnRef(type=UUID, column=SimpleTypes.uuid#19)
+    +-input_scan=
+      +-TableScan(column_list=SimpleTypes.[int32#1, int64#2, uint32#3, uint64#4, string#5, bytes#6, bool#7, float#8, double#9, date#10, timestamp#15, numeric#16, bignumeric#17, json#18, uuid#19], table=SimpleTypes, column_index_list=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18])
+==
+
+# Comprehensive tests for VARIANT casts - Literals of Time, Datetime, Interval.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE,+CIVIL_TIME,+INTERVAL_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select
+  cast(TIME '12:34:56' as VARIANT) as c_time,
+  cast(DATETIME '2025-01-01 12:34:56' as VARIANT) as c_datetime,
+  cast(INTERVAL '1' DAY as VARIANT) as c_interval;
+--
+QueryStmt
++-output_column_list=
+| +-$query.c_time#1 AS c_time [VARIANT]
+| +-$query.c_datetime#2 AS c_datetime [VARIANT]
+| +-$query.c_interval#3 AS c_interval [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[c_time#1, c_datetime#2, c_interval#3]
+    +-expr_list=
+    | +-c_time#1 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | +-c_datetime#2 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | +-c_interval#3 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    +-input_scan=
+      +-SingleRowScan
+==
+
+# Comprehensive tests for VARIANT casts - Complex types (Array, Struct, Map).
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE,+MAP_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select
+  cast([1, 2] as VARIANT) as c_array,
+  cast(STRUCT(1 as a) as VARIANT) as c_struct,
+  cast(MAP_FROM_ARRAY([('a', 1)]) as VARIANT) as c_map,
+  cast(MAP_FROM_ARRAY([(1, 'a')]) as VARIANT) as c_map_int_key;
+--
+QueryStmt
++-output_column_list=
+| +-$query.c_array#1 AS c_array [VARIANT]
+| +-$query.c_struct#2 AS c_struct [VARIANT]
+| +-$query.c_map#3 AS c_map [VARIANT]
+| +-$query.c_map_int_key#4 AS c_map_int_key [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[c_array#1, c_struct#2, c_map#3, c_map_int_key#4]
+    +-expr_list=
+    | +-c_array#1 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | +-c_struct#2 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | +-c_map#3 :=
+    | | +-Cast(MAP<STRING, INT64> -> VARIANT)
+    | |   +-FunctionCall(GoogleSQL:map_from_array(ARRAY<STRUCT<STRING, INT64>>) -> MAP<STRING, INT64>)
+    | |     +-Literal(type=ARRAY<STRUCT<STRING, INT64>>, value=[{"a", 1}])
+    | +-c_map_int_key#4 :=
+    |   +-Cast(MAP<INT64, STRING> -> VARIANT)
+    |     +-FunctionCall(GoogleSQL:map_from_array(ARRAY<STRUCT<INT64, STRING>>) -> MAP<INT64, STRING>)
+    |       +-Literal(type=ARRAY<STRUCT<INT64, STRING>>, value=[{1, "a"}])
+    +-input_scan=
+      +-SingleRowScan
+==
+
+# Comprehensive tests for VARIANT casts - Proto and Enum.
+# TODO: Remove [no_run_sqlbuilder] and [no_run_deserializer] once VARIANT support is implemented in SQLBuilder and serializer.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+select
+  cast(KitchenSink as VARIANT) as c_proto,
+  cast(TestEnum as VARIANT) as c_enum
+from TestTable;
+--
+QueryStmt
++-output_column_list=
+| +-$query.c_proto#4 AS c_proto [VARIANT]
+| +-$query.c_enum#5 AS c_enum [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[c_proto#4, c_enum#5]
+    +-expr_list=
+    | +-c_proto#4 :=
+    | | +-Cast(PROTO<googlesql_test.KitchenSinkPB> -> VARIANT)
+    | |   +-ColumnRef(type=PROTO<googlesql_test.KitchenSinkPB>, column=TestTable.KitchenSink#3)
+    | +-c_enum#5 :=
+    |   +-Cast(ENUM<googlesql_test.TestEnum> -> VARIANT)
+    |     +-ColumnRef(type=ENUM<googlesql_test.TestEnum>, column=TestTable.TestEnum#2)
+    +-input_scan=
+      +-TableScan(column_list=TestTable.[TestEnum#2, KitchenSink#3], table=TestTable, column_index_list=[1, 2])
+==
+
+# Implicit coercion to VARIANT. VARIANT is not a supertype of any type except
+# itself. Literals, query parameters, untyped NULL and untyped [] coerce to a
+# VARIANT expression. Other expressions need an explicit CAST, or an explicit
+# ARRAY<VARIANT> constructor type.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+[no_enable_literal_replacement]
+select
+  if(true, cast(1 as VARIANT), 2) as c_if_lit,
+  if(true, cast(1 as VARIANT), null) as c_if_untyped_null,
+  if(true, cast(1 as VARIANT), @test_param_int64) as c_if_param,
+  if(true, cast(1 as VARIANT), cast(`int64` as VARIANT)) as c_if_explicit_cast,
+  [cast(1 as VARIANT), 'abc', []] as c_array_lit,
+  ARRAY<VARIANT>[cast(1 as VARIANT), `int64`, cast(null as INT64), 'abc', [], STRUCT(1 as a)] as c_array_explicit_type
+from SimpleTypes;
+--
+QueryStmt
++-output_column_list=
+| +-$query.c_if_lit#20 AS c_if_lit [VARIANT]
+| +-$query.c_if_untyped_null#21 AS c_if_untyped_null [VARIANT]
+| +-$query.c_if_param#22 AS c_if_param [VARIANT]
+| +-$query.c_if_explicit_cast#23 AS c_if_explicit_cast [VARIANT]
+| +-$query.c_array_lit#24 AS c_array_lit [ARRAY<VARIANT>]
+| +-$query.c_array_explicit_type#25 AS c_array_explicit_type [ARRAY<VARIANT>]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[c_if_lit#20, c_if_untyped_null#21, c_if_param#22, c_if_explicit_cast#23, c_array_lit#24, c_array_explicit_type#25]
+    +-expr_list=
+    | +-c_if_lit#20 :=
+    | | +-FunctionCall(GoogleSQL:if(BOOL, VARIANT, VARIANT) -> VARIANT)
+    | |   +-Literal(type=BOOL, value=true)
+    | |   +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | |   +-Literal(type=VARIANT, value=<Variant formatting not supported>)
+    | +-c_if_untyped_null#21 :=
+    | | +-FunctionCall(GoogleSQL:if(BOOL, VARIANT, VARIANT) -> VARIANT)
+    | |   +-Literal(type=BOOL, value=true)
+    | |   +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | |   +-Literal(type=VARIANT, value=NULL)
+    | +-c_if_param#22 :=
+    | | +-FunctionCall(GoogleSQL:if(BOOL, VARIANT, VARIANT) -> VARIANT)
+    | |   +-Literal(type=BOOL, value=true)
+    | |   +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | |   +-Cast(INT64 -> VARIANT)
+    | |     +-Parameter(type=INT64, name="test_param_int64")
+    | +-c_if_explicit_cast#23 :=
+    | | +-FunctionCall(GoogleSQL:if(BOOL, VARIANT, VARIANT) -> VARIANT)
+    | |   +-Literal(type=BOOL, value=true)
+    | |   +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    | |   +-Cast(INT64 -> VARIANT)
+    | |     +-ColumnRef(type=INT64, column=SimpleTypes.int64#2)
+    | +-c_array_lit#24 := Literal(type=ARRAY<VARIANT>, value=[<Variant formatting not supported>, <Variant formatting not supported>, <Variant formatting not supported>], has_explicit_type=TRUE)
+    | +-c_array_explicit_type#25 :=
+    |   +-FunctionCall(GoogleSQL:$make_array(repeated(6) VARIANT) -> ARRAY<VARIANT>)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    |     +-Cast(INT64 -> VARIANT)
+    |     | +-ColumnRef(type=INT64, column=SimpleTypes.int64#2)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>)
+    +-input_scan=
+      +-TableScan(column_list=[SimpleTypes.int64#2], table=SimpleTypes, column_index_list=[1])
+==
+
+# A non-literal, including a literal with an explicit type, does not coerce to
+# VARIANT in a common supertype context.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select if(true, cast(1 as VARIANT), {{`int64`|cast(null as INT64)|cast(2 as INT64)|DATE '2020-01-01'|STRUCT(1 as a)}})
+from SimpleTypes
+--
+ALTERNATION GROUP: `int64`
+--
+ERROR: No matching signature for function IF
+  Argument types: BOOL, VARIANT, INT64
+  Signature: IF(BOOL, T1, T1)
+    Unable to find common supertype for templated argument <T1>
+      Input types for <T1>: {INT64, VARIANT} [at 1:8]
+select if(true, cast(1 as VARIANT), `int64`)
+       ^
+--
+ALTERNATION GROUP: cast(null as INT64)
+--
+ERROR: No matching signature for function IF
+  Argument types: BOOL, VARIANT, INT64
+  Signature: IF(BOOL, T1, T1)
+    Unable to find common supertype for templated argument <T1>
+      Input types for <T1>: {INT64, VARIANT} [at 1:8]
+select if(true, cast(1 as VARIANT), cast(null as INT64))
+       ^
+--
+ALTERNATION GROUP: cast(2 as INT64)
+--
+ERROR: No matching signature for function IF
+  Argument types: BOOL, VARIANT, INT64
+  Signature: IF(BOOL, T1, T1)
+    Unable to find common supertype for templated argument <T1>
+      Input types for <T1>: {INT64, VARIANT} [at 1:8]
+select if(true, cast(1 as VARIANT), cast(2 as INT64))
+       ^
+--
+ALTERNATION GROUP: DATE '2020-01-01'
+--
+ERROR: No matching signature for function IF
+  Argument types: BOOL, VARIANT, DATE
+  Signature: IF(BOOL, T1, T1)
+    Unable to find common supertype for templated argument <T1>
+      Input types for <T1>: {DATE, VARIANT} [at 1:8]
+select if(true, cast(1 as VARIANT), DATE '2020-01-01')
+       ^
+--
+ALTERNATION GROUP: STRUCT(1 as a)
+--
+ERROR: No matching signature for function IF
+  Argument types: BOOL, VARIANT, STRUCT<a INT64>
+  Signature: IF(BOOL, T1, T1)
+    Unable to find common supertype for templated argument <T1>
+      Input types for <T1>: {STRUCT<a INT64>, VARIANT} [at 1:8]
+select if(true, cast(1 as VARIANT), STRUCT(1 as a))
+       ^
+==
+
+# CAST an array with homogeneous types to VARIANT. Both the cases here fail
+# because there is no common supertype.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select [cast(1 as VARIANT), 'abc', {{`int64`|STRUCT(1 as a)}}]
+from SimpleTypes
+
+--
+ALTERNATION GROUP: `int64`
+--
+ERROR: Array elements of types {INT64, STRING, VARIANT} do not have a common supertype [at 1:8]
+select [cast(1 as VARIANT), 'abc', `int64`]
+       ^
+--
+ALTERNATION GROUP: STRUCT(1 as a)
+--
+ERROR: Array elements of types {STRING, STRUCT<a INT64>, VARIANT} do not have a common supertype [at 1:8]
+select [cast(1 as VARIANT), 'abc', STRUCT(1 as a)]
+       ^

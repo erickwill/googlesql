@@ -412,6 +412,12 @@ SCALAR_PATH_MODE = EnumScalarType('PathMode', 'ResolvedGraphPathMode')
 SCALAR_PATH_SEARCH_PREFIX = EnumScalarType(
     'PathSearchPrefixType', 'ResolvedGraphPathSearchPrefix'
 )
+SCALAR_GRAPH_ELEMENT_PROPERTY_UPDATE_MODE = EnumScalarType(
+    'PropertyUpdateMode', 'ResolvedGraphUpdateElement'
+)
+SCALAR_GRAPH_ELEMENT_LABEL_UPDATE_MODE = EnumScalarType(
+    'LabelUpdateMode', 'ResolvedGraphUpdateElement'
+)
 
 SCALAR_DROP_INDEX_TYPE = EnumScalarType('IndexType', 'ResolvedDropIndexStmt')
 SCALAR_ALTER_INDEX_TYPE = EnumScalarType(
@@ -718,7 +724,7 @@ def Field(
 
 # You can use `tag_id=GetTempTagId()` until doing the final submit.
 # That will avoid merge conflicts when syncing in other changes.
-NEXT_NODE_TAG_ID = 333
+NEXT_NODE_TAG_ID = 339
 
 
 def GetTempTagId():
@@ -2525,6 +2531,22 @@ def main(unused_argv):
   )
 
   gen.AddNode(
+      name='ResolvedGetVariantField',
+      tag_id=335,
+      parent='ResolvedExpr',
+      comment="""
+      Get the field <field_name> from <expr>, which has a VARIANT type.
+      <field_name> cannot be "".
+      The output always has VARIANT type.
+      Returns SQL NULL if <field_name> does not exist.
+      """,
+      fields=[
+          Field('expr', 'ResolvedExpr', tag_id=2),
+          Field('field_name', SCALAR_STRING, tag_id=3),
+      ],
+  )
+
+  gen.AddNode(
       name='ResolvedGetRowField',
       tag_id=314,
       parent='ResolvedExpr',
@@ -3079,6 +3101,48 @@ value.
               """,
       fields=[
           Field('connection', SCALAR_CONNECTION, tag_id=2),
+      ],
+  )
+
+  gen.AddNode(
+      name='ResolvedConnectionKeyValuePair',
+      tag_id=337,
+      parent='ResolvedArgument',
+      comment="""
+      Represents a connection associated with a key (role).
+      """,
+      fields=[
+          Field('key', SCALAR_STRING, tag_id=2),
+          Field('connection', 'ResolvedConnection', tag_id=3),
+      ],
+  )
+
+  gen.AddNode(
+      name='ResolvedConnectionList',
+      tag_id=338,
+      parent='ResolvedArgument',
+      comment="""
+      Represents a connection clause (`WITH CONNECTION ...` or
+      `CONNECTION(...)`), which specifies either a single unnamed `connection`
+      or a list of keyed connections (`connection_kv_list`), enabled by
+      `FEATURE_MULTI_CONNECTIONS`. Exactly one of `connection` or a non-empty
+      `connection_kv_list` must be present.
+      """,
+      fields=[
+          Field(
+              'connection',
+              'ResolvedConnection',
+              tag_id=2,
+              ignorable=IGNORABLE_DEFAULT,
+          ),
+          Field(
+              'connection_kv_list',
+              'ResolvedConnectionKeyValuePair',
+              tag_id=3,
+              vector=True,
+              ignorable=IGNORABLE_DEFAULT,
+              is_optional_constructor_arg=True,
+          ),
       ],
   )
 
@@ -4885,7 +4949,8 @@ value.
       * `expr` represents a scalar function argument.
       * `scan` represents a table-typed argument.
       * `model` represents a ML model function argument.
-      * `connection` represents a connection object function argument.
+      * `connection_list` represents a connection object or list of keyed
+        connections function argument.
       * `descriptor_arg` represents a descriptor object function argument.
       * `inline_lambda` represents a lambda function argument.
       * `sequence` represents a sequence object function argument.
@@ -4913,10 +4978,10 @@ value.
               'model', 'ResolvedModel', ignorable=IGNORABLE_DEFAULT, tag_id=5
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
+              'connection_list',
+              'ResolvedConnectionList',
               ignorable=IGNORABLE_DEFAULT,
-              tag_id=6,
+              tag_id=15,
           ),
           Field(
               # Can't name it 'descriptor' because of conflict in protos.
@@ -4992,7 +5057,37 @@ value.
               other types, e.g. `scan` or `model` in the future.
               """,
           ),
+          Field(
+              'partition_by_list',
+              'ResolvedColumnRef',
+              tag_id=13,
+              vector=True,
+              ignorable=IGNORABLE_DEFAULT,
+              is_optional_constructor_arg=True,
+              comment="""
+              If this argument is a relation, this stores the partition keys
+              from the PARTITION BY clause.
+              """,
+          ),
+          Field(
+              'order_by_list',
+              'ResolvedOrderByItem',
+              tag_id=14,
+              vector=True,
+              ignorable=IGNORABLE_DEFAULT,
+              is_optional_constructor_arg=True,
+              comment="""
+              If this argument is a relation, this stores the order-by items
+              from the ORDER BY clause.
+              """,
+          ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -5684,10 +5779,10 @@ value.
       comment="""
       This statement:
         CREATE [OR REPLACE] [TEMP|TEMPORARY|PUBLIC|PRIVATE] EXTERNAL SCHEMA
-        [IF NOT EXISTS] <name> [WITH CONNECTION] <connection>
+        [IF NOT EXISTS] <name> [WITH CONNECTION] <connection_list>
         OPTIONS (name=value, ...)
 
-        <connection> encapsulates engine-specific metadata used to connect
+        <connection_list> encapsulates engine-specific metadata used to connect
         to an external data source
 
         Note: external schemas are pointers to schemas defined in an external
@@ -5695,12 +5790,18 @@ value.
               """,
       fields=[
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=2,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=3,
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -5810,12 +5911,18 @@ value.
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=13,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=14,
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -6126,12 +6233,18 @@ value.
               'is_remote', SCALAR_BOOL, tag_id=11, ignorable=IGNORABLE_DEFAULT
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=12,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=14,
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -6336,23 +6449,30 @@ value.
       parent='ResolvedStatement',
       comment="""
       This statement:
-        EXPORT MODEL <model_name_path> [WITH CONNECTION <connection>]
+        EXPORT MODEL <model_name_path> [WITH CONNECTION <connection_list>]
         <option_list>
       which is used to export a model to a specific location.
-      <connection> is the connection that the model is written to.
+      <connection_list> is the connection or list of keyed connections that the
+        model is written to.
       <option_list> identifies user specified options to use when exporting the
         model.
            """,
       fields=[
           Field('model_name_path', SCALAR_STRING, vector=True, tag_id=2),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=3,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=5,
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field('option_list', 'ResolvedOption', vector=True, tag_id=4),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -6361,17 +6481,19 @@ value.
       parent='ResolvedStatement',
       comment="""
       This statement:
-        EXPORT DATA [WITH CONNECTION] <connection> (<option_list>) AS SELECT ...
+        EXPORT DATA [WITH CONNECTION] <connection_list> (<option_list>)
+        AS SELECT ...
 
       Also used for the pipe operator
-        |> EXPORT DATA [WITH CONNECTION] <connection> (<option_list>)
+        |> EXPORT DATA [WITH CONNECTION] <connection_list> (<option_list>)
       This occurs inside ResolvedPipeExportDataScan, with the pipe
       input stored in `query`.  All other modifier fields are allowed.
 
       This is used to run export a query result somewhere without giving the
       result a table name.
 
-      <connection> connection reference for accessing destination source.
+      <connection_list> connection reference or list of keyed connections for
+                        accessing destination source.
       <option_list> has engine-specific directives for how and where to
                     materialize the query result.
       <output_column_list> has the names and types of the columns produced by
@@ -6386,9 +6508,9 @@ value.
               """,
       fields=[
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=6,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=7,
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
@@ -6427,6 +6549,12 @@ value.
                 """,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -6436,13 +6564,14 @@ value.
       comment="""
       This statement:
         EXPORT <schema_object_kind> METADATA FROM <name_path>
-        [WITH CONNECTION <connection>] [OPTIONS(<option_list>)]
+        [WITH CONNECTION <connection_list>] [OPTIONS(<option_list>)]
 
       <schema_object_kind> is a string identifier for the object for which the
       metadata should be exported. Currently, only 'TABLE' object is supported.
       <name_path> is a vector giving the identifier path for the object for
       which the metadata should be exported.
-      <connection> connection reference for accessing destination source.
+      <connection_list> connection reference or list of keyed connections for
+      accessing destination source.
       <option_list> identifies user specified options to use when exporting
       object's metadata.
           """,
@@ -6450,13 +6579,19 @@ value.
           Field('schema_object_kind', SCALAR_STRING, tag_id=2),
           Field('name_path', SCALAR_STRING, tag_id=3, vector=True),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=4,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=6,
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field('option_list', 'ResolvedOption', vector=True, tag_id=5),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -9768,9 +9903,9 @@ ResolvedArgumentRef(y)
               ignorable=IGNORABLE,
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=16,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=17,
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
@@ -9781,6 +9916,12 @@ ResolvedArgumentRef(y)
         // and immutable specifiers are considered immutable and functions
         // with the stable specifier are considered stable.
         FunctionEnums::Volatility volatility() const;
+      """,
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
       """,
   )
 
@@ -9994,12 +10135,18 @@ ResolvedArgumentRef(y)
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=12,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=13,
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -10357,7 +10504,7 @@ ResolvedArgumentRef(y)
       This statement creates a user-defined procedure:
         CREATE [OR REPLACE] [TEMP] PROCEDURE [IF NOT EXISTS] <name_path>
         (<arg_list>) [EXTERNAL SECURITY <external_security>]
-        [WITH CONNECTION <connection>] [OPTIONS (<option_list>)]
+        [WITH CONNECTION <connection_list>] [OPTIONS (<option_list>)]
         [BEGIN <procedure_body> END | LANGUAGE <language> [AS <code>]];
 
         <name_path> is the identifier path of the procedure.
@@ -10367,7 +10514,7 @@ ResolvedArgumentRef(y)
                Catalog for future queries.
         <external_security> is the external security mode for the created
                procedure. Values include 'INVOKER', 'DEFINER'.
-        <connection> is the identifier path of the connection object.
+        <connection_list> is the connection or list of keyed connections.
         <option_list> has engine-specific directives for modifying procedures.
         <procedure_body> is a string literal that contains the SQL procedure
                body. It includes everything from the BEGIN keyword to the END
@@ -10419,9 +10566,9 @@ ResolvedArgumentRef(y)
               tag_id=5,
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=6,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=10,
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
@@ -10435,6 +10582,12 @@ ResolvedArgumentRef(y)
               tag_id=9,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -11702,7 +11855,8 @@ ResolvedArgumentRef(y)
           The hive partition columns from the source file do not automatically
           partition the destination table. To apply the partition, the
           <partition_by_list> must be specified.
-      <connection> optional connection reference for accessing files.
+      <connection_list> optional connection reference or list of keyed
+          connections for accessing files.
       <from_files_option_list> the options list describing the source file(s).
 
       Special-case column creation logic in this node:
@@ -11796,9 +11950,9 @@ ResolvedArgumentRef(y)
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
-              'connection',
-              'ResolvedConnection',
-              tag_id=14,
+              'connection_list',
+              'ResolvedConnectionList',
+              tag_id=18,
               ignorable=IGNORABLE_DEFAULT,
           ),
           Field(
@@ -11809,6 +11963,12 @@ ResolvedArgumentRef(y)
               ignorable=IGNORABLE_DEFAULT,
           ),
       ],
+      extra_defs_node_only="""
+  const ResolvedConnection* connection() const {
+    return connection_list() != nullptr ? connection_list()->connection()
+                                        : nullptr;
+  }
+      """,
   )
 
   gen.AddNode(
@@ -13809,10 +13969,6 @@ ResolvedArgumentRef(y)
 
               In nested UPDATE constructors, this allows ResolvedColumnRefs
               that reference the input value from a specific UPDATE.
-
-              (If the LHS path traverses repeated fields in nested update
-              constructor, then this column represents an individual element
-              of the repeated field.)
               """,
           ),
       ],
@@ -14102,6 +14258,187 @@ ResolvedArgumentRef(y)
               SCALAR_UPDATE_COLLISION_ACTION_TYPE,
               tag_id=4,
               comment="""COLLISION_ACTION_ERROR (default) or COLLISION_ACTION_PICK_ONE """,
+          ),
+      ],
+  )
+
+  gen.AddNode(
+      name='ResolvedGraphUpdateElement',
+      tag_id=333,
+      parent='ResolvedArgument',
+      comment="""
+      Represents GQL SET or REMOVE operations for a single target graph element
+      variable.
+
+      Modifies `target_element` with property updates (`property_update_mode`,
+      `property_list`) and/or label updates (`label_update_mode`, `label_list`),
+      producing the updated graph element in `output_column`.
+
+      Mode compatibility rules:
+       - `property_update_mode` and `label_update_mode` cannot both be
+         NO_UPDATE.
+       - Cannot mix SET/REPLACE with REMOVE: one mode cannot be SET or REPLACE
+         while the other is REMOVE.
+
+      Property update modes (`property_update_mode`):
+       - PROPERTY_NO_UPDATE:
+         - No properties are modified.
+       - PROPERTY_SET:
+         - Updates existing properties or adds dynamic properties.
+         - Updatable static properties can be modified; non-updatable static
+           properties produce an error.
+         - Each item in `property_list` must have `property_value` set.
+       - PROPERTY_REPLACE:
+         - Replaces all properties on the element.
+         - Updatable static properties not in `property_list` are set to NULL;
+           unlisted dynamic properties are discarded.
+         - Each item in `property_list` (if any) must have `property_value` set.
+       - PROPERTY_REMOVE:
+         - Deletes specified dynamic properties.
+         - Each item in `property_list` must have `property()` == nullptr and
+           `property_value()` == nullptr (static properties cannot be removed).
+         - Requires FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE.
+
+      Label update modes (`label_update_mode`):
+       - LABEL_NO_UPDATE:
+         - No labels are modified.
+         - `label_list` must be empty.
+       - LABEL_SET:
+         - Adds specified labels (idempotent if label already exists).
+         - `label_list` must not be empty.
+       - LABEL_REMOVE:
+         - Deletes specified dynamic labels.
+         - `label_list` must not be empty.
+         - For each label item in `label_list`, `label()` must be nullptr and
+           `label_name()` must be a STRING literal (static labels cannot be
+           removed).
+         - Requires FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE.
+      """,
+      fields=[
+          Field(
+              'target_element',
+              'ResolvedColumnRef',
+              tag_id=2,
+              comment="""
+              The graph element (node or edge) being updated. If the column
+              value is NULL at runtime, the update is treated as a no-op.
+              """,
+          ),
+          Field(
+              'output_column',
+              SCALAR_RESOLVED_COLUMN,
+              column_is_created=True,
+              tag_id=3,
+              comment="""
+              Represents the updated graph element after applying the
+              modifications in this element.
+              Must have the same type as `target_element`.
+              """,
+          ),
+          Field(
+              'property_update_mode',
+              SCALAR_GRAPH_ELEMENT_PROPERTY_UPDATE_MODE,
+              tag_id=4,
+          ),
+          Field(
+              'property_list',
+              'ResolvedGraphDMLPropertyItem',
+              tag_id=5,
+              vector=True,
+              is_optional_constructor_arg=True,
+              ignorable=IGNORABLE_DEFAULT,
+              comment="""
+              Properties being modified. Interpreted according to
+              `property_update_mode`:
+              - Must be empty for PROPERTY_NO_UPDATE.
+              - May be empty for PROPERTY_REPLACE (e.g. `SET n = {}`).
+              - Must not be empty for PROPERTY_SET and PROPERTY_REMOVE.
+              """,
+          ),
+          Field(
+              'label_update_mode',
+              SCALAR_GRAPH_ELEMENT_LABEL_UPDATE_MODE,
+              tag_id=6,
+          ),
+          Field(
+              'label_list',
+              'ResolvedGraphLabel',
+              tag_id=7,
+              vector=True,
+              is_optional_constructor_arg=True,
+              ignorable=IGNORABLE_DEFAULT,
+              comment="""
+              Labels being added or deleted. Interpreted according to
+              `label_update_mode`:
+              - Must be empty for LABEL_NO_UPDATE.
+              - Must not be empty for LABEL_SET and LABEL_REMOVE.
+              """,
+          ),
+      ],
+  )
+
+  gen.AddNode(
+      name='ResolvedGraphUpdateScan',
+      tag_id=334,
+      parent='ResolvedScan',
+      comment="""
+      Represents a GQL SET statement or REMOVE statement. Used only when
+      FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE is enabled. See
+      (broken link):dml-update for more details.
+
+      For each input row from `input_scan`, evaluates the modifications in
+      `update_element_list` to apply property/label updates to graph elements.
+
+      Output of this scan:
+      - Rows: Flows through all input rows from `input_scan`.
+      - Columns (`column_list`): The column list can include a subset of columns
+        from the input_scan's `column_list` and the `output_column`s from
+        `update_element_list`.
+
+      When executed, all update expressions are evaluated against the
+      pre-update state of the incoming working table. `ResolvedGraphUpdateScan`
+      applies the side effects of updating these nodes or edges into the
+      current property graph.
+      """,
+      fields=[
+          Field('input_scan', 'ResolvedScan', tag_id=2),
+          Field(
+              'update_element_list',
+              'ResolvedGraphUpdateElement',
+              tag_id=3,
+              vector=True,
+              comment="""
+              The list of modifications to graph elements.
+
+              Contract:
+              - Target element columns in `update_element_list` must be unique
+                (each target graph element column appears at most once, enforced
+                by the validator).
+              - All property and label modifications for a given target element
+                column must be combined into a single
+                `ResolvedGraphUpdateElement`.
+              """,
+          ),
+      ],
+  )
+
+  gen.AddNode(
+      name='ResolvedMakeColumnListSpec',
+      tag_id=336,
+      parent='ResolvedExpr',
+      comment="""
+      Constructs a column_list_spec object.
+      A column_list_spec is a list of unresolved column names, allowed as an
+      argument in TVFs and UNPACK expressions. The enclosed expression must
+      resolve to an array of non-empty non-null strings.
+
+      It has type COLUMN_LIST_SPEC.
+      """,
+      fields=[
+          Field(
+              'column_name_list',
+              'ResolvedExpr',
+              tag_id=2,
           ),
       ],
   )

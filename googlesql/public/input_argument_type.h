@@ -23,7 +23,6 @@
 #include <string>
 #include <vector>
 
-#include "googlesql/base/logging.h"
 #include "googlesql/public/id_string.h"
 #include "googlesql/public/options.pb.h"
 #include "googlesql/public/type.h"
@@ -32,6 +31,7 @@
 #include "absl/base/attributes.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/hash/hash.h"
+#include "googlesql/base/check.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -294,8 +294,8 @@ class InputArgumentType {
 
   // Constructor for connection arguments. Only for use when analyzing
   // table-valued functions. 'connection_arg' specifies the connection object
-  // for the provided input. For more information about connection argument, see
-  // table_valued_function.h.
+  // or key-value pair list for the provided input. For more information about
+  // connection argument, see table_valued_function.h.
   static InputArgumentType ConnectionInputArgumentType(
       const TVFConnectionArgument& connection_arg);
 

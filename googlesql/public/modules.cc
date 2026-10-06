@@ -30,9 +30,11 @@
 #include "googlesql/common/resolution_scope.h"
 #include "googlesql/common/scope_error_catalog.h"
 #include "googlesql/parser/ast_node_kind.h"
+#include "googlesql/parser/macros/macro_catalog.h"
 #include "googlesql/parser/parse_tree.h"
 #include "googlesql/parser/parse_tree_errors.h"
 #include "googlesql/parser/parser.h"
+#include "googlesql/parser/parser_mode.h"
 #include "googlesql/public/analyzer.h"
 #include "googlesql/public/analyzer_options.h"
 #include "googlesql/public/analyzer_output.h"
@@ -163,6 +165,12 @@ absl::Status ModuleCatalog::MakeAndRegisterStatementError(
   ParseLocationPoint location =
       GetErrorLocationPoint(node, /*include_leftmost_child=*/true);
   return MakeAndRegisterError(error_string, location, errors);
+}
+
+void ModuleCatalog::MakeAndRegisterStatementErrorIgnored(
+    absl::string_view error_string, const ASTNode* node,
+    std::vector<absl::Status>* errors) {
+  MakeAndRegisterStatementError(error_string, node, errors).IgnoreError();
 }
 
 static std::string UnsupportedOverloadsErrorString(
@@ -812,8 +820,13 @@ absl::Status ModuleCatalog::InitInternalCatalogs() {
                                              analyzer_options_, type_factory_,
                                              &private_global_catalog_));
 
+  public_macro_catalog_ = std::make_unique<parser::macros::MacroCatalog>();
+  private_macro_catalog_ = std::make_unique<parser::macros::MacroCatalog>();
+
   GOOGLESQL_RETURN_IF_ERROR(MultiCatalog::Create(
-      FullName(), {public_builtin_catalog_.get(), public_global_catalog_.get()},
+      FullName(),
+      {public_builtin_catalog_.get(), public_global_catalog_.get(),
+       public_macro_catalog_.get()},
       &public_catalog_));
 
   type_import_catalog_ =
@@ -825,7 +838,8 @@ absl::Status ModuleCatalog::InitInternalCatalogs() {
       FullName(),
       {public_builtin_catalog_.get(), private_builtin_catalog_.get(),
        type_import_catalog_.get(), module_import_builtin_catalog_.get(),
-       builtin_function_catalog_},
+       builtin_function_catalog_, public_macro_catalog_.get(),
+       private_macro_catalog_.get()},
       &resolution_catalog_builtin_));
 
   // If global scope catalog is provided, global-scope module objects can
@@ -839,7 +853,8 @@ absl::Status ModuleCatalog::InitInternalCatalogs() {
       FullName(),
       {public_builtin_catalog_.get(), public_global_catalog_.get(),
        private_builtin_catalog_.get(), private_global_catalog_.get(),
-       type_import_catalog_.get(), module_import_global_catalog_.get()},
+       type_import_catalog_.get(), module_import_global_catalog_.get(),
+       public_macro_catalog_.get(), private_macro_catalog_.get()},
       &resolution_catalog_global_));
   if (global_scope_catalog_ != nullptr) {
     GOOGLESQL_RETURN_IF_ERROR(
@@ -1191,6 +1206,62 @@ absl::Status ModuleCatalog::MaybeUpdateCatalogFromModuleStatement(
   return absl::OkStatus();
 }
 
+absl::Status ModuleCatalog::MaybeUpdateCatalogFromDefineMacroStatement(
+    std::unique_ptr<ParserOutput> parser_output) {
+  if (!module_factory_options_.allow_macros_in_module) {
+    MakeAndRegisterStatementErrorIgnored(
+        "DEFINE MACRO statements are not supported", parser_output->statement(),
+        &module_errors_);
+    return absl::OkStatus();
+  }
+
+  GOOGLESQL_RET_CHECK_EQ(AST_DEFINE_MACRO_STATEMENT,
+               parser_output->statement()->node_kind());
+  const ASTDefineMacroStatement* define_macro_ast =
+      parser_output->statement()->GetAs<const ASTDefineMacroStatement>();
+  GOOGLESQL_RET_CHECK_NE(nullptr, define_macro_ast);
+
+  // Throw an error if visibility is not PUBLIC or PRIVATE (i.e. it is
+  // unspecified).
+  if (define_macro_ast->visibility() ==
+      ASTDefineMacroStatementEnums::MACRO_VISIBILITY_UNSPECIFIED) {
+    MakeAndRegisterStatementErrorIgnored(
+        "DEFINE MACRO statements inside modules require an explicit PUBLIC or "
+        "PRIVATE visibility modifier",
+        parser_output->statement(), &module_errors_);
+    return absl::OkStatus();
+  }
+
+  parser::macros::MacroInfo macro_info(
+      module_contents_, define_macro_ast->location(),
+      define_macro_ast->name()->location(),
+      define_macro_ast->body()->location(),
+      define_macro_ast->location().start().GetByteOffset());
+
+  GOOGLESQL_RET_CHECK(internal_catalogs_initialized_);
+  bool is_public =
+      (define_macro_ast->visibility() == ASTDefineMacroStatementEnums::PUBLIC);
+
+  const Macro* existing_macro = nullptr;
+  GOOGLESQL_RETURN_IF_ERROR(resolution_catalog_global_->GetMacro(
+      std::string(macro_info.name()), &existing_macro));
+  if (existing_macro != nullptr) {
+    MakeAndRegisterStatementErrorIgnored(
+        absl::StrCat("Macros must have unique names, but found duplicate name ",
+                     macro_info.name()),
+        parser_output->statement(), &module_errors_);
+    return absl::OkStatus();
+  }
+
+  if (is_public) {
+    GOOGLESQL_RETURN_IF_ERROR(public_macro_catalog_->RegisterMacro(macro_info));
+  } else {
+    GOOGLESQL_RETURN_IF_ERROR(private_macro_catalog_->RegisterMacro(macro_info));
+  }
+
+  return absl::OkStatus();
+}
+
 absl::Status ModuleCatalog::MaybeUpdateCatalogFromStatement(
     const ParseResumeLocation& parse_resume_location,
     std::unique_ptr<ParserOutput> parser_output) {
@@ -1224,6 +1295,9 @@ absl::Status ModuleCatalog::MaybeUpdateCatalogFromStatement(
       return MaybeUpdateCatalogFromCreateProcedureStatement(
           parse_resume_location, std::move(parser_output));
     }
+    case AST_DEFINE_MACRO_STATEMENT:
+      return MaybeUpdateCatalogFromDefineMacroStatement(
+          std::move(parser_output));
     case AST_MODULE_STATEMENT: {
       return MaybeUpdateCatalogFromModuleStatement(std::move(parser_output));
     }
@@ -1248,7 +1322,11 @@ absl::Status ModuleCatalog::Init() {
   GOOGLESQL_RET_CHECK_OK(ValidateConstantEvaluatorPrecondition());
   ParseResumeLocation parse_resume_location =
       ParseResumeLocation::FromStringView(module_filename_, module_contents_);
-  ParserOptions parser_options = analyzer_options_.GetParserOptions();
+  ParserOptions parser_options = analyzer_options_.GetParserOptions(
+      module_factory_options_.allow_macros_in_module
+          ? parser::MacroExpansionMode::kStrict
+          : parser::MacroExpansionMode::kNone,
+      /*catalog=*/nullptr);
   bool is_end_of_input = false;
   while (!is_end_of_input) {
     std::unique_ptr<ParserOutput> parser_output;
@@ -1274,6 +1352,18 @@ absl::Status ModuleCatalog::Init() {
 
     GOOGLESQL_RETURN_IF_ERROR(MaybeUpdateCatalogFromStatement(this_parse_resume_location,
                                                     std::move(parser_output)));
+
+    // Internal catalogs (including resolution_catalog_global_) are only
+    // initialized after the first statement (MODULE statement) is processed.
+    // Once initialized, attach resolution_catalog_global_ to parser_options so
+    // that all subsequent statements (DEFINE MACRO, CREATE FUNCTION, etc.) have
+    // access to both public and private macros during parsing/macro expansion.
+    if (module_factory_options_.allow_macros_in_module &&
+        parser_options.catalog() == nullptr && internal_catalogs_initialized_) {
+      parser_options = analyzer_options_.GetParserOptions(
+          parser::MacroExpansionMode::kStrict,
+          resolution_catalog_global_.get());
+    }
   }
 
   if (module_statement_analyzer_output() == nullptr) {
@@ -1539,6 +1629,23 @@ ModuleCatalog* ModuleCatalog::GetModuleCatalogForAlias(
     return nullptr;
   }
   return it->second.module_catalog;
+}
+
+absl::Status ModuleCatalog::GetMacro(const std::string& name,
+                                     const Macro** macro,
+                                     const FindOptions& options) {
+  *macro = nullptr;
+  if (!internal_catalogs_initialized_ || public_catalog_ == nullptr) {
+    return absl::OkStatus();
+  }
+  return public_catalog_->GetMacro(name, macro, options);
+}
+
+absl::Status ModuleCatalog::GetCatalog(const std::string& name,
+                                       Catalog** catalog,
+                                       const FindOptions& options) {
+  *catalog = GetModuleCatalogForAlias(name);
+  return absl::OkStatus();
 }
 
 bool ModuleCatalog::HasGlobalScopeObjects() const {

@@ -70,6 +70,7 @@ TEST(TestDriverTest, ClassAndProtoSize) {
     std::string userid_column;
     std::vector<const AnnotationMap*> column_annotations;
     std::vector<bool> pseudo_columns;
+    std::vector<Value> column_default_values;
   };
   struct MockTestTable {
     Value table_as_value;
@@ -92,7 +93,7 @@ TEST(TestDriverTest, ClassAndProtoSize) {
                 "TestDatabaseProto (test_driver.proto) tests if "
                 "MeasureColumnDef is modified.");
   EXPECT_EQ(TestDatabaseProto::descriptor()->field_count(), 8);
-  EXPECT_EQ(8, TestTableOptionsProto::descriptor()->field_count());
+  EXPECT_EQ(9, TestTableOptionsProto::descriptor()->field_count());
   EXPECT_EQ(5, TestTableProto::descriptor()->field_count());
   EXPECT_EQ(4, MeasureColumnDefProto::descriptor()->field_count());
 }

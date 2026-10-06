@@ -1417,22 +1417,24 @@ absl::FormatConvertResult<absl::FormatConversionCharSet::kIntegral> ConvertInt(
   if (GROUPING) {
     // Append leading precision digits with group separators.
     if (precision_digits > 0) {
-      // Number of precision digits before the first separator.
-      int leading_precision_digits = std::min(leading_digits, precision_digits);
-      sink->Append(leading_precision_digits, '0');
-      precision_digits -= leading_precision_digits;
-      if (leading_digits > 0 && leading_digits == leading_precision_digits) {
+      if (precision_digits < leading_digits) {
+        sink->Append(precision_digits, '0');
+        leading_digits -= precision_digits;
+      } else {
+        sink->Append(leading_digits, '0');
+        precision_digits -= leading_digits;
         sink->Append(1, sep);
+        while (precision_digits >= group_size) {
+          sink->Append(group_size, '0');
+          sink->Append(1, sep);
+          precision_digits -= group_size;
+        }
+        if (precision_digits > 0) {
+          sink->Append(precision_digits, '0');
+        }
+        // How many significant digits are needed before the next separator.
+        leading_digits = group_size - precision_digits;
       }
-      while (precision_digits >= group_size) {
-        sink->Append(group_size, '0');
-        sink->Append(1, sep);
-        precision_digits -= group_size;
-      }
-      ABSL_DCHECK_GE(precision_digits, 0);
-      sink->Append(precision_digits, '0');
-      // How many significant digits are needed before the *next* separator.
-      leading_digits = std::min(sig_digits, group_size - precision_digits);
     }
 
     // Append the significant digits with group separators.

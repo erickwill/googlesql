@@ -48,12 +48,19 @@
 #include "googlesql/base/case.h"  
 #include "absl/base/macros.h"
 #include "absl/container/btree_map.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "google/protobuf/descriptor.h"
 
 namespace googlesql {
+
+namespace parser {
+namespace macros {
+class MacroCatalog;
+}  // namespace macros
+}  // namespace parser
 
 class ModuleFactory;
 struct ModuleFactoryOptions;
@@ -467,10 +474,18 @@ class ModuleCatalog : public internal::ModuleCatalogInterface {
   // Retains ownership of the ResolvedModuleStmt.
   const ResolvedModuleStmt* resolved_module_stmt() const;
 
+  using Catalog::GetMacro;
+  absl::Status GetMacro(const std::string& name, const Macro** macro,
+                        const FindOptions& options) override;
+
  protected:
   Catalog* GetInternalResolutionCatalog() override {
     return resolution_catalog_global_.get();
   }
+
+  using Catalog::GetCatalog;
+  absl::Status GetCatalog(const std::string& name, Catalog** catalog,
+                          const FindOptions& options) override;
 
  private:
   // The ModuleCatalog must be initialized (via Init()) before it is used.
@@ -581,6 +596,11 @@ class ModuleCatalog : public internal::ModuleCatalogInterface {
       const ParseResumeLocation& parse_resume_location,
       std::unique_ptr<ParserOutput> parser_output);
 
+  // Similar to the above, but where `parser_output` is known to represent an
+  // ASTDefineMacroStatement.
+  absl::Status MaybeUpdateCatalogFromDefineMacroStatement(
+      std::unique_ptr<ParserOutput> parser_output);
+
   // Shared helper function that performs common validation of the
   // <ast_create_statement>, including verification that:
   // 1) the CREATE statement must have the PUBLIC or PRIVATE modifier
@@ -683,6 +703,16 @@ class ModuleCatalog : public internal::ModuleCatalogInterface {
   absl::Status MakeAndRegisterStatementError(absl::string_view error_string,
                                              const ASTNode* node,
                                              std::vector<absl::Status>* errors);
+  // Same as `MakeAndRegisterStatementError`, but ignores the returned Status
+  // because the error has been recorded in `errors` (e.g. `module_errors_`),
+  // allowing the caller to return `absl::OkStatus()` and continue processing
+  // subsequent statements in the module.
+  // TODO: b/432236841 - Update other
+  // MakeAndRegisterStatementError().IgnoreError() call sites in modules.cc to
+  // use this wrapper.
+  void MakeAndRegisterStatementErrorIgnored(absl::string_view error_string,
+                                            const ASTNode* node,
+                                            std::vector<absl::Status>* errors);
 
   // Updates <status> by attaching the module filename to the ErrorLocation
   // as needed, and then updates the <status> based on <error_message_mode_>
@@ -909,6 +939,9 @@ class ModuleCatalog : public internal::ModuleCatalogInterface {
 
   // Details about this module.
   ModuleDetails module_details_ = ModuleDetails::CreateEmpty();
+
+  std::unique_ptr<parser::macros::MacroCatalog> public_macro_catalog_;
+  std::unique_ptr<parser::macros::MacroCatalog> private_macro_catalog_;
 
   friend class ModuleTest;
 };

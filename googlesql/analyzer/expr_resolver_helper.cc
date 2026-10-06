@@ -131,6 +131,10 @@ absl::StatusOr<bool> IsConstantExpression(const ResolvedExpr* expr) {
     case RESOLVED_GET_JSON_FIELD:
       return IsConstantExpression(expr->GetAs<ResolvedGetJsonField>()->expr());
 
+    case RESOLVED_GET_VARIANT_FIELD:
+      return IsConstantExpression(
+          expr->GetAs<ResolvedGetVariantField>()->expr());
+
     case RESOLVED_FLATTEN:
       for (const auto& arg : expr->GetAs<ResolvedFlatten>()->get_field_list()) {
         GOOGLESQL_ASSIGN_OR_RETURN(bool arg_is_constant_expr,
@@ -253,6 +257,10 @@ absl::StatusOr<bool> IsConstantExpression(const ResolvedExpr* expr) {
 
       return true;
     }
+
+    case RESOLVED_MAKE_COLUMN_LIST_SPEC:
+      return IsConstantExpression(
+          expr->GetAs<ResolvedMakeColumnListSpec>()->column_name_list());
 
     default:
       // Update the static_assert above if adding or removing cases in

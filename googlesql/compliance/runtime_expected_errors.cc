@@ -94,6 +94,13 @@ std::unique_ptr<MatcherCollection<absl::Status>> RuntimeExpectedErrorMatcher(
   error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
       absl::StatusCode::kOutOfRange,
       "(uint64|int64|int32|uint32|float|numeric|BIGNUMERIC) out of range: "));
+  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
+      absl::StatusCode::kOutOfRange,
+      "(STRING|BYTES).*has maximum length.*but got a value with length"));
+  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
+      absl::StatusCode::kOutOfRange,
+      "(NUMERIC|BIGNUMERIC).*has precision.*and scale.*but got a value that is "
+      "not in range of"));
   error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
       absl::StatusCode::kOutOfRange,
       "Illegal conversion of non-finite floating point number to an integer"));
@@ -103,6 +110,12 @@ std::unique_ptr<MatcherCollection<absl::Status>> RuntimeExpectedErrorMatcher(
       absl::StatusCode::kOutOfRange,
       "Truncating date (.+) to WEEK resulted in "
       "an out of range date value: (.+)"));
+  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
+      absl::StatusCode::kOutOfRange,
+      "Truncating (.+) to the nearest (.+) causes overflow"));
+  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
+      absl::StatusCode::kOutOfRange,
+      "Last day of date.*out of range date value:.*"));
   error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
       absl::StatusCode::kOutOfRange,
       "Negative NUMERIC value cannot be raised to "

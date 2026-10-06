@@ -439,6 +439,131 @@ select ARRAY[ARRAY[1]]
              ^
 ==
 
+# If the element type of an array constructor is VARIANT, elements that are
+# arrays are coerced to VARIANT, so the result is not a nested array. This works
+# without FEATURE_ARRAY_OF_ARRAY. VARIANT is not the supertype of an array, so
+# the element type must be explicitly ARRAY<VARIANT>, except for an untyped [].
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE,{{|+ARRAY_OF_ARRAY}}]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select
+  [cast(1 as VARIANT), []] as untyped_empty_array,
+  ARRAY<VARIANT>[[1, 2], []] as explicit_type_lit,
+  ARRAY<VARIANT>[cast(1 as VARIANT), KitchenSink.repeated_int64_val] as explicit_type_col
+from TestTable
+--
+QueryStmt
++-output_column_list=
+| +-$query.untyped_empty_array#4 AS untyped_empty_array [ARRAY<VARIANT>]
+| +-$query.explicit_type_lit#5 AS explicit_type_lit [ARRAY<VARIANT>]
+| +-$query.explicit_type_col#6 AS explicit_type_col [ARRAY<VARIANT>]
++-query=
+  +-ProjectScan
+    +-column_list=$query.[untyped_empty_array#4, explicit_type_lit#5, explicit_type_col#6]
+    +-expr_list=
+    | +-untyped_empty_array#4 := Literal(type=ARRAY<VARIANT>, value=[<Variant formatting not supported>, <Variant formatting not supported>], has_explicit_type=TRUE)
+    | +-explicit_type_lit#5 := Literal(type=ARRAY<VARIANT>, value=[<Variant formatting not supported>, <Variant formatting not supported>], has_explicit_type=TRUE)
+    | +-explicit_type_col#6 :=
+    |   +-FunctionCall(GoogleSQL:$make_array(repeated(2) VARIANT) -> ARRAY<VARIANT>)
+    |     +-Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    |     +-Cast(ARRAY<INT64> -> VARIANT)
+    |       +-GetProtoField
+    |         +-type=ARRAY<INT64>
+    |         +-expr=
+    |         | +-ColumnRef(type=PROTO<googlesql_test.KitchenSinkPB>, column=TestTable.KitchenSink#3)
+    |         +-field_descriptor=repeated_int64_val
+    |         +-default_value=[]
+    +-input_scan=
+      +-TableScan(column_list=[TestTable.KitchenSink#3], table=TestTable, column_index_list=[2])
+==
+
+# Without an explicit ARRAY<VARIANT> type, an array element and a VARIANT
+# element have no common supertype.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE,{{|+ARRAY_OF_ARRAY}}]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select [cast(1 as VARIANT), {{[1, 2]|KitchenSink.repeated_int64_val}}]
+from TestTable
+--
+ALTERNATION GROUP: [1, 2]
+--
+ERROR: Cannot construct array with element type ARRAY<INT64> because nested arrays are not supported [at 1:29]
+select [cast(1 as VARIANT), [1, 2]]
+                            ^
+--
+ALTERNATION GROUP: KitchenSink.repeated_int64_val
+--
+ERROR: Cannot construct array with element type ARRAY<INT64> because nested arrays are not supported [at 1:29]
+select [cast(1 as VARIANT), KitchenSink.repeated_int64_val]
+                            ^
+--
+ALTERNATION GROUP: +ARRAY_OF_ARRAY,[1, 2]
+--
+ERROR: Array elements of types {ARRAY<INT64>, VARIANT} do not have a common supertype [at 1:8]
+select [cast(1 as VARIANT), [1, 2]]
+       ^
+--
+ALTERNATION GROUP: +ARRAY_OF_ARRAY,KitchenSink.repeated_int64_val
+--
+ERROR: Array elements of types {ARRAY<INT64>, VARIANT} do not have a common supertype [at 1:8]
+select [cast(1 as VARIANT), KitchenSink.repeated_int64_val]
+       ^
+==
+
+# The CAST target type does not change the element type of the array
+# constructor. The element type of [[]] is ARRAY<INT64>, so it is a nested array
+# and requires FEATURE_ARRAY_OF_ARRAY, even if the CAST target type is VARIANT or
+# ARRAY<VARIANT>.
+# TODO: Remove [no_run_sqlbuilder], [no_run_deserializer] and [no_java] once VARIANT support is implemented in SQLBuilder, serializer and Java.
+[language_features=NONE,+VARIANT_TYPE,+CAST_DIFFERENT_ARRAY_TYPES,{{|+ARRAY_OF_ARRAY}}]
+[no_run_sqlbuilder]
+[no_run_deserializer]
+[no_java]
+select cast([[]] as {{VARIANT|ARRAY<VARIANT>}})
+--
+ALTERNATION GROUP: VARIANT
+--
+ERROR: Cannot construct array with element type ARRAY<INT64> because nested arrays are not supported [at 1:14]
+select cast([[]] as VARIANT)
+             ^
+--
+ALTERNATION GROUP: ARRAY<VARIANT>
+--
+ERROR: Cannot construct array with element type ARRAY<INT64> because nested arrays are not supported [at 1:14]
+select cast([[]] as ARRAY<VARIANT>)
+             ^
+--
+ALTERNATION GROUP: +ARRAY_OF_ARRAY,VARIANT
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#1 AS `$col1` [VARIANT]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#1]
+    +-expr_list=
+    | +-$col1#1 := Literal(type=VARIANT, value=<Variant formatting not supported>, has_explicit_type=TRUE)
+    +-input_scan=
+      +-SingleRowScan
+--
+ALTERNATION GROUP: +ARRAY_OF_ARRAY,ARRAY<VARIANT>
+--
+QueryStmt
++-output_column_list=
+| +-$query.$col1#1 AS `$col1` [ARRAY<VARIANT>]
++-query=
+  +-ProjectScan
+    +-column_list=[$query.$col1#1]
+    +-expr_list=
+    | +-$col1#1 := Literal(type=ARRAY<VARIANT>, value=[<Variant formatting not supported>], has_explicit_type=TRUE)
+    +-input_scan=
+      +-SingleRowScan
+==
+
 select ARRAY[1, 2, 3][OFFSET(0)], [1][OFFSET(0)]
 from TestTable where [1, 1][ORDINAL(2)] = 1
 --

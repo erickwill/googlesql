@@ -469,6 +469,11 @@ class Validator {
       const std::set<ResolvedColumn>& visible_parameters,
       const ResolvedGetJsonField* get_json_field);
 
+  absl::Status ValidateResolvedGetVariantFieldExpr(
+      const std::set<ResolvedColumn>& visible_columns,
+      const std::set<ResolvedColumn>& visible_parameters,
+      const ResolvedGetVariantField* get_variant_field);
+
   absl::Status ValidateResolvedGetRowFieldExpr(
       const std::set<ResolvedColumn>& visible_columns,
       const std::set<ResolvedColumn>& visible_parameters,
@@ -972,7 +977,7 @@ class Validator {
       const ResolvedGraphLinearScan* scan,
       const std::set<ResolvedColumn>& visible_parameters);
 
-  absl::Status ValidateGraphReturnOperator(const ResolvedScan* scan);
+  absl::Status ValidateLastGraphLinearOperator(const ResolvedScan* scan);
 
   absl::Status ValidateTopLevelGraphLinearScanStructure(
       const ResolvedGraphLinearScan* scan);
@@ -1015,6 +1020,15 @@ class Validator {
       const ResolvedGraphInsertScan* scan,
       const std::set<ResolvedColumn>& visible_parameters);
 
+  absl::Status ValidateResolvedGraphUpdateElement(
+      const std::set<ResolvedColumn>& visible_columns,
+      const std::set<ResolvedColumn>& visible_parameters,
+      const ResolvedGraphUpdateElement* node);
+
+  absl::Status ValidateResolvedGraphUpdateScan(
+      const ResolvedGraphUpdateScan* scan,
+      const std::set<ResolvedColumn>& visible_parameters);
+
   absl::Status ValidateResolvedGraphPathPatternQuantifier(
       const ResolvedGraphPathPatternQuantifier* quantifier,
       const std::set<ResolvedColumn>& visible_parameters);
@@ -1026,6 +1040,10 @@ class Validator {
       const ResolvedGraphLabelExpr* expr);
 
   absl::Status ValidateResolvedGraphLabel(const ResolvedGraphLabel* expr);
+
+  absl::Status ValidateResolvedGraphUpdateLabel(
+      const ResolvedGraphLabel* label,
+      ResolvedGraphUpdateElement::LabelUpdateMode mode);
 
   absl::Status ValidateResolvedGraphWildCardLabel(
       const ResolvedGraphWildCardLabel* expr);
@@ -1070,6 +1088,11 @@ class Validator {
       const std::set<ResolvedColumn>& visible_columns,
       const std::set<ResolvedColumn>& visible_parameters,
       const ResolvedUpdateConstructor* update_constructor);
+
+  absl::Status ValidateResolvedMakeColumnListSpec(
+      const std::set<ResolvedColumn>& visible_columns,
+      const std::set<ResolvedColumn>& visible_parameters,
+      const ResolvedMakeColumnListSpec* column_list_spec);
 
   // Validates that <expr> is a valid expression of bool type.
   absl::Status ValidateBoolExpr(
@@ -1199,6 +1222,12 @@ class Validator {
 
   absl::Status ValidateResolvedCreateSequenceStmt(
       const ResolvedCreateSequenceStmt* stmt);
+
+  absl::Status ValidateResolvedConnectionKeyValuePair(
+      const ResolvedConnectionKeyValuePair* kv_pair);
+
+  absl::Status ValidateResolvedConnectionList(
+      const ResolvedConnectionList* connection_list);
 
   // Validates that the type of a column and the corresponding resolved_column
   // are 'equivalent'.

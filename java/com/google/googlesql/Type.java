@@ -98,7 +98,8 @@ public abstract class Type implements Serializable {
           entry(TypeKind.TYPE_UUID, "UUID"),
           entry(TypeKind.TYPE_MEASURE, "MEASURE"),
           entry(TypeKind.TYPE_DECLARATIVE, "DECLARATIVE"),
-          entry(TypeKind.TYPE_COLUMN_LIST_SPEC, "COLUMN_LIST_SPEC"));
+          entry(TypeKind.TYPE_COLUMN_LIST_SPEC, "COLUMN_LIST_SPEC"),
+          entry(TypeKind.TYPE_VARIANT, "VARIANT"));
 
   /** Returns {@code true} if the given {@code date} value is within valid range. */
   @SuppressWarnings("GoodTime") // should accept a java.time.LocalDate (?)

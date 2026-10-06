@@ -142,12 +142,16 @@ QueryStmt
                   |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#22)
                   |   +-group_by_list=
-                  |   | +-grain_lock_key#26 :=
+                  |   | +-grain_lock_key_0#26 :=
                   |   |   +-GetStructField
-                  |   |     +-type=STRUCT<key INT64>
+                  |   |     +-type=INT64
                   |   |     +-expr=
-                  |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#22)
-                  |   |     +-field_idx=1
+                  |   |     | +-GetStructField
+                  |   |     |   +-type=STRUCT<key INT64>
+                  |   |     |   +-expr=
+                  |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#22)
+                  |   |     |   +-field_idx=1
+                  |   |     +-field_idx=0
                   |   +-group_by_aggregate_list=
                   |     +-$any_value_grain_lock_0#25 :=
                   |       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -168,12 +172,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#23)
                       +-group_by_list=
-                      | +-grain_lock_key#29 :=
+                      | +-grain_lock_key_0#29 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<key INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#23)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<key INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#23)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#28 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -211,11 +219,11 @@ FROM
       SUM(ANY_VALUE(withrefscan_5.a_4.referenced_columns.price)
         WHERE
           NOT((withrefscan_5.a_4) IS NULL)
-        GROUP BY withrefscan_5.a_4.key_columns) AS a_7,
+        GROUP BY withrefscan_5.a_4.key_columns.key) AS a_7,
       SUM(ANY_VALUE(withrefscan_6.a_4.referenced_columns.price)
         WHERE
           NOT((withrefscan_6.a_4) IS NULL)
-        GROUP BY withrefscan_6.a_4.key_columns) AS a_8
+        GROUP BY withrefscan_6.a_4.key_columns.key) AS a_8
     FROM
       (
         SELECT
@@ -373,12 +381,16 @@ QueryStmt
                   |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#25)
                   |   +-group_by_list=
-                  |   | +-grain_lock_key#31 :=
+                  |   | +-grain_lock_key_0#31 :=
                   |   |   +-GetStructField
-                  |   |     +-type=STRUCT<key INT64>
+                  |   |     +-type=INT64
                   |   |     +-expr=
-                  |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#25)
-                  |   |     +-field_idx=1
+                  |   |     | +-GetStructField
+                  |   |     |   +-type=STRUCT<key INT64>
+                  |   |     |   +-expr=
+                  |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#25)
+                  |   |     |   +-field_idx=1
+                  |   |     +-field_idx=0
                   |   +-group_by_aggregate_list=
                   |     +-$any_value_grain_lock_0#30 :=
                   |       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -399,12 +411,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#28)
                       +-group_by_list=
-                      | +-grain_lock_key#34 :=
+                      | +-grain_lock_key_0#34 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<key INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#28)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<key INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable.struct_for_measures_from_table_WithTable#28)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#33 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -450,11 +466,11 @@ FROM
       SUM(ANY_VALUE(withrefscan_8.a_5.referenced_columns.price)
         WHERE
           NOT((withrefscan_8.a_5) IS NULL)
-        GROUP BY withrefscan_8.a_5.key_columns) AS a_12,
+        GROUP BY withrefscan_8.a_5.key_columns.key) AS a_12,
       SUM(ANY_VALUE(withrefscan_10.a_11.referenced_columns.quantity)
         WHERE
           NOT((withrefscan_10.a_11) IS NULL)
-        GROUP BY withrefscan_10.a_11.key_columns) AS a_13
+        GROUP BY withrefscan_10.a_11.key_columns.key) AS a_13
     FROM
       (
         SELECT
@@ -637,12 +653,16 @@ QueryStmt
                   |   |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                   |   |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#29)
                   |   +-group_by_list=
-                  |   | +-grain_lock_key#35 :=
+                  |   | +-grain_lock_key_0#35 :=
                   |   |   +-GetStructField
-                  |   |     +-type=STRUCT<key INT64>
+                  |   |     +-type=INT64
                   |   |     +-expr=
-                  |   |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#29)
-                  |   |     +-field_idx=1
+                  |   |     | +-GetStructField
+                  |   |     |   +-type=STRUCT<key INT64>
+                  |   |     |   +-expr=
+                  |   |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#29)
+                  |   |     |   +-field_idx=1
+                  |   |     +-field_idx=0
                   |   +-group_by_aggregate_list=
                   |     +-$any_value_grain_lock_0#34 :=
                   |       +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -663,12 +683,16 @@ QueryStmt
                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#32)
                       +-group_by_list=
-                      | +-grain_lock_key#38 :=
+                      | +-grain_lock_key_0#38 :=
                       |   +-GetStructField
-                      |     +-type=STRUCT<key INT64>
+                      |     +-type=INT64
                       |     +-expr=
-                      |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#32)
-                      |     +-field_idx=1
+                      |     | +-GetStructField
+                      |     |   +-type=STRUCT<key INT64>
+                      |     |   +-expr=
+                      |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<quantity INT64, price INT64>, key_columns STRUCT<key INT64>>, column=WithTable2.struct_for_measures_from_table_WithTable2#32)
+                      |     |   +-field_idx=1
+                      |     +-field_idx=0
                       +-group_by_aggregate_list=
                         +-$any_value_grain_lock_0#37 :=
                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -721,11 +745,11 @@ FROM
       SUM(ANY_VALUE(withrefscan_10.a_5.referenced_columns.price)
         WHERE
           NOT((withrefscan_10.a_5) IS NULL)
-        GROUP BY withrefscan_10.a_5.key_columns) AS a_12,
+        GROUP BY withrefscan_10.a_5.key_columns.key) AS a_12,
       SUM(ANY_VALUE(withrefscan_11.a_9.referenced_columns.quantity)
         WHERE
           NOT((withrefscan_11.a_9) IS NULL)
-        GROUP BY withrefscan_11.a_9.key_columns) AS a_13
+        GROUP BY withrefscan_11.a_9.key_columns.key) AS a_13
     FROM
       (
         SELECT
@@ -919,12 +943,16 @@ QueryStmt
         |                       |   +-FunctionCall(GoogleSQL:$is_null(STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>) -> BOOL)
         |                       |     +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$subquery1.struct_for_measures_from_table_$subquery1#27)
         |                       +-group_by_list=
-        |                       | +-grain_lock_key#30 :=
+        |                       | +-grain_lock_key_0#30 :=
         |                       |   +-GetStructField
-        |                       |     +-type=STRUCT<key INT64>
+        |                       |     +-type=INT64
         |                       |     +-expr=
-        |                       |     | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$subquery1.struct_for_measures_from_table_$subquery1#27)
-        |                       |     +-field_idx=1
+        |                       |     | +-GetStructField
+        |                       |     |   +-type=STRUCT<key INT64>
+        |                       |     |   +-expr=
+        |                       |     |   | +-ColumnRef(type=STRUCT<referenced_columns STRUCT<price INT64>, key_columns STRUCT<key INT64>>, column=$subquery1.struct_for_measures_from_table_$subquery1#27)
+        |                       |     |   +-field_idx=1
+        |                       |     +-field_idx=0
         |                       +-group_by_aggregate_list=
         |                         +-$any_value_grain_lock_0#29 :=
         |                           +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
@@ -980,7 +1008,7 @@ SELECT
           SUM(ANY_VALUE(projectscan_11.a_10.referenced_columns.price)
             WHERE
               NOT((projectscan_11.a_10) IS NULL)
-            GROUP BY projectscan_11.a_10.key_columns) AS a_12
+            GROUP BY projectscan_11.a_10.key_columns.key) AS a_12
         FROM
           (
             SELECT

@@ -202,15 +202,17 @@ class ASTNode : public googlesql_base::ArenaOnlyGladiator {
   // prevent traversing underneath those nodes.
   void GetDescendantSubtreesWithKinds(const std::set<int>& node_kinds,
                               std::vector<const ASTNode*>* found_nodes) const {
-    GetDescendantsWithKindsImpl(node_kinds, found_nodes,
-                                false /* continue_traversal */);
+    GetDescendantsWithKindsImpl(
+        node_kinds, found_nodes,
+        /*continue_traversal=*/false /* continue_traversal */);
   }
 
   // Similar to above. It continues traversal below the found node.
   void GetDescendantsWithKinds(const std::set<int>& node_kinds,
                                std::vector<const ASTNode*>* found_nodes) const {
-    GetDescendantsWithKindsImpl(node_kinds, found_nodes,
-                                true /* continue_traversal */);
+    GetDescendantsWithKindsImpl(
+        node_kinds, found_nodes,
+        /*continue_traversal=*/true /* continue_traversal */);
   }
 
   // Traverses the tree depth-first, using a non-recursive visitor.  Each

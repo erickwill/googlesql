@@ -33,6 +33,7 @@
 
 #include "googlesql/base/logging.h"
 #include "google/protobuf/wrappers.pb.h"
+#include "googlesql/base/enum_utils.h"
 #include "googlesql/public/simple_token_list.h"
 #include "googlesql/common/float_margin.h"
 #include "googlesql/common/internal_value.h"
@@ -54,10 +55,12 @@
 #include "googlesql/public/token_list_util.h"
 #include "googlesql/public/type.h"
 #include "googlesql/public/types/measure_type.h"
+#include "googlesql/public/types/row_type.h"
 #include "googlesql/public/types/struct_type.h"
 #include "googlesql/public/types/type_factory.h"
 #include "googlesql/public/types/value_equality_check_options.h"
 #include "googlesql/public/uuid_value.h"
+#include "googlesql/public/variant_value.h"
 #include "googlesql/testdata/test_proto3.pb.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "googlesql/testing/test_value.h"
@@ -1181,6 +1184,816 @@ TEST_F(ValueTest, Uuid) {
     EXPECT_EQ(uuid, v2.uuid_value().value());
     EXPECT_EQ(uuid, v3.uuid_value().value());
   }
+}
+
+TEST_F(ValueTest, VariantCopyAndAssignment) {
+  Value inner_int = Value::Int64(123);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int, Value::Variant(inner_int));
+
+  // Test copy constructor
+  {
+    Value v2(variant_int);
+    EXPECT_EQ(TYPE_VARIANT, v2.type_kind());
+    EXPECT_FALSE(v2.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_view, v2.variant_value());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value inner_val, variant_view.GetPrimitiveValue());
+    EXPECT_EQ(inner_val, inner_int);
+  }
+
+  // Test assignment
+  {
+    Value v2 = Value::NullVariant();
+    v2 = variant_int;
+    EXPECT_FALSE(v2.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_view, v2.variant_value());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value inner_val, variant_view.GetPrimitiveValue());
+    EXPECT_EQ(inner_val, inner_int);
+  }
+}
+
+TEST_F(ValueTest, VariantWithAnotherVariant) {
+  Value inner_int = Value::Int64(123);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int, Value::Variant(inner_int));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_variant, Value::Variant(variant_int));
+  EXPECT_TRUE(variant_variant.Equals(variant_int));
+}
+
+TEST_F(ValueTest, VariantWithUntypedNull) {
+  Value null_variant = Value::NullVariant();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value result, Value::Variant(null_variant));
+  EXPECT_TRUE(result.is_null());
+  EXPECT_EQ(result.type_kind(), TYPE_VARIANT);
+}
+
+TEST_F(ValueTest, VariantWithTypedNull) {
+  Value null_int = Value::NullInt64();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_null_int, Value::Variant(null_int));
+  EXPECT_FALSE(variant_null_int.is_null());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_view,
+                       variant_null_int.variant_value());
+  EXPECT_TRUE(variant_view.is_null());
+}
+
+TEST_F(ValueTest, VariantEquality) {
+  Value inner_int = Value::Int64(123);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int, Value::Variant(inner_int));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int2, Value::Variant(inner_int));
+  EXPECT_TRUE(variant_int.Equals(variant_int2));
+
+  Value inner_int3 = Value::Int64(456);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int3, Value::Variant(inner_int3));
+  EXPECT_FALSE(variant_int.Equals(variant_int3));
+
+  Value inner_string = Value::String("123");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_string, Value::Variant(inner_string));
+  EXPECT_FALSE(variant_int.Equals(variant_string));
+
+  // Test equality with different types but same string representation (if
+  // any)
+  Value inner_u64 = Value::Uint64(123);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_u64, Value::Variant(inner_u64));
+  // Should be false due to strict type check
+  EXPECT_FALSE(variant_int.Equals(variant_u64));
+}
+
+TEST_F(ValueTest, VariantObjectEquality) {
+  // All the 3 containers are representable as Variant Objects but none of them
+  // are equal to each other.
+  TypeFactory factory;
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"a", types::Int64Type()}}, &struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value struct_val,
+                       Value::MakeStruct(struct_type, {Value::Int64(1)}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct, Value::Variant(struct_val));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* map_type,
+      factory.MakeMapType(types::StringType(), types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_val,
+      Value::MakeMap(map_type, {{Value::String("a"), Value::Int64(1)}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_map, Value::Variant(map_val));
+
+  Value json_val = Value::Json(JSONValue(absl::string_view("{\"a\":1}")));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_json, Value::Variant(json_val));
+
+  EXPECT_FALSE(variant_struct.Equals(variant_map));
+  EXPECT_FALSE(variant_struct.Equals(variant_json));
+  EXPECT_FALSE(variant_map.Equals(variant_json));
+}
+
+TEST_F(ValueTest, VariantNullEquality) {
+  Value null_int = Value::NullInt64();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_null_int, Value::Variant(null_int));
+
+  Value null_string = Value::NullString();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_null_string, Value::Variant(null_string));
+
+  // Inner NULL values of different non-equivalent types are not equal.
+  EXPECT_FALSE(variant_null_int.Equals(variant_null_string));
+
+  // Their hashes should also likely be different.
+  EXPECT_NE(variant_null_int.HashCode(), variant_null_string.HashCode());
+}
+
+TEST_F(ValueTest, VariantEquivalentStructsEquality) {
+  TypeFactory factory;
+  const StructType* struct_type1;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"a", types::Int64Type()}}, &struct_type1));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value struct_val1,
+                       Value::MakeStruct(struct_type1, {Value::Int64(1)}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct1, Value::Variant(struct_val1));
+
+  const StructType* struct_type2;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"b", types::Int64Type()}}, &struct_type2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value struct_val2,
+                       Value::MakeStruct(struct_type2, {Value::Int64(1)}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct2, Value::Variant(struct_val2));
+
+  // They are considerred equal by Value::Equals because they are Equivalent.
+  EXPECT_TRUE(struct_val1.Equals(struct_val2));
+
+  // But they are not strictly equal because field names differ.
+  EXPECT_FALSE(struct_type1->Equals(struct_type2));
+
+  // But they are Equivalent.
+  EXPECT_TRUE(struct_type1->Equivalent(struct_type2));
+
+  // In Variant, they should be equal because we use EqualsInternal which uses
+  // Equivalence for types.
+  EXPECT_TRUE(variant_struct1.Equals(variant_struct2));
+  EXPECT_EQ(variant_struct1.HashCode(), variant_struct2.HashCode());
+}
+
+TEST_F(ValueTest, VariantInvalidInnerValue) {
+  EXPECT_THAT(Value::Variant(Value()),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("inner_value in Variant must be valid")));
+}
+
+TEST_F(ValueTest, VariantBlockedTypes) {
+  const MeasureType* measure_type = GetTestMeasureType(types::Int64Type());
+  Value null_measure = Value::Null(measure_type);
+  EXPECT_THAT(
+      Value::Variant(null_measure),
+      StatusIs(
+          absl::StatusCode::kInternal,
+          HasSubstr(
+              "Variant cannot be constructed using type: MEASURE<INT64>")));
+
+  SimpleTable table("TestTable");
+  GOOGLESQL_ASSERT_OK(table.AddColumn(std::make_unique<SimpleColumn>(
+      table.FullName(), "c1", types::Int32Type())));
+  GOOGLESQL_ASSERT_OK(table.AddColumn(std::make_unique<SimpleColumn>(
+      table.FullName(), "c2", types::Int32Type())));
+
+  TypeFactory factory;
+  const RowType* row_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeRowType(&table, table.FullName(), &row_type));
+  Value null_row = Value::Null(row_type);
+  EXPECT_THAT(
+      Value::Variant(null_row),
+      StatusIs(
+          absl::StatusCode::kInternal,
+          HasSubstr(
+              "Variant cannot be constructed using type: ROW<TestTable>")));
+
+  const TableRefType* table_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeTableType(&table, table.FullName(),
+                                  /*multi_row=*/false, {table.GetColumn(0)},
+                                  &table, {table.GetColumn(1)}, &table_type));
+  Value null_table = Value::Null(table_type);
+  EXPECT_THAT(Value::Variant(null_table),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("Variant cannot be constructed using type: "
+                                 "TABLE UNIQUE<ROW<TestTable>>")));
+
+  const StructType* struct_measure_type;
+  GOOGLESQL_ASSERT_OK(
+      factory.MakeStructType({{"m", measure_type}}, &struct_measure_type));
+  Value null_struct_measure = Value::Null(struct_measure_type);
+  EXPECT_THAT(Value::Variant(null_struct_measure),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("Variant cannot be constructed using type: "
+                                 "STRUCT<m MEASURE<INT64>>")));
+
+  const ArrayType* array_measure_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(measure_type, &array_measure_type));
+  Value null_array_measure = Value::Null(array_measure_type);
+  EXPECT_THAT(Value::Variant(null_array_measure),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("Variant cannot be constructed using type: "
+                                 "ARRAY<MEASURE<INT64>>")));
+
+  const Type* map_measure_type;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(map_measure_type,
+                       factory.MakeMapType(types::StringType(), measure_type));
+  Value null_map_measure = Value::Null(map_measure_type);
+  EXPECT_THAT(Value::Variant(null_map_measure),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("Variant cannot be constructed using type: "
+                                 "MAP<STRING, MEASURE<INT64>>")));
+}
+
+TEST_F(ValueTest, VariantWithAllTypes) {
+  auto test_variant_valid = [](const Value& v, bool is_primitive = false,
+                               bool is_object = false, bool is_array = false) {
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant, Value::Variant(v));
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_view,
+                         variant.variant_value());
+    EXPECT_TRUE(variant_view.is_valid());
+    EXPECT_EQ(variant_view.IsPrimitive(), is_primitive);
+    EXPECT_EQ(variant_view.IsObject(), is_object);
+    EXPECT_EQ(variant_view.IsArray(), is_array);
+
+    // Test equality
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant2, Value::Variant(v));
+    EXPECT_TRUE(variant.Equals(variant2));
+
+    // Test hashing
+    EXPECT_NE(variant.HashCode(), 0);
+  };
+
+  // Simple types
+  test_variant_valid(Value::Int32(1), /*is_primitive=*/true);
+  test_variant_valid(Value::Int64(2), /*is_primitive=*/true);
+  test_variant_valid(Value::Uint32(3), /*is_primitive=*/true);
+  test_variant_valid(Value::Uint64(4), /*is_primitive=*/true);
+  test_variant_valid(Value::Bool(true), /*is_primitive=*/true);
+  test_variant_valid(Value::Float(5.0f), /*is_primitive=*/true);
+  test_variant_valid(Value::Double(6.0), /*is_primitive=*/true);
+  test_variant_valid(Value::String("hello"), /*is_primitive=*/true);
+  test_variant_valid(Value::Bytes("world"), /*is_primitive=*/true);
+  test_variant_valid(Value::Date(1000), /*is_primitive=*/true);
+  test_variant_valid(Value::Timestamp(absl::FromUnixSeconds(1000)),
+                     /*is_primitive=*/true);
+  test_variant_valid(Value::Time(TimeValue::FromHMSAndMicros(1, 2, 3, 4)),
+                     /*is_primitive=*/true);
+  test_variant_valid(Value::Datetime(DatetimeValue::FromYMDHMSAndMicros(
+                         2025, 1, 2, 3, 4, 5, 6)),
+                     /*is_primitive=*/true);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto interval_val,
+                       IntervalValue::FromMonthsDaysMicros(1, 2, 3));
+  test_variant_valid(Value::Interval(interval_val), /*is_primitive=*/true);
+  test_variant_valid(Value::Numeric(NumericValue(123)), /*is_primitive=*/true);
+  test_variant_valid(Value::BigNumeric(BigNumericValue(456)),
+                     /*is_primitive=*/true);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_obj,
+                       JSONValue::ParseJSONString("{\"a\":1}"));
+  test_variant_valid(Value::Json(std::move(json_obj)),
+                     /*is_primitive=*/false, /*is_object=*/true);
+  test_variant_valid(Value::Json(JSONValue(absl::string_view("hello"))),
+                     /*is_primitive=*/true);
+  test_variant_valid(Value::Json(JSONValue()), /*is_primitive=*/true);
+  test_variant_valid(Value::UnvalidatedJsonString("{\"a\":1}"),
+                     /*is_primitive=*/false, /*is_object=*/true);
+  test_variant_valid(Value::UnvalidatedJsonString("[1,2]"),
+                     /*is_primitive=*/false, /*is_object=*/false,
+                     /*is_array=*/true);
+  test_variant_valid(Value::UnvalidatedJsonString("{\"a\":"),
+                     /*is_primitive=*/false, /*is_object=*/false,
+                     /*is_array=*/false);
+  test_variant_valid(Value::TokenList(tokens::TokenList()),
+                     /*is_primitive=*/true);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto uuid_val, UuidValue::FromString("9d3da3234c20360fbd9bec54feec54f0"));
+  test_variant_valid(Value::Uuid(uuid_val), /*is_primitive=*/true);
+
+  // Complex types
+  TypeFactory factory;
+
+  // Array
+  const ArrayType* array_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(types::Int64Type(), &array_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_val,
+      Value::MakeArray(array_type, {Value::Int64(1), Value::Int64(2)}));
+  test_variant_valid(array_val, /*is_primitive=*/false, /*is_object=*/false,
+                     /*is_array=*/true);
+
+  // Struct
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"a", types::Int64Type()}}, &struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value struct_val,
+                       Value::MakeStruct(struct_type, {Value::Int64(1)}));
+  test_variant_valid(struct_val, /*is_primitive=*/false, /*is_object=*/true);
+
+  // Proto
+  const ProtoType* proto_type = GetTestProtoType();
+  test_variant_valid(Value::Proto(proto_type, absl::Cord("")),
+                     /*is_primitive=*/false, /*is_object=*/true);
+
+  // Enum
+  const EnumType* enum_type = GetTestEnumType();
+  test_variant_valid(Value::Enum(enum_type, 1), /*is_primitive=*/true);
+
+  // Map
+  test_variant_valid(test_values::Map({{Value::String("a"), Value::Int64(1)}}),
+                     /*is_primitive=*/false, /*is_object=*/true);
+
+  // Range
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value range_val,
+                       Value::MakeRange(Value::Date(1), Value::Date(2)));
+  test_variant_valid(range_val, /*is_primitive=*/false);
+}
+
+TEST_F(ValueTest, VariantNullValues) {
+  auto test_variant_null = [](const Value& null_v) {
+    ASSERT_TRUE(null_v.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant, Value::Variant(null_v));
+    EXPECT_FALSE(variant.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_view,
+                         variant.variant_value());
+    EXPECT_TRUE(variant_view.is_valid());
+    EXPECT_TRUE(variant_view.is_null());
+  };
+
+  for (TypeKind kind :
+       googlesql_base::EnumerateEnumValues<TypeKind>()) {
+    if (kind == TYPE_VARIANT) {
+      continue;
+    }
+    if (Type::IsSimpleType(kind)) {
+      const Type* type = types::TypeFromSimpleTypeKind(kind);
+      if (type != nullptr) {
+        test_variant_null(Value::Null(type));
+      }
+    }
+  }
+
+  TypeFactory factory;
+  const ArrayType* array_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(types::Int64Type(), &array_type));
+  test_variant_null(Value::Null(array_type));
+
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType({{"a", types::Int64Type()}}, &struct_type));
+  test_variant_null(Value::Null(struct_type));
+
+  test_variant_null(Value::Null(GetTestProtoType()));
+  test_variant_null(Value::Null(GetTestEnumType()));
+
+  // Map
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* map_type,
+      factory.MakeMapType(types::StringType(), types::Int64Type()));
+  test_variant_null(Value::Null(map_type));
+
+  // Range
+  const RangeType* range_type = MakeRangeType(types::DateType());
+  test_variant_null(Value::Null(range_type));
+}
+
+TEST_F(ValueTest, VariantJson) {
+  // Valid JSON strings with different formatting should be equal if they are
+  // semantically equal. This is as per JSON equality rules.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json1,
+                       JSONValue::ParseJSONString("{\"a\": 1, \"b\": 2}"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json2,
+                       JSONValue::ParseJSONString("{\"b\": 2, \"a\": 1}"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json3,
+                       JSONValue::ParseJSONString("{\"a\": 1}"));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value json1,
+                       Value::Variant(Value::Json(std::move(parsed_json1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value json2,
+                       Value::Variant(Value::Json(std::move(parsed_json2))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value json3,
+                       Value::Variant(Value::Json(std::move(parsed_json3))));
+
+  EXPECT_TRUE(json1.Equals(json2));
+  EXPECT_FALSE(json1.Equals(json3));
+
+  // Numbers
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_num1,
+                       JSONValue::ParseJSONString("123"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_num2,
+                       JSONValue::ParseJSONString("  123  "));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_num3,
+                       JSONValue::ParseJSONString("456"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_num1,
+      Value::Variant(Value::Json(std::move(parsed_json_num1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_num2,
+      Value::Variant(Value::Json(std::move(parsed_json_num2))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_num3,
+      Value::Variant(Value::Json(std::move(parsed_json_num3))));
+  EXPECT_TRUE(json_num1.Equals(json_num2));
+  EXPECT_FALSE(json_num1.Equals(json_num3));
+
+  // Strings
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_str1,
+                       JSONValue::ParseJSONString("\"hello\""));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_str2,
+                       JSONValue::ParseJSONString("\"hello\""));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_str3,
+                       JSONValue::ParseJSONString("\"world\""));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_str4,
+                       JSONValue::ParseJSONString("\"hEllo\""));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_str1,
+      Value::Variant(Value::Json(std::move(parsed_json_str1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_str2,
+      Value::Variant(Value::Json(std::move(parsed_json_str2))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_str3,
+      Value::Variant(Value::Json(std::move(parsed_json_str3))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_str4,
+      Value::Variant(Value::Json(std::move(parsed_json_str4))));
+  EXPECT_TRUE(json_str1.Equals(json_str2));
+  EXPECT_FALSE(json_str1.Equals(json_str3));
+  // JSON strings are case-sensitive.
+  EXPECT_FALSE(json_str1.Equals(json_str4));
+
+  // Booleans
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_bool1,
+                       JSONValue::ParseJSONString("true"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_bool2,
+                       JSONValue::ParseJSONString("true"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_bool3,
+                       JSONValue::ParseJSONString("false"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_bool1,
+      Value::Variant(Value::Json(std::move(parsed_json_bool1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_bool2,
+      Value::Variant(Value::Json(std::move(parsed_json_bool2))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_bool3,
+      Value::Variant(Value::Json(std::move(parsed_json_bool3))));
+  EXPECT_TRUE(json_bool1.Equals(json_bool2));
+  EXPECT_FALSE(json_bool1.Equals(json_bool3));
+
+  // JSON null
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_null1,
+                       JSONValue::ParseJSONString("null"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_null2,
+                       JSONValue::ParseJSONString("null"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_null1,
+      Value::Variant(Value::Json(std::move(parsed_json_null1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_null2,
+      Value::Variant(Value::Json(std::move(parsed_json_null2))));
+  EXPECT_TRUE(json_null1.Equals(json_null2));
+  EXPECT_FALSE(json_null1.Equals(json_num1));  // null != 123
+
+  // Arrays
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_arr1,
+                       JSONValue::ParseJSONString("[1, \"hello\", true]"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_arr2,
+                       JSONValue::ParseJSONString("[1, \"hello\", true]"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto parsed_json_arr3,
+                       JSONValue::ParseJSONString("[2, false]"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_arr1,
+      Value::Variant(Value::Json(std::move(parsed_json_arr1))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_arr2,
+      Value::Variant(Value::Json(std::move(parsed_json_arr2))));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value json_arr3,
+      Value::Variant(Value::Json(std::move(parsed_json_arr3))));
+  EXPECT_TRUE(json_arr1.Equals(json_arr2));
+  EXPECT_FALSE(json_arr1.Equals(json_arr3));  // Order matters in JSON arrays
+
+  // Unvalidated JSON strings
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value unvalidated1,
+      Value::Variant(Value::UnvalidatedJsonString("{\"a\":1}")));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value unvalidated2,
+      Value::Variant(Value::UnvalidatedJsonString("{\"a\":1}")));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value unvalidated3,
+                       Value::Variant(Value::UnvalidatedJsonString(
+                           "{\"a\": 1}")));  // space difference
+
+  EXPECT_TRUE(unvalidated1.Equals(unvalidated2));
+  // In GoogleSQL, unvalidated strings are compared as parsed JSON if they
+  // parse.
+  EXPECT_TRUE(unvalidated1.Equals(unvalidated3));
+}
+
+TEST_F(ValueTest, VariantContainers) {
+  TypeFactory factory;
+  // ARRAY<VARIANT>
+  const ArrayType* array_variant_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(types::VariantType(), &array_variant_type));
+
+  Value inner_int = Value::Int64(1);
+  Value inner_string = Value::String("hello");
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int, Value::Variant(inner_int));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_string, Value::Variant(inner_string));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_variant,
+      Value::MakeArray(array_variant_type, {variant_int, variant_string}));
+
+  // Wrap the ARRAY<VARIANT> inside another VARIANT
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_array, Value::Variant(array_variant));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_array_view,
+                       variant_array.variant_value());
+  EXPECT_TRUE(variant_array_view.IsArray());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto array_size, variant_array_view.GetArraySize());
+  EXPECT_EQ(array_size, 2);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto elem0, variant_array_view.GetElement(0));
+  EXPECT_TRUE(elem0->IsPrimitive());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value elem0_val, elem0->GetPrimitiveValue());
+  EXPECT_TRUE(elem0_val.Equals(variant_int));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView elem0_val_view,
+                       elem0_val.variant_value());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value elem0_scalar, elem0_val_view.GetPrimitiveValue());
+  EXPECT_EQ(elem0_scalar, Value::Int64(1));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto elem1, variant_array_view.GetElement(1));
+  EXPECT_TRUE(elem1->IsPrimitive());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value elem1_val, elem1->GetPrimitiveValue());
+  EXPECT_TRUE(elem1_val.Equals(variant_string));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView elem1_val_view,
+                       elem1_val.variant_value());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value elem1_scalar, elem1_val_view.GetPrimitiveValue());
+  EXPECT_EQ(elem1_scalar, Value::String("hello"));
+
+  // Verify strict type equality check inside array.
+  // array_variant has Variant(Int64(1)) as first element.
+  // array_variant2 has Variant(Uint64(1)) as first element.
+  // They are NOT equal because Variant equality check requires inner values to
+  // have EXACTLY same type (Int64 != Uint64).
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_u64, Value::Variant(Value::Uint64(1)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_variant2,
+      Value::MakeArray(array_variant_type, {variant_u64, variant_string}));
+  EXPECT_FALSE(array_variant.Equals(array_variant2));
+
+  // MAP<STRING, VARIANT>
+  Value map_val = test_values::Map({{Value::String("key1"), variant_int},
+                                    {Value::String("key2"), variant_string}});
+
+  // Wrap the MAP inside another VARIANT
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_map, Value::Variant(map_val));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_map_view,
+                       variant_map.variant_value());
+  EXPECT_TRUE(variant_map_view.IsObject());
+  EXPECT_TRUE(variant_map_view.HasKey("key1"));
+  EXPECT_TRUE(variant_map_view.HasKey("key2"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto key1_val, variant_map_view.GetKeyValue("key1"));
+  EXPECT_TRUE(key1_val->IsPrimitive());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value key1_v, key1_val->GetPrimitiveValue());
+  EXPECT_TRUE(key1_v.Equals(variant_int));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView key1_v_view, key1_v.variant_value());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value key1_scalar, key1_v_view.GetPrimitiveValue());
+  EXPECT_EQ(key1_scalar, Value::Int64(1));
+
+  // MAP<INT64, PROTO> inside VARIANT
+  const ProtoType* proto_type = GetTestProtoType();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* map_proto_type,
+                       factory.MakeMapType(types::Int64Type(), proto_type));
+
+  Value proto_val1 = Value::Proto(proto_type, absl::Cord(""));
+  Value proto_val2 = Value::Proto(proto_type, absl::Cord("a"));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_proto_val1,
+      Value::MakeMap(map_proto_type, {{Value::Int64(1), proto_val1}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_proto_val2,
+      Value::MakeMap(map_proto_type, {{Value::Int64(1), proto_val1}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_proto_val3,
+      Value::MakeMap(map_proto_type, {{Value::Int64(1), proto_val2}}));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_map_proto1,
+                       Value::Variant(map_proto_val1));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_map_proto2,
+                       Value::Variant(map_proto_val2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_map_proto3,
+                       Value::Variant(map_proto_val3));
+
+  EXPECT_TRUE(variant_map_proto1.Equals(variant_map_proto2));
+  EXPECT_FALSE(variant_map_proto1.Equals(variant_map_proto3));
+}
+
+// This test verifies that VARIANT can hold deeply nested and recursive
+// structures (like ARRAY<VARIANT> which in turn holds STRUCT or other
+// containers), and that equality check and retrieval behave correctly
+// across these deep structures.
+TEST_F(ValueTest, VariantComplexRecursive) {
+  TypeFactory factory;
+  const ArrayType* array_variant_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(types::VariantType(), &array_variant_type));
+
+  // 1. Variant holding Struct<int, string>
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeStructType(
+      {{"a", types::Int64Type()}, {"b", types::StringType()}}, &struct_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val1,
+      Value::MakeStruct(struct_type,
+                        {Value::Int64(1), Value::String("hello")}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct1, Value::Variant(struct_val1));
+
+  // 2. Variant holding Array<int>
+  const ArrayType* int_array_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeArrayType(types::Int64Type(), &int_array_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value int_array_val1,
+      Value::MakeArray(int_array_type, {Value::Int64(10), Value::Int64(20)}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int_array1,
+                       Value::Variant(int_array_val1));
+
+  // 3. Variant holding another ARRAY<VARIANT> (nested recursion)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value inner_array_variant,
+                       Value::MakeArray(array_variant_type, {variant_struct1}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_array,
+                       Value::Variant(inner_array_variant));
+
+  // Explicitly verify the type and inner content of the Variant holding
+  // ARRAY<VARIANT>
+  EXPECT_TRUE(variant_inner_array.type()->IsVariant());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_inner_array_view,
+                       variant_inner_array.variant_value());
+  EXPECT_TRUE(variant_inner_array_view.IsArray());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto inner_array_size,
+                       variant_inner_array_view.GetArraySize());
+  EXPECT_EQ(inner_array_size, 1);
+
+  // Create top-level ARRAY<VARIANT>
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_variant1,
+      Value::MakeArray(array_variant_type, {variant_struct1, variant_int_array1,
+                                            variant_inner_array}));
+
+  // Wrap in VARIANT
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_array1, Value::Variant(array_variant1));
+
+  // Create logically equal but different instance
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val2,
+      Value::MakeStruct(struct_type,
+                        {Value::Int64(1), Value::String("hello")}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct2, Value::Variant(struct_val2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value int_array_val2,
+      Value::MakeArray(int_array_type, {Value::Int64(10), Value::Int64(20)}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_int_array2,
+                       Value::Variant(int_array_val2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value inner_array_variant2,
+                       Value::MakeArray(array_variant_type, {variant_struct2}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_array2,
+                       Value::Variant(inner_array_variant2));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_variant2,
+      Value::MakeArray(array_variant_type, {variant_struct2, variant_int_array2,
+                                            variant_inner_array2}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_array2, Value::Variant(array_variant2));
+
+  EXPECT_TRUE(var_array1.Equals(var_array2));
+
+  // Create unequal instance (different deep struct value)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value struct_val3,
+      Value::MakeStruct(struct_type,
+                        {Value::Int64(1), Value::String("world")}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_struct3, Value::Variant(struct_val3));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value inner_array_variant3,
+                       Value::MakeArray(array_variant_type, {variant_struct3}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_array3,
+                       Value::Variant(inner_array_variant3));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_variant3,
+      Value::MakeArray(array_variant_type, {variant_struct1, variant_int_array1,
+                                            variant_inner_array3}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_array3, Value::Variant(array_variant3));
+
+  EXPECT_FALSE(var_array1.Equals(var_array3));
+}
+
+TEST_F(ValueTest, VariantComplexRecursiveMap) {
+  TypeFactory factory;
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_MAP_TYPE);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* map_variant_type,
+      factory.MakeMapType(types::StringType(), types::VariantType(),
+                          language_options));
+
+  // 1. Variant holding Map<string, int>
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* string_int_map_type,
+      factory.MakeMapType(types::StringType(), types::Int64Type(),
+                          language_options));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value string_int_map_val1,
+                       Value::MakeMap(string_int_map_type,
+                                      {{Value::String("a"), Value::Int64(1)},
+                                       {Value::String("b"), Value::Int64(2)}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_string_int_map1,
+                       Value::Variant(string_int_map_val1));
+
+  // 2. Variant holding Map<string, Variant>
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value inner_map_variant1,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest1"), variant_string_int_map1}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_map1,
+                       Value::Variant(inner_map_variant1));
+
+  // 3. Variant holding another Map<string, Variant> (deeper nesting)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value deeper_map_variant1,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest2"), variant_inner_map1}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_deeper_map1,
+                       Value::Variant(deeper_map_variant1));
+
+  // Explicitly verify the type and inner content of the Variant holding
+  // deeper Map
+  EXPECT_TRUE(variant_deeper_map1.type()->IsVariant());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(VariantValueView variant_deeper_map1_view,
+                       variant_deeper_map1.variant_value());
+  EXPECT_TRUE(variant_deeper_map1_view.IsObject());
+  EXPECT_TRUE(variant_deeper_map1_view.HasKey("nest2"));
+
+  // Create top-level Map<string, Variant>
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_variant1,
+      Value::MakeMap(
+          map_variant_type,
+          {{Value::String("mapped_simple_map"), variant_string_int_map1},
+           {Value::String("mapped_deeper_map"), variant_deeper_map1}}));
+
+  // Wrap in VARIANT
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_map1, Value::Variant(map_variant1));
+
+  // Create logically equal but different instance
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value string_int_map_val2,
+                       Value::MakeMap(string_int_map_type,
+                                      {{Value::String("a"), Value::Int64(1)},
+                                       {Value::String("b"), Value::Int64(2)}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_string_int_map2,
+                       Value::Variant(string_int_map_val2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value inner_map_variant2,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest1"), variant_string_int_map2}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_map2,
+                       Value::Variant(inner_map_variant2));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value deeper_map_variant2,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest2"), variant_inner_map2}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_deeper_map2,
+                       Value::Variant(deeper_map_variant2));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_variant2,
+      Value::MakeMap(
+          map_variant_type,
+          {{Value::String("mapped_simple_map"), variant_string_int_map2},
+           {Value::String("mapped_deeper_map"), variant_deeper_map2}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_map2, Value::Variant(map_variant2));
+
+  EXPECT_TRUE(var_map1.Equals(var_map2));
+
+  // Create unequal instance (different deep map value)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value string_int_map_val3,
+                       Value::MakeMap(string_int_map_type,
+                                      {{Value::String("a"), Value::Int64(1)},
+                                       {Value::String("b"),
+                                        Value::Int64(3)}}));  // different value
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_string_int_map3,
+                       Value::Variant(string_int_map_val3));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value inner_map_variant3,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest1"), variant_string_int_map3}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_inner_map3,
+                       Value::Variant(inner_map_variant3));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value deeper_map_variant3,
+      Value::MakeMap(map_variant_type,
+                     {{Value::String("nest2"), variant_inner_map3}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_deeper_map3,
+                       Value::Variant(deeper_map_variant3));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value map_variant3,
+      Value::MakeMap(
+          map_variant_type,
+          {{Value::String("mapped_simple_map"), variant_string_int_map1},
+           {Value::String("mapped_deeper_map"), variant_deeper_map3}}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value var_map3, Value::Variant(map_variant3));
+
+  EXPECT_FALSE(var_map1.Equals(var_map3));
 }
 
 TEST_F(ValueTest, UuidFormatting) {
@@ -6927,7 +7740,7 @@ TEST_F(ValueTest, MetadataChecks) {
 }
 
 // Test that Value::DebugString stack overflow cutoffs work and we don't crash.
-static void StackOverflowTest() {
+static googlesql::Value MakeDeeplyNestedValue() {
   TypeFactory factory;
   Value v = values::Int64(5);
   for (int i = 0; i < 1000; ++i) {
@@ -6954,6 +7767,10 @@ static void StackOverflowTest() {
     v = values::Array(new_array_type, {v});
     LOG_EVERY_N_SEC(INFO, 10) << "Depth " << i << " " << v;
   }
+  return v;
+}
+
+static void StackOverflowTest(const googlesql::Value& v) {
   std::string s = v.DebugString();
   ABSL_LOG(INFO) << s;
   if (GOOGLESQL_DEBUG_MODE) {
@@ -6972,7 +7789,8 @@ static void StackOverflowTest() {
 }
 
 TEST(ValueDebugString, StackOverflow) {
-  StackOverflowTest();
+  googlesql::Value v = MakeDeeplyNestedValue();
+  StackOverflowTest(v);
 }
 
 namespace {

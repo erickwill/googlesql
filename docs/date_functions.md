@@ -367,14 +367,14 @@ SELECT
 ## `DATE_ADD`
 
 ```googlesql
-DATE_ADD(date_expression, INTERVAL int64_expression date_part)
+DATE_ADD(date_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Adds a specified time interval to a DATE.
+Adds a specified time interval to a `DATE` object.
 
-`DATE_ADD` supports the following `date_part` values:
+`DATE_ADD` supports the following `step_unit` values:
 
 +  `DAY`
 +  `WEEK`. Equivalent to 7 `DAY`s.
@@ -384,7 +384,7 @@ Adds a specified time interval to a DATE.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when
 the date is at (or near) the last day of the month. If the resulting
-month has fewer days than the original date's day, then the resulting
+month has fewer days than the original `DATE` object's day, then the resulting
 date is the last date of that month.
 
 **Return Data Type**
@@ -438,7 +438,9 @@ Gets the number of unit boundaries between two `DATE` values (`end_date` -
 
 **Details**
 
-If `end_date` is earlier than `start_date`, the output is negative.
+If `end_date` is earlier than `start_date`, the output is 0 or negative.
+Decimals are always truncated rather than rounded. For example, both 3.9 and 3.1
+become 3, while -3.9 and -3.1 become -3 (instead of -4).
 
 Note: The behavior of the this function follows the type of arguments passed in.
 For example, `DATE_DIFF(TIMESTAMP, TIMESTAMP, PART)`
@@ -448,7 +450,7 @@ behaves like `TIMESTAMP_DIFF(TIMESTAMP, TIMESTAMP, PART)`.
 
 `INT64`
 
-**Example**
+**Examples**
 
 ```googlesql
 SELECT DATE_DIFF(DATE '2010-07-07', DATE '2008-12-25', DAY) AS days_diff;
@@ -458,6 +460,24 @@ SELECT DATE_DIFF(DATE '2010-07-07', DATE '2008-12-25', DAY) AS days_diff;
  +-----------+
  | 559       |
  +-----------*/
+```
+
+In the following example, `DATE_DIFF` truncates the output rather than rounding
+it. Both 3 years 11 months (3.9 years) and 3 years 1 month (3.1 years)
+truncate to 3 years, and their negative counterparts truncate to -3 years:
+
+```googlesql
+SELECT
+  DATE_DIFF(DATE '2023-11-30', DATE '2020-01-01', YEAR) AS diff_3_9,
+  DATE_DIFF(DATE '2023-02-01', DATE '2020-01-01', YEAR) AS diff_3_1,
+  DATE_DIFF(DATE '2020-01-01', DATE '2023-11-30', YEAR) AS diff_negative_3_9,
+  DATE_DIFF(DATE '2020-01-01', DATE '2023-02-01', YEAR) AS diff_negative_3_1;
+
+/*----------+----------+-------------------+-------------------+
+ | diff_3_9 | diff_3_1 | diff_negative_3_9 | diff_negative_3_1 |
+ +----------+----------+-------------------+-------------------+
+ | 3        | 3        | -3                | -3                |
+ +----------+----------+-------------------+-------------------*/
 ```
 
 ```googlesql
@@ -550,14 +570,14 @@ SELECT DATE_FROM_UNIX_DATE(14238) AS date_from_epoch;
 ## `DATE_SUB`
 
 ```googlesql
-DATE_SUB(date_expression, INTERVAL int64_expression date_part)
+DATE_SUB(date_expression, INTERVAL step_size step_unit)
 ```
 
 **Description**
 
-Subtracts a specified time interval from a DATE.
+Subtracts a specified time interval from a `DATE` object.
 
-`DATE_SUB` supports the following `date_part` values:
+`DATE_SUB` supports the following `step_unit` values:
 
 +  `DAY`
 +  `WEEK`. Equivalent to 7 `DAY`s.
@@ -567,7 +587,7 @@ Subtracts a specified time interval from a DATE.
 
 Special handling is required for MONTH, QUARTER, and YEAR parts when
 the date is at (or near) the last day of the month. If the resulting
-month has fewer days than the original date's day, then the resulting
+month has fewer days than the original `DATE` object's day, then the resulting
 date is the last date of that month.
 
 **Return Data Type**

@@ -103,6 +103,7 @@ static const FunctionIdToNameMap& GetFunctionIdToNameMap() {
     //   use `GetAllBuiltinFunctionsAndTypes`.
     LanguageOptions options;
     options.EnableMaximumLanguageFeaturesForDevelopment();
+    // Enable relevant ideally_enabled=false features.
     options.set_product_mode(PRODUCT_INTERNAL);
 
     absl::Status status = GetBuiltinFunctionsAndTypes(

@@ -49,6 +49,7 @@
 #include "googlesql/reference_impl/evaluation.h"
 #include "googlesql/reference_impl/operator.h"
 #include "googlesql/reference_impl/tuple.h"
+#include "googlesql/reference_impl/type_helpers.h"
 #include "googlesql/reference_impl/variable_generator.h"
 #include "googlesql/reference_impl/variable_id.h"
 #include "googlesql/resolved_ast/resolved_ast.h"
@@ -5755,6 +5756,7 @@ absl::StatusOr<std::vector<StmtResult>> MultiStmtExpr::EvalMulti(
   std::optional<int> prev_failed_create_with_entry;
 
   for (int i = 0; i < statements().size(); ++i) {
+    context->ClearNumRowsModified();
     const ExprArg* stmt_arg = statements()[i];
     const ValueExpr* stmt = stmt_arg->value_expr();
 
@@ -5837,6 +5839,103 @@ absl::Span<const ExprArg* const> MultiStmtExpr::statements() const {
 
 absl::Span<ExprArg* const> MultiStmtExpr::mutable_statements() {
   return GetMutableArgs<ExprArg>(kStatements);
+}
+
+// DMLGraphOutputExpr
+absl::StatusOr<std::unique_ptr<DMLGraphOutputExpr>> DMLGraphOutputExpr::Create(
+    std::unique_ptr<ValueExpr> scan_expr, std::vector<TableInfo> tables,
+    const Type* output_type, bool has_returning) {
+  return absl::WrapUnique(new DMLGraphOutputExpr(
+      std::move(scan_expr), std::move(tables), output_type, has_returning));
+}
+
+DMLGraphOutputExpr::DMLGraphOutputExpr(std::unique_ptr<ValueExpr> scan_expr,
+                                       std::vector<TableInfo> tables,
+                                       const Type* output_type,
+                                       bool has_returning)
+    : ValueExpr(output_type),
+      scan_expr_(std::move(scan_expr)),
+      tables_(std::move(tables)),
+      has_returning_(has_returning) {}
+
+absl::Status DMLGraphOutputExpr::SetSchemasForEvaluation(
+    absl::Span<const TupleSchema* const> params_schemas) {
+  return scan_expr_->SetSchemasForEvaluation(params_schemas);
+}
+
+bool DMLGraphOutputExpr::Eval(absl::Span<const TupleData* const> params,
+                              EvaluationContext* context,
+                              VirtualTupleSlot* result,
+                              absl::Status* status) const {
+  // Evaluates the child scan expression to execute graph DML operations.
+  Value scan_val;
+  std::shared_ptr<TupleSlot::SharedProtoState> scan_shared_state;
+  VirtualTupleSlot scan_slot(&scan_val, &scan_shared_state);
+  if (!scan_expr_->Eval(params, context, &scan_slot, status)) {
+    return false;
+  }
+
+  // Collect output values for each target graph table.
+  std::vector<Value> table_outputs;
+  table_outputs.reserve(tables_.size() + (has_returning_ ? 1 : 0));
+
+  const StructType* output_struct_type = output_type()->AsStruct();
+
+  for (int i = 0; i < tables_.size(); ++i) {
+    const auto& table = tables_[i];
+    // Retrieve the modified table's updated contents as an array.
+    Value array = context->GetTableAsArray(table.name);
+    if (!array.is_valid()) {
+      *status = googlesql_base::InternalErrorBuilder()
+                << "Table not found in context: " << table.name;
+      return false;
+    }
+    // Get the count of rows modified in the table.
+    int64_t num_modified = context->GetNumRowsModified(table.name);
+
+    // Build the per-table DML result struct: {num_rows_modified,
+    // modified_rows_array}.
+    const StructType* dml_struct_type =
+        output_struct_type->field(i).type->AsStruct();
+
+    absl::StatusOr<Value> dml_struct =
+        Value::MakeStruct(dml_struct_type, {Value::Int64(num_modified), array});
+    if (!dml_struct.ok()) {
+      *status = dml_struct.status();
+      return false;
+    }
+    table_outputs.push_back(*std::move(dml_struct));
+  }
+
+  if (has_returning_) {
+    table_outputs.push_back(std::move(scan_val));
+  }
+
+  // Construct the final output struct containing results for all modified
+  // tables.
+  absl::StatusOr<Value> final_val =
+      Value::MakeStruct(output_struct_type, std::move(table_outputs));
+  if (!final_val.ok()) {
+    *status = final_val.status();
+    return false;
+  }
+  result->SetValue(*std::move(final_val));
+  return true;
+}
+
+std::string DMLGraphOutputExpr::DebugInternal(const std::string& indent,
+                                              bool verbose) const {
+  std::string indent_child = absl::StrCat(indent, kIndentFork);
+  std::string result = absl::StrCat(
+      "DMLGraphOutputExpr(", indent_child,
+      "scan: ", scan_expr_->DebugInternal(indent + kIndentSpace, verbose));
+  std::string tables_str;
+  for (const auto& table : tables_) {
+    absl::StrAppend(&tables_str, table.name, ",");
+  }
+  absl::StrAppend(&result, indent_child, "tables: [", tables_str, "]",
+                  has_returning_ ? ", has_returning: true" : "", ")");
+  return result;
 }
 
 }  // namespace googlesql

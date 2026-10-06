@@ -1379,3 +1379,206 @@ QueryStmt
     |       +-Literal(type=ARRAY<STRUCT<k INT64, v INT64>>, value=[{k:1, v:1}])
     +-input_scan=
       +-SingleRowScan
+==
+
+# Test MAP_REPLACE with function-typed parameter reference.
+[language_features=NONE,+MAP_TYPE,+ORDER_BY_IN_AGGREGATE,+HAVING_IN_AGGREGATE,+INLINE_LAMBDA_ARGUMENT,+UDF_LAMBDA_ARGUMENTS]
+[enabled_ast_rewrites=NONE,+VARIADIC_FUNCTION_SIGNATURE_EXPANDER,+BUILTIN_FUNCTION_INLINER]
+CREATE FUNCTION CustomReplaceMap(mp MAP<STRING, INT64>, f FUNCTION<INT64 -> INT64>)
+AS (MAP_REPLACE(mp, 'a', 'b', 'c', FUNCTION f));
+--
+CreateFunctionStmt
++-name_path=CustomReplaceMap
++-return_type=MAP<STRING, INT64>
++-argument_name_list=[mp, f]
++-signature=(MAP<STRING, INT64> mp, FUNCTION<INT64->INT64> f) -> MAP<STRING, INT64>
++-language="SQL"
++-code="MAP_REPLACE(mp, 'a', 'b', 'c', FUNCTION f)"
++-function_expression=
+  +-FunctionCall(GoogleSQL:map_replace(MAP<STRING, INT64> input_map, STRING key, repeated(2) STRING repeated_key, FUNCTION<INT64->INT64> updater_lambda) -> MAP<STRING, INT64>)
+    +-FunctionArgument
+    | +-expr=
+    |   +-ArgumentRef(type=MAP<STRING, INT64>, name="mp")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="a")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="b")
+    +-FunctionArgument
+    | +-expr=
+    |   +-Literal(type=STRING, value="c")
+    +-FunctionArgument
+      +-function_ref=
+        +-FunctionRef(function=FUNCTION_TYPED_PARAMETER:f, signature=(INT64) -> INT64)
+
+[REWRITTEN AST]
+CreateFunctionStmt
++-name_path=CustomReplaceMap
++-return_type=MAP<STRING, INT64>
++-argument_name_list=[mp, f]
++-signature=(MAP<STRING, INT64> mp, FUNCTION<INT64->INT64> f) -> MAP<STRING, INT64>
++-language="SQL"
++-code="MAP_REPLACE(mp, 'a', 'b', 'c', FUNCTION f)"
++-function_expression=
+  +-SubqueryExpr
+    +-type=MAP<STRING, INT64>
+    +-subquery_type=SCALAR
+    +-subquery=
+      +-ProjectScan
+        +-column_list=[$expr_subquery.$col1#26]
+        +-expr_list=
+        | +-$col1#26 :=
+        |   +-FunctionCall(GoogleSQL:if(BOOL, MAP<STRING, INT64>, MAP<STRING, INT64>) -> MAP<STRING, INT64>)
+        |     +-FunctionCall(GoogleSQL:$is_null(MAP<STRING, INT64>) -> BOOL)
+        |     | +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#2)
+        |     +-Literal(type=MAP<STRING, INT64>, value=NULL)
+        |     +-FunctionCall(GoogleSQL:map_from_array(ARRAY<STRUCT<key STRING, INT64>>) -> MAP<STRING, INT64>)
+        |       +-SubqueryExpr
+        |         +-type=ARRAY<STRUCT<key STRING, INT64>>
+        |         +-subquery_type=ARRAY
+        |         +-parameter_list=
+        |         | +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#2)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.key#3)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.repeated_key_1#4)
+        |         | +-ColumnRef(type=STRING, column=$subquery1.repeated_key_2#5)
+        |         +-subquery=
+        |           +-ProjectScan
+        |             +-column_list=[$expr_subquery.$col1#25]
+        |             +-expr_list=
+        |             | +-$col1#25 :=
+        |             |   +-FunctionCall(GoogleSQL:$case_no_value(repeated(2) BOOL, repeated(2) STRUCT<key STRING, INT64>, STRUCT<key STRING, INT64>) -> STRUCT<key STRING, INT64>)
+        |             |     +-FunctionCall(GoogleSQL:$greater(INT64, INT64) -> BOOL)
+        |             |     | +-ColumnRef(type=INT64, column=$aggregate.$agg1#19)
+        |             |     | +-Literal(type=INT64, value=1)
+        |             |     +-Cast(STRUCT<key STRING, INT64> -> STRUCT<key STRING, INT64>)
+        |             |     | +-FunctionCall(GoogleSQL:error(STRING) -> STRUCT<key STRING, INT64>)
+        |             |     |   +-FunctionCall(GoogleSQL:format(STRING, repeated(1) STRING) -> STRING)
+        |             |     |     +-Literal(type=STRING, value="Key provided more than once as argument: %T")
+        |             |     |     +-ColumnRef(type=STRING, column=$groupby.key#24)
+        |             |     +-FunctionCall(GoogleSQL:$equal(INT64, INT64) -> BOOL)
+        |             |     | +-ColumnRef(type=INT64, column=$aggregate.$agg2#20)
+        |             |     | +-Literal(type=INT64, value=1)
+        |             |     +-Cast(STRUCT<key STRING, INT64> -> STRUCT<key STRING, INT64>)
+        |             |     | +-FunctionCall(GoogleSQL:error(STRING) -> STRUCT<key STRING, INT64>)
+        |             |     |   +-FunctionCall(GoogleSQL:format(STRING, repeated(1) STRING) -> STRING)
+        |             |     |     +-Literal(type=STRING, value="Key does not exist in map: %T")
+        |             |     |     +-ColumnRef(type=STRING, column=$groupby.key#24)
+        |             |     +-MakeStruct
+        |             |       +-type=STRUCT<key STRING, INT64>
+        |             |       +-field_list=
+        |             |         +-ColumnRef(type=STRING, column=$groupby.key#24)
+        |             |         +-FunctionCall(GoogleSQL:if(BOOL, INT64, INT64) -> INT64)
+        |             |           +-FunctionCall(GoogleSQL:$equal(INT64, INT64) -> BOOL)
+        |             |           | +-ColumnRef(type=INT64, column=$aggregate.$agg3#21)
+        |             |           | +-Literal(type=INT64, value=1)
+        |             |           +-FunctionCall(FUNCTION_TYPED_PARAMETER:f(INT64) -> INT64)
+        |             |           | +-ColumnRef(type=INT64, column=$aggregate.$agg4#22)
+        |             |           +-ColumnRef(type=INT64, column=$aggregate.$agg5#23)
+        |             +-input_scan=
+        |               +-AggregateScan
+        |                 +-column_list=[$groupby.key#24, $aggregate.$agg1#19, $aggregate.$agg2#20, $aggregate.$agg3#21, $aggregate.$agg4#22, $aggregate.$agg5#23]
+        |                 +-input_scan=
+        |                 | +-SetOperationScan
+        |                 |   +-column_list=$union_all.[key#16, value#17, is_new#18]
+        |                 |   +-op_type=UNION_ALL
+        |                 |   +-input_item_list=
+        |                 |     +-SetOperationItem
+        |                 |     | +-scan=
+        |                 |     | | +-ProjectScan
+        |                 |     | |   +-column_list=$union_all1.[key#7, value#8, is_new#9]
+        |                 |     | |   +-expr_list=
+        |                 |     | |   | +-key#7 :=
+        |                 |     | |   | | +-GetStructField
+        |                 |     | |   | |   +-type=STRING
+        |                 |     | |   | |   +-expr=
+        |                 |     | |   | |   | +-ColumnRef(type=STRUCT<key STRING, value INT64>, column=$array.t#6)
+        |                 |     | |   | |   +-field_idx=0
+        |                 |     | |   | +-value#8 :=
+        |                 |     | |   | | +-GetStructField
+        |                 |     | |   | |   +-type=INT64
+        |                 |     | |   | |   +-expr=
+        |                 |     | |   | |   | +-ColumnRef(type=STRUCT<key STRING, value INT64>, column=$array.t#6)
+        |                 |     | |   | |   +-field_idx=1
+        |                 |     | |   | +-is_new#9 := Literal(type=INT64, value=0)
+        |                 |     | |   +-input_scan=
+        |                 |     | |     +-ArrayScan
+        |                 |     | |       +-column_list=[$array.t#6]
+        |                 |     | |       +-array_expr_list=
+        |                 |     | |       | +-FunctionCall(GoogleSQL:map_entries_unsorted(MAP<STRING, INT64>) -> ARRAY<STRUCT<key STRING, value INT64>>)
+        |                 |     | |       |   +-ColumnRef(type=MAP<STRING, INT64>, column=$subquery1.input_map#2, is_correlated=TRUE)
+        |                 |     | |       +-element_column_list=[$array.t#6]
+        |                 |     | +-output_column_list=$union_all1.[key#7, value#8, is_new#9]
+        |                 |     +-SetOperationItem
+        |                 |       +-scan=
+        |                 |       | +-ProjectScan
+        |                 |       |   +-column_list=[$union_all.key#13, $union_all2.value#14, $union_all2.is_new#15]
+        |                 |       |   +-expr_list=
+        |                 |       |   | +-value#14 := Literal(type=INT64, value=NULL)
+        |                 |       |   | +-is_new#15 := Literal(type=INT64, value=1)
+        |                 |       |   +-input_scan=
+        |                 |       |     +-SetOperationScan
+        |                 |       |       +-column_list=[$union_all.key#13]
+        |                 |       |       +-op_type=UNION_ALL
+        |                 |       |       +-input_item_list=
+        |                 |       |         +-SetOperationItem
+        |                 |       |         | +-scan=
+        |                 |       |         | | +-ProjectScan
+        |                 |       |         | |   +-column_list=[$union_all1.key#10]
+        |                 |       |         | |   +-expr_list=
+        |                 |       |         | |   | +-key#10 := ColumnRef(type=STRING, column=$subquery1.key#3, is_correlated=TRUE)
+        |                 |       |         | |   +-input_scan=
+        |                 |       |         | |     +-SingleRowScan
+        |                 |       |         | +-output_column_list=[$union_all1.key#10]
+        |                 |       |         +-SetOperationItem
+        |                 |       |         | +-scan=
+        |                 |       |         | | +-ProjectScan
+        |                 |       |         | |   +-column_list=[$union_all2.key#11]
+        |                 |       |         | |   +-expr_list=
+        |                 |       |         | |   | +-key#11 := ColumnRef(type=STRING, column=$subquery1.repeated_key_1#4, is_correlated=TRUE)
+        |                 |       |         | |   +-input_scan=
+        |                 |       |         | |     +-SingleRowScan
+        |                 |       |         | +-output_column_list=[$union_all2.key#11]
+        |                 |       |         +-SetOperationItem
+        |                 |       |           +-scan=
+        |                 |       |           | +-ProjectScan
+        |                 |       |           |   +-column_list=[$union_all3.key#12]
+        |                 |       |           |   +-expr_list=
+        |                 |       |           |   | +-key#12 := ColumnRef(type=STRING, column=$subquery1.repeated_key_2#5, is_correlated=TRUE)
+        |                 |       |           |   +-input_scan=
+        |                 |       |           |     +-SingleRowScan
+        |                 |       |           +-output_column_list=[$union_all3.key#12]
+        |                 |       +-output_column_list=[$union_all.key#13, $union_all2.value#14, $union_all2.is_new#15]
+        |                 +-group_by_list=
+        |                 | +-key#24 := ColumnRef(type=STRING, column=$union_all.key#16)
+        |                 +-aggregate_list=
+        |                   +-$agg1#19 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:sum(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#18)
+        |                   +-$agg2#20 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:min(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#18)
+        |                   +-$agg3#21 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:max(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.is_new#18)
+        |                   +-$agg4#22 :=
+        |                   | +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
+        |                   |   +-ColumnRef(type=INT64, column=$union_all.value#17)
+        |                   |   +-having_modifier=
+        |                   |     +-AggregateHavingModifier
+        |                   |       +-kind=MIN
+        |                   |       +-having_expr=
+        |                   |         +-ColumnRef(type=INT64, column=$union_all.is_new#18)
+        |                   +-$agg5#23 :=
+        |                     +-AggregateFunctionCall(GoogleSQL:any_value(INT64) -> INT64)
+        |                       +-ColumnRef(type=INT64, column=$union_all.value#17)
+        +-input_scan=
+          +-ProjectScan
+            +-column_list=$subquery1.[input_map#2, key#3, repeated_key_1#4, repeated_key_2#5]
+            +-expr_list=
+            | +-input_map#2 := ArgumentRef(type=MAP<STRING, INT64>, name="mp")
+            | +-key#3 := Literal(type=STRING, value="a")
+            | +-repeated_key_1#4 := Literal(type=STRING, value="b")
+            | +-repeated_key_2#5 := Literal(type=STRING, value="c")
+            +-input_scan=
+              +-SingleRowScan

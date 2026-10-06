@@ -124,7 +124,7 @@ absl::Status ApplyUnconstrainedVectorLength(const Type* type,
     return absl::OkStatus();
   }
 
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   if (component_types.empty()) {
     return absl::OkStatus();
   }
@@ -164,11 +164,21 @@ absl::Status VectorLengthAnnotation::CheckAndPropagateForColumnRef(
                                         result_annotation_map);
 }
 
+absl::Status VectorLengthAnnotation::CheckAndPropagateForParameter(
+    const ResolvedParameter& parameter, AnnotationMap* result_annotation_map) {
+  GOOGLESQL_RET_CHECK(result_annotation_map != nullptr);
+
+  GOOGLESQL_RETURN_IF_ERROR(DefaultAnnotationSpec::CheckAndPropagateForParameter(
+      parameter, result_annotation_map));
+  return ApplyUnconstrainedVectorLength(parameter.type(),
+                                        result_annotation_map);
+}
+
 absl::Status VectorLengthAnnotation::PropagateFromTypeParameters(
     const Type* target_type, const TypeParameters& target_type_params,
     const AnnotationMap* input_map, AnnotationMap& result_annotation_map,
     bool return_null_on_error, const ParseLocationRange* error_location) {
-  std::vector<const Type*> component_types = target_type->ComponentTypes();
+  TypeListView component_types = target_type->ComponentTypes();
   // If the target type is not a composite type, then we are propagating a base
   // type.
   if (component_types.empty()) {

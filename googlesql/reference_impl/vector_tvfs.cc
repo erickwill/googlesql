@@ -700,7 +700,7 @@ class KMeansResultIterator : public EvaluatorTableIterator {
     std::vector<Value> distinct_vectors;
   };
 
-  absl::Status InitCentroids(const std::vector<Value>& distinct_vectors,
+  absl::Status InitCentroids(absl::Span<const Value> distinct_vectors,
                              int64_t restart_idx,
                              std::vector<Value>& out_centroids) {
     out_centroids.clear();
@@ -962,7 +962,7 @@ class KMeansResultIterator : public EvaluatorTableIterator {
     }
   }
 
-  absl::StatusOr<Value> ComputeMean(const std::vector<Value>& vectors,
+  absl::StatusOr<Value> ComputeMean(absl::Span<const Value> vectors,
                                     const Type* element_type) {
     GOOGLESQL_RET_CHECK(!vectors.empty()) << "Empty vectors for mean";
     size_t len = vectors[0].elements().size();

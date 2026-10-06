@@ -275,6 +275,41 @@ SELECT 'corba' LIKE ANY (SELECT chars FROM Words) as result;
 +--------+
 ```
 
+### General quantified comparison subqueries 
+<a id="general_quantified_comparison_subquery_concepts"></a>
+
+```googlesql
+expression comparison_operator { ANY | SOME | ALL } ( subquery )
+```
+
+**Description**
+
+A subquery that can be used in a general quantified comparison. The `SELECT`
+list for `subquery` must have a single column and its type must be comparable
+to the type for `expression`. If not, an error is returned. For full semantics,
+including `NULL` handling, see
+[General quantified comparisons][general-quantified-comparisons].
+
+**Examples**
+
+In this example, the `= ANY` comparison checks to see if `10` matches at least
+one value in the set of rows returned by the subquery:
+
+```googlesql {highlight="lines:1:8-1:50"}
+WITH Scores AS (
+  SELECT 5 AS score UNION ALL
+  SELECT 10 UNION ALL
+  SELECT 15
+)
+SELECT 10 = ANY (SELECT score FROM Scores) AS result;
+
+/*--------+
+ | result |
+ +--------+
+ | TRUE   |
+ +--------*/
+```
+
 ### `EXISTS` subqueries 
 <a id="exists_subquery_concepts"></a>
 
@@ -472,6 +507,8 @@ Some subqueries are evaluated once, others more often.
 [semantic-rules-like]: https://github.com/google/googlesql/blob/master/docs/operators.md#semantic_rules_like
 
 [quantified-like]: https://github.com/google/googlesql/blob/master/docs/operators.md#like_operator_quantified
+
+[general-quantified-comparisons]: https://github.com/google/googlesql/blob/master/docs/operators.md#general_quantified_comparisons
 
 <!-- mdlint on -->
 

@@ -79,14 +79,7 @@ class StructType : public ListBackedType {
 
   const StructType* AsStruct() const override { return this; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    std::vector<const Type*> component_types;
-    component_types.reserve(fields_.size());
-    for (const StructField& field : fields_) {
-      component_types.push_back(field.type);
-    }
-    return component_types;
-  }
+  TypeListView ComponentTypes() const override { return component_types_; }
 
   // Look up a field by name.
   // Returns NULL if <name> is not found (uniquely).
@@ -142,6 +135,10 @@ class StructType : public ListBackedType {
   int nesting_depth() const override { return nesting_depth_; }
 
   bool IsSupportedType(const LanguageOptions& language_options) const override;
+
+  // Check if a StructType with <fields> is CoercibleTo <to>.
+  static bool FieldsAreCoercibleTo(absl::Span<const StructField> fields,
+                                   const StructType* to);
 
   // Validate and resolve type parameters for struct type, currently always
   // return error since struct type itself doesn't support type parameters.
@@ -223,6 +220,7 @@ class StructType : public ListBackedType {
       const FormatValueContentOptions& options, std::string* result) const;
 
   const std::vector<StructField> fields_;
+  const std::vector<const Type*> component_types_;
 
   // The deepest nesting depth in the type tree rooted at this StructType, i.e.,
   // the maximum nesting_depth of the field types, plus 1 for the StructType

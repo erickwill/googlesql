@@ -1050,7 +1050,7 @@ and as an argument in some functions that support the interval data type.
 Syntax:
 
 ```googlesql
-INTERVAL int64_expression datetime_part
+INTERVAL step_size step_unit
 ```
 
 The single datetime part syntax includes an `INT64` expression and a

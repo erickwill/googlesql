@@ -605,7 +605,7 @@ class Type {
   // MAP and GRAPH_PATH:        have 2 component types.
   // STRUCT and GRAPH_ELEMENT:  have N component types.
   // Non-composite, e.g. INT64: have no component types (return an empty list).
-  virtual std::vector<const Type*> ComponentTypes() const { return {}; }
+  virtual TypeListView ComponentTypes() const { return {}; }
 
   // Returns true if this type is enabled given 'language_options'.
   // Checks for ProductMode, TimestampMode, and supported LanguageFeatures.
@@ -803,21 +803,27 @@ class Type {
     }
 
     ABSL_DEPRECATED("Use the constructor taking LanguageOptions instead.")
-    FormatValueContentOptions() {
-      language_options_.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
-    }
-    explicit FormatValueContentOptions(LanguageOptions language_options);
-    FormatValueContentOptions(LanguageOptions language_options,
+    FormatValueContentOptions();
+    // REQUIRES: language_options must outlive this FormatValueContentOptions
+    // instance.
+    explicit FormatValueContentOptions(
+        const LanguageOptions& language_options ABSL_ATTRIBUTE_LIFETIME_BOUND);
+    explicit FormatValueContentOptions(
+        const LanguageOptions&& language_options) = delete;
+    // REQUIRES: language_options must outlive this FormatValueContentOptions
+    // instance.
+    FormatValueContentOptions(const LanguageOptions& language_options
+                                  ABSL_ATTRIBUTE_LIFETIME_BOUND,
                               bool use_external_float32);
+    FormatValueContentOptions(const LanguageOptions&& language_options,
+                              bool use_external_float32) = delete;
 
     ProductMode product_mode() const {
-      return language_options_.product_mode();
+      return language_options_->product_mode();
     }
-    void set_product_mode(ProductMode mode) {
-      language_options_.set_product_mode(mode);
-    }
+
     const LanguageOptions& language_options() const {
-      return language_options_;
+      return *language_options_;
     }
 
     // The getters below are here mostly for historical reasons: originally
@@ -852,13 +858,16 @@ class Type {
         format_token_attribute;
     // NOLINTEND(readability-identifier-naming)
 
-    FormatValueContentOptions IncreaseIndent();
+    FormatValueContentOptions IncreaseIndent() const;
 
     // Number of columns per indentation.
     static const int kIndentStep = 2;
 
+    static FormatValueContentOptions DefaultForMode(ProductMode mode);
+
    private:
-    LanguageOptions language_options_;
+    static const LanguageOptions& GetDefaultLanguageOptions(ProductMode mode);
+    const LanguageOptions* language_options_ = nullptr;
   };
 
   // List of DebugStringImpl outputs. Used to serve as a stack in

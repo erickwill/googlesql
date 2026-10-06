@@ -327,6 +327,7 @@ cc_library(
         "//googlesql/base:stl_util",
         "//googlesql/base:strings",
         "//googlesql/base:varsetter",
+        "//googlesql/common:constant_utils",
         "//googlesql/common:graph_element_utils",
         "//googlesql/common:measure_utils",
         "//googlesql/common:thread_stack",
@@ -432,6 +433,7 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+        "@com_google_protobuf//:protobuf",
         "@com_googlesource_code_re2//:re2",
     ],
 )
@@ -827,6 +829,7 @@ cc_test(
         "//googlesql/public:options_cc_proto",
         "//googlesql/public:parse_resume_location",
         "//googlesql/public:simple_catalog",
+        "//googlesql/public:sql_tvf_no_resolver",
         "//googlesql/public:templated_sql_function",
         "//googlesql/public:templated_sql_tvf",
         "//googlesql/public:type_parameters_cc_proto",

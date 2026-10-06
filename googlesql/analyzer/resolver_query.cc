@@ -40,7 +40,6 @@
 #include "googlesql/base/logging.h"
 #include "googlesql/base/varsetter.h"
 #include "googlesql/analyzer/analytic_function_resolver.h"
-#include "googlesql/analyzer/column_list_spec.h"
 #include "googlesql/analyzer/constant_resolver_helper.h"
 #include "googlesql/analyzer/expr_matching_helpers.h"
 #include "googlesql/analyzer/expr_resolver_helper.h"
@@ -2120,8 +2119,9 @@ absl::Status Resolver::ResolvePipeAssert(
       std::unique_ptr<const ResolvedExpr> ifnull_expr;
       std::vector<std::unique_ptr<const ResolvedExpr>> ifnull_args;
       ifnull_args.push_back(std::move(expr));
-      ifnull_args.push_back(MakeResolvedLiteral(/*ast_location=*/nullptr,
-                                                Value::StringValue("NULL")));
+      ifnull_args.push_back(MakeResolvedLiteral(
+          /*ast_location=*/nullptr, Value::StringValue("NULL"), false,
+          /*preserve_in_literal_remover=*/false));
       GOOGLESQL_RETURN_IF_ERROR(ResolveFunctionCallWithResolvedArguments(
           pipe_assert, /*arg_locations=*/{ast_message, pipe_assert},
           /*match_internal_signatures=*/false, /*function_name=*/"IFNULL",
@@ -2139,8 +2139,10 @@ absl::Status Resolver::ResolvePipeAssert(
     GOOGLESQL_ASSIGN_OR_RETURN(absl::string_view substr,
                      GetSQLForASTNode(pipe_assert->condition()));
 
-    final_message_expr = MakeResolvedLiteral(
-        /*ast_location=*/nullptr, Value::StringValue(std::string(substr)));
+    final_message_expr =
+        MakeResolvedLiteral(/*ast_location=*/nullptr,
+                            Value::StringValue(std::string(substr)), false,
+                            /*preserve_in_literal_remover=*/false);
   } else if (message_expr_list.size() == 1) {
     // The message is the single payload argument.
     final_message_expr = std::move(message_expr_list[0]);
@@ -2151,8 +2153,9 @@ absl::Status Resolver::ResolvePipeAssert(
 
     for (int i = 0; i < message_expr_list.size(); ++i) {
       if (i > 0) {
-        concat_args.push_back(MakeResolvedLiteral(/*ast_location=*/nullptr,
-                                                  Value::StringValue(" ")));
+        concat_args.push_back(MakeResolvedLiteral(
+            /*ast_location=*/nullptr, Value::StringValue(" "), false,
+            /*preserve_in_literal_remover=*/false));
         arg_locations.push_back(pipe_assert);
       }
 
@@ -2301,7 +2304,9 @@ absl::Status Resolver::ResolvePipeDescribe(
   *current_scan = MakeResolvedDescribeScan(
       ResolvedColumnList({column}), std::move(*current_scan),
       MakeResolvedComputedColumn(
-          column, MakeResolvedLiteral(/*ast_location=*/nullptr, output_value)));
+          column,
+          MakeResolvedLiteral(/*ast_location=*/nullptr, output_value, false,
+                              /*preserve_in_literal_remover=*/false)));
   auto new_name_list = std::make_shared<NameList>();
   GOOGLESQL_RETURN_IF_ERROR(new_name_list->AddColumn(column_name, column,
                                            /*is_explicit=*/true));
@@ -12013,7 +12018,8 @@ absl::Status Resolver::ResolveLimitOffsetScan(
     // literal so we set `ast_location` to nullptr.
     limit_expr = MakeResolvedLiteral(
         /*ast_location=*/nullptr,
-        Value::Int64(std::numeric_limits<int64_t>::max() / 2));
+        Value::Int64(std::numeric_limits<int64_t>::max() / 2), false,
+        /*preserve_in_literal_remover=*/false);
   } else if (limit != nullptr) {
     GOOGLESQL_RETURN_IF_ERROR(ResolveLimitOrOffsetExpr(
         limit,
@@ -12701,7 +12707,6 @@ absl::Status Resolver::ResolveForExprInPivotClause(
   return absl::OkStatus();
 }
 
-
 absl::Status Resolver::ResolveInClauseInPivotClause(
     const ASTPivotValueList* pivot_values, const NameScope* scope,
     const Type* for_expr_type,
@@ -13312,19 +13317,23 @@ Resolver::ResolveMatchRecognizePatternQuantifier(
       auto symbol = ast_quantifier->GetAsOrDie<ASTSymbolQuantifier>()->symbol();
       switch (symbol) {
         case ASTSymbolQuantifierEnums::QUESTION_MARK:
-          lower_bound =
-              MakeResolvedLiteral(/*ast_location=*/nullptr, Value::Int64(0));
-          upper_bound =
-              MakeResolvedLiteral(/*ast_location=*/nullptr, Value::Int64(1));
+          lower_bound = MakeResolvedLiteral(
+              /*ast_location=*/nullptr, Value::Int64(0), false,
+              /*preserve_in_literal_remover=*/false);
+          upper_bound = MakeResolvedLiteral(
+              /*ast_location=*/nullptr, Value::Int64(1), false,
+              /*preserve_in_literal_remover=*/false);
           break;
         case ASTSymbolQuantifierEnums::PLUS:
-          lower_bound =
-              MakeResolvedLiteral(/*ast_location=*/nullptr, Value::Int64(1));
+          lower_bound = MakeResolvedLiteral(
+              /*ast_location=*/nullptr, Value::Int64(1), false,
+              /*preserve_in_literal_remover=*/false);
           upper_bound = nullptr;
           break;
         case ASTSymbolQuantifierEnums::STAR:
-          lower_bound =
-              MakeResolvedLiteral(/*ast_location=*/nullptr, Value::Int64(0));
+          lower_bound = MakeResolvedLiteral(
+              /*ast_location=*/nullptr, Value::Int64(0), false,
+              /*preserve_in_literal_remover=*/false);
           upper_bound = nullptr;
           break;
         default:
@@ -13357,8 +13366,9 @@ Resolver::ResolveMatchRecognizePatternQuantifier(
       } else {
         // If the lower bound is not specified, this means a lower bound of 0,
         // i.e., ResolvedLiteral(0)
-        lower_bound =
-            MakeResolvedLiteral(/*ast_location=*/nullptr, Value::Int64(0));
+        lower_bound = MakeResolvedLiteral(
+            /*ast_location=*/nullptr, Value::Int64(0), false,
+            /*preserve_in_literal_remover=*/false);
       }
 
       // Unlike the lower bound, the upper bound is optional, to represent
@@ -16466,15 +16476,11 @@ absl::Status Resolver::ResolveTVF(
               .release());
 
     } else if (arg.IsConnection()) {
-      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedConnection> connection,
-                       arg.MoveConnection());
-      final_resolved_tvf_args.push_back(
-          MakeResolvedFunctionArgument(
-              /*expr=*/nullptr, /*scan=*/nullptr, /*model=*/nullptr,
-              std::move(connection), /*descriptor_arg=*/nullptr,
-              /*argument_column_list=*/{}, /*inline_lambda=*/nullptr,
-              /*sequence=*/nullptr, /*graph=*/nullptr)
-              .release());
+      GOOGLESQL_ASSIGN_OR_RETURN(auto tvf_arg,
+                       ResolvedFunctionArgumentBuilder()
+                           .set_connection_list(arg.MoveConnectionList())
+                           .Build());
+      final_resolved_tvf_args.push_back(tvf_arg.release());
     } else if (arg.IsDescriptor()) {
       GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedDescriptor> descriptor,
                        arg.MoveDescriptor());
@@ -17213,12 +17219,22 @@ absl::Status Resolver::PrepareTVFInputArguments(
       /*is_tvf=*/true));
 
   bool is_sql_tvf = tvf_catalog_entry->Is<SQLTableValuedFunctionInterface>();
-
-  // If the TVF provides a custom callback to validate argument annotations, we
-  // bypass the default strict engine check and defer to the TVF's custom
-  // validation logic.
-  if (tvf_catalog_entry->tvf_options().check_argument_annotations_callback ==
-      nullptr) {
+  bool annotation_on_sql_function_feature_enabled =
+      language().LanguageFeatureEnabled(
+          FEATURE_TYPE_ANNOTATIONS_ON_SQL_FUNCTION_ARGUMENTS);
+  // When FEATURE_TYPE_ANNOTATIONS_ON_SQL_FUNCTION_ARGUMENTS is disabled, check
+  // for unsupported annotations (e.g., collation) before argument coercion.
+  // When the feature is enabled, this check is deferred until after argument
+  // coercion so that coercion can drop collation for arguments with fixed
+  // target types (or propagate collation where supported). Keeping this check
+  // pre-coercion when the feature is disabled ensures that the collation-
+  // dropping behavior remains flag-gated for backwards compatibility.
+  // TODO: Cleanup the pre-coercion argument annotation validation
+  // after the feature FEATURE_TYPE_ANNOTATIONS_ON_SQL_FUNCTION_ARGUMENTS is
+  // fully rolled out.
+  if (!annotation_on_sql_function_feature_enabled &&
+      tvf_catalog_entry->tvf_options().check_argument_annotations_callback ==
+          nullptr) {
     GOOGLESQL_RETURN_IF_ERROR(CheckTVFArgumentHasNoUnsupportedAnnotations(
         is_sql_tvf, resolved_tvf_args, arg_locations));
   }
@@ -17349,10 +17365,22 @@ absl::Status Resolver::PrepareTVFInputArguments(
       tvf_input_arguments.push_back(TVFInputArgumentType(
           TVFDescriptorArgument(descriptor->descriptor_column_name_list())));
     } else if (resolved_tvf_arg.IsConnection()) {
-      GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedConnection* const connection,
-                       resolved_tvf_arg.GetConnection());
-      tvf_input_arguments.push_back(TVFInputArgumentType(
-          TVFConnectionArgument(connection->connection())));
+      GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedConnectionList* connection_list,
+                       resolved_tvf_arg.GetConnectionList());
+      if (connection_list->connection() != nullptr) {
+        tvf_input_arguments.push_back(
+            TVFInputArgumentType(TVFConnectionArgument(
+                connection_list->connection()->connection())));
+      } else {
+        std::vector<TVFConnectionArgument::KeyValuePair> connection_kv_list;
+        connection_kv_list.reserve(connection_list->connection_kv_list_size());
+        for (const auto& kv_pair : connection_list->connection_kv_list()) {
+          connection_kv_list.push_back(
+              {kv_pair->key(), kv_pair->connection()->connection()});
+        }
+        tvf_input_arguments.push_back(TVFInputArgumentType(
+            TVFConnectionArgument(std::move(connection_kv_list))));
+      }
     } else if (resolved_tvf_arg.IsModel()) {
       GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedModel* const model,
                        resolved_tvf_arg.GetModel());
@@ -17442,12 +17470,21 @@ absl::Status Resolver::PrepareTVFInputArguments(
       }
     }
   }
+  // If the TVF provides a custom callback to validate argument annotations, we
+  // bypass the default strict engine check and defer to the TVF's custom
+  // validation logic.
   if (tvf_catalog_entry->tvf_options().check_argument_annotations_callback !=
       nullptr) {
     GOOGLESQL_RETURN_IF_ERROR(StatusWithInternalErrorLocation(
         tvf_catalog_entry->tvf_options().check_argument_annotations_callback(
             *result_signature, tvf_input_arguments, language()),
         ast_tvf));
+  } else if (annotation_on_sql_function_feature_enabled) {
+    // When FEATURE_TYPE_ANNOTATIONS_ON_SQL_FUNCTION_ARGUMENTS is enabled,
+    // validate that no unsupported annotations remain on the arguments after
+    // coercion has been performed.
+    GOOGLESQL_RETURN_IF_ERROR(CheckTVFArgumentHasNoUnsupportedAnnotations(
+        is_sql_tvf, resolved_tvf_args, arg_locations));
   }
   return absl::OkStatus();
 }
@@ -17603,10 +17640,10 @@ absl::StatusOr<ResolvedTVFArg> Resolver::ResolveTVFArg(
       resolved_tvf_arg.SetExpr(std::move(expr));
     }
   } else if (ast_connection_clause != nullptr) {
-    std::unique_ptr<const ResolvedConnection> resolved_connection;
+    std::unique_ptr<const ResolvedConnectionList> connection_list;
     GOOGLESQL_RETURN_IF_ERROR(
-        ResolveConnectionClause(ast_connection_clause, &resolved_connection));
-    resolved_tvf_arg.SetConnection(std::move(resolved_connection));
+        ResolveConnectionClause(ast_connection_clause, &connection_list));
+    resolved_tvf_arg.SetConnection(std::move(connection_list));
   } else if (ast_model_clause != nullptr) {
     std::unique_ptr<const ResolvedModel> resolved_model;
     GOOGLESQL_RETURN_IF_ERROR(
@@ -17674,10 +17711,21 @@ absl::StatusOr<InputArgumentType> Resolver::GetTVFArgType(
           resolved_tvf_arg.IsPipeInputTable());
     }
   } else if (resolved_tvf_arg.IsConnection()) {
-    GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedConnection* const connection,
-                     resolved_tvf_arg.GetConnection());
-    input_arg_type = InputArgumentType::ConnectionInputArgumentType(
-        TVFConnectionArgument(connection->connection()));
+    GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedConnectionList* connection_list,
+                     resolved_tvf_arg.GetConnectionList());
+    if (connection_list->connection() != nullptr) {
+      input_arg_type = InputArgumentType::ConnectionInputArgumentType(
+          TVFConnectionArgument(connection_list->connection()->connection()));
+    } else {
+      std::vector<TVFConnectionArgument::KeyValuePair> connection_kv_list;
+      connection_kv_list.reserve(connection_list->connection_kv_list_size());
+      for (const auto& kv_pair : connection_list->connection_kv_list()) {
+        connection_kv_list.push_back(
+            {kv_pair->key(), kv_pair->connection()->connection()});
+      }
+      input_arg_type = InputArgumentType::ConnectionInputArgumentType(
+          TVFConnectionArgument(std::move(connection_kv_list)));
+    }
   } else if (resolved_tvf_arg.IsModel()) {
     // We are processing a model argument.
     GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedModel* const model,
@@ -18954,14 +19002,22 @@ absl::Status Resolver::ResolveConnection(
         path_expr_or_default->GetAsOrDie<ASTPathExpression>(),
         resolved_connection);
   }
-  GOOGLESQL_RET_CHECK(path_expr_or_default->Is<ASTDefaultLiteral>());
-  if (!is_default_connection_allowed) {
-    return MakeSqlErrorAt(path_expr_or_default)
-           << "CONNECTION DEFAULT is not supported";
+  if (path_expr_or_default->Is<ASTStringLiteral>()) {
+    return ResolveConnectionString(
+        path_expr_or_default->GetAsOrDie<ASTStringLiteral>(),
+        resolved_connection);
   }
-  return ResolveDefaultConnection(
-      path_expr_or_default->GetAsOrDie<ASTDefaultLiteral>(),
-      resolved_connection);
+  if (path_expr_or_default->Is<ASTDefaultLiteral>()) {
+    if (!is_default_connection_allowed) {
+      return MakeSqlErrorAt(path_expr_or_default)
+             << "CONNECTION DEFAULT is not supported";
+    }
+    return ResolveDefaultConnection(
+        path_expr_or_default->GetAsOrDie<ASTDefaultLiteral>(),
+        resolved_connection);
+  }
+  return MakeSqlErrorAt(path_expr_or_default)
+         << "Connection name must be a path expression or string literal";
 }
 
 absl::Status Resolver::ResolveConnectionPath(
@@ -18975,6 +19031,35 @@ absl::Status Resolver::ResolveConnectionPath(
   if (find_status.code() == absl::StatusCode::kNotFound) {
     return MakeSqlErrorAt(path_expr)
            << "Connection not found: " << path_expr->ToIdentifierPathString();
+  }
+  GOOGLESQL_RETURN_IF_ERROR(find_status);
+
+  *resolved_connection = MakeResolvedConnection(connection);
+  return absl::OkStatus();
+}
+
+absl::Status Resolver::ParseConnectionString(
+    absl::string_view connection_str, const LanguageOptions& language_options,
+    std::vector<std::string>* path) {
+  return ParseIdentifierPath(connection_str, language_options, path);
+}
+
+absl::Status Resolver::ResolveConnectionString(
+    const ASTStringLiteral* string_literal,
+    std::unique_ptr<const ResolvedConnection>* resolved_connection) {
+  std::vector<std::string> path;
+  absl::Status parse_status =
+      ParseConnectionString(string_literal->string_value(), language(), &path);
+  if (!parse_status.ok()) {
+    return MakeSqlErrorAt(string_literal) << parse_status.message();
+  }
+  const Connection* connection = nullptr;
+  const absl::Status find_status = catalog_->FindConnection(
+      path, &connection, analyzer_options_.find_options());
+
+  if (find_status.code() == absl::StatusCode::kNotFound) {
+    return MakeSqlErrorAt(string_literal)
+           << "Connection not found: " << string_literal->string_value();
   }
   GOOGLESQL_RETURN_IF_ERROR(find_status);
 
@@ -19004,15 +19089,57 @@ absl::Status Resolver::ResolveConnectionClause(
   if (connection_clause == nullptr) {
     return absl::OkStatus();
   }
+  if (!connection_clause->connection_kv_pairs().empty()) {
+    return MakeSqlErrorAt(connection_clause)
+           << "Multiple connections in CONNECTION clause is not supported";
+  }
+  GOOGLESQL_RET_CHECK(connection_clause->connection_path() != nullptr);
+  return ResolveConnection(connection_clause->connection_path(),
+                           resolved_connection, is_default_connection_allowed);
+}
+
+absl::Status Resolver::ResolveConnectionClause(
+    const ASTConnectionClause* connection_clause,
+    std::unique_ptr<const ResolvedConnectionList>* resolved_connection_list,
+    bool is_default_connection_allowed) {
+  if (connection_clause == nullptr) {
+    return absl::OkStatus();
+  }
   if (connection_clause->connection_path() != nullptr) {
     GOOGLESQL_RET_CHECK(connection_clause->connection_kv_pairs().empty());
-    return ResolveConnection(connection_clause->connection_path(),
-                             resolved_connection,
-                             is_default_connection_allowed);
+    std::unique_ptr<const ResolvedConnection> resolved_connection;
+    GOOGLESQL_RETURN_IF_ERROR(ResolveConnection(connection_clause->connection_path(),
+                                      &resolved_connection,
+                                      is_default_connection_allowed));
+    GOOGLESQL_ASSIGN_OR_RETURN(*resolved_connection_list,
+                     ResolvedConnectionListBuilder()
+                         .set_connection(std::move(resolved_connection))
+                         .Build());
+    return absl::OkStatus();
   }
   GOOGLESQL_RET_CHECK(!connection_clause->connection_kv_pairs().empty());
-  return MakeSqlErrorAt(connection_clause)
-         << "Multiple connections in CONNECTION clause is not supported";
+  if (!language().LanguageFeatureEnabled(FEATURE_MULTI_CONNECTIONS)) {
+    return MakeSqlErrorAt(connection_clause)
+           << "Multiple connections in CONNECTION clause is not supported";
+  }
+  ResolvedConnectionListBuilder connection_list_builder;
+  absl::flat_hash_set<std::string> seen_keys;
+  for (const ASTConnectionKeyValuePair* kv_pair :
+       connection_clause->connection_kv_pairs()) {
+    std::unique_ptr<const ResolvedConnection> connection;
+    GOOGLESQL_RETURN_IF_ERROR(ResolveConnection(kv_pair->value(), &connection,
+                                      is_default_connection_allowed));
+    const std::string key = kv_pair->key()->GetAsString();
+    if (!seen_keys.insert(absl::AsciiStrToLower(key)).second) {
+      return MakeSqlErrorAt(kv_pair->key())
+             << "Duplicate connection key " << key;
+    }
+    connection_list_builder.add_connection_kv_list(
+        MakeResolvedConnectionKeyValuePair(key, std::move(connection)));
+  }
+  GOOGLESQL_ASSIGN_OR_RETURN(*resolved_connection_list,
+                   std::move(connection_list_builder).Build());
+  return absl::OkStatus();
 }
 
 absl::Status Resolver::ResolveConnectionClause(
@@ -19023,6 +19150,16 @@ absl::Status Resolver::ResolveConnectionClause(
       with_connection == nullptr ? nullptr
                                  : with_connection->connection_clause(),
       resolved_connection, is_default_connection_allowed);
+}
+
+absl::Status Resolver::ResolveConnectionClause(
+    const ASTWithConnectionClause* with_connection,
+    std::unique_ptr<const ResolvedConnectionList>* resolved_connection_list,
+    bool is_default_connection_allowed) {
+  return ResolveConnectionClause(
+      with_connection == nullptr ? nullptr
+                                 : with_connection->connection_clause(),
+      resolved_connection_list, is_default_connection_allowed);
 }
 
 bool Resolver::IsPathExpressionStartingFromNamedSubquery(
@@ -19777,14 +19914,14 @@ Resolver::ResolveUnpackExpressionColumnNames(
            << ast_expr->GetNodeKindString();
   }
 
-  const ASTColumnListSpec* column_list_spec_expr =
-      ast_expr->GetAsOrDie<ASTColumnListSpec>();
+  std::unique_ptr<const ResolvedExpr> resolved_expr;
+  GOOGLESQL_RETURN_IF_ERROR(ResolveExpr(ast_expr, expr_resolution_info, &resolved_expr));
+  GOOGLESQL_RET_CHECK_NE(resolved_expr, nullptr);
+  GOOGLESQL_RET_CHECK(resolved_expr->Is<ResolvedMakeColumnListSpec>());
 
-  std::unique_ptr<const ColumnListSpec> column_list_spec;
-  GOOGLESQL_RETURN_IF_ERROR(ResolveColumnListSpec(
-      column_list_spec_expr, expr_resolution_info, &column_list_spec));
-
-  return column_list_spec->column_names();
+  return ValidateAndExtractColumnListSpecColumnNames(
+      *ast_expr->GetAsOrDie<ASTColumnListSpec>()->column_names(),
+      *resolved_expr->GetAs<ResolvedMakeColumnListSpec>()->column_name_list());
 }
 
 // Looks up a column name from an unpack expression in the given scope.

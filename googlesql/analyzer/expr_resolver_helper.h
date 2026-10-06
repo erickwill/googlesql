@@ -31,6 +31,7 @@
 #include "googlesql/public/with_modifier_mode.h"
 #include "googlesql/resolved_ast/resolved_ast.h"
 #include "googlesql/resolved_ast/resolved_column.h"
+#include "googlesql/base/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "googlesql/base/ret_check.h"
@@ -423,8 +424,10 @@ class ResolvedTVFArg {
     model_ = std::move(model);
     type_ = MODEL;
   }
-  void SetConnection(std::unique_ptr<const ResolvedConnection> connection) {
-    connection_ = std::move(connection);
+  void SetConnection(
+      std::unique_ptr<const ResolvedConnectionList> connection_list) {
+    ABSL_DCHECK(connection_list != nullptr);
+    connection_list_ = std::move(connection_list);
     type_ = CONNECTION;
   }
   void SetDescriptor(std::unique_ptr<const ResolvedDescriptor> descriptor) {
@@ -440,6 +443,7 @@ class ResolvedTVFArg {
   bool IsScan() const { return type_ == SCAN; }
   bool IsModel() const { return type_ == MODEL; }
   bool IsConnection() const { return type_ == CONNECTION; }
+  bool HasConnection() const { return IsConnection(); }
   bool IsDescriptor() const { return type_ == DESCRIPTOR; }
   bool IsGraph() const { return type_ == GRAPH; }
 
@@ -455,9 +459,9 @@ class ResolvedTVFArg {
     GOOGLESQL_RET_CHECK(IsModel());
     return model_.get();
   }
-  absl::StatusOr<const ResolvedConnection*> GetConnection() const {
+  absl::StatusOr<const ResolvedConnectionList*> GetConnectionList() const {
     GOOGLESQL_RET_CHECK(IsConnection());
-    return connection_.get();
+    return connection_list_.get();
   }
   absl::StatusOr<const ResolvedDescriptor*> GetDescriptor() const {
     GOOGLESQL_RET_CHECK(IsDescriptor());
@@ -485,9 +489,10 @@ class ResolvedTVFArg {
     GOOGLESQL_RET_CHECK(IsModel());
     return std::move(model_);
   }
-  absl::StatusOr<std::unique_ptr<const ResolvedConnection>> MoveConnection() {
+  absl::StatusOr<std::unique_ptr<const ResolvedConnectionList>>
+  MoveConnectionList() {
     GOOGLESQL_RET_CHECK(IsConnection());
-    return std::move(connection_);
+    return std::move(connection_list_);
   }
   absl::StatusOr<std::unique_ptr<const ResolvedDescriptor>> MoveDescriptor() {
     GOOGLESQL_RET_CHECK(IsDescriptor());
@@ -515,7 +520,7 @@ class ResolvedTVFArg {
   std::unique_ptr<const ResolvedExpr> expr_;
   std::unique_ptr<const ResolvedScan> scan_;
   std::unique_ptr<const ResolvedModel> model_;
-  std::unique_ptr<const ResolvedConnection> connection_;
+  std::unique_ptr<const ResolvedConnectionList> connection_list_;
   std::unique_ptr<const ResolvedDescriptor> descriptor_;
   const PropertyGraph* graph_ = nullptr;
 

@@ -164,6 +164,54 @@ QueryStmt
           +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
 ==
 
+# Here two renamed columns become ambiguous with each other.
+SELECT 1 a, 2 b, 3 c, 4 d
+|> RENAME b AS xx, d AS xx
+|> STATIC_DESCRIBE
+{{|\|>SELECT xx}}
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStmt
++-output_column_list=
+| +-$query.a#1 AS a [INT64]
+| +-$query.b#2 AS xx [INT64]
+| +-$query.c#3 AS c [INT64]
+| +-$query.d#4 AS xx [INT64]
++-query=
+  +-StaticDescribeScan
+    +-column_list=$query.[a#1, b#2, c#3, d#4]
+    +-describe_text=
+    |   """
+    |   NameList:
+    |     a INT64 $query.a#1
+    |     xx INT64 $query.b#2
+    |     c INT64 $query.c#3
+    |     xx INT64 $query.d#4
+    |   NameScope:
+    |     Names:
+    |       a -> INT64 ($query.a#1)
+    |       c -> INT64 ($query.c#3)
+    |       xx -> ambiguous
+    |   """
+    +-input_scan=
+      +-ProjectScan
+        +-column_list=$query.[a#1, b#2, c#3, d#4]
+        +-expr_list=
+        | +-a#1 := Literal(type=INT64, value=1)
+        | +-b#2 := Literal(type=INT64, value=2)
+        | +-c#3 := Literal(type=INT64, value=3)
+        | +-d#4 := Literal(type=INT64, value=4)
+        +-input_scan=
+          +-SingleRowScan
+--
+ALTERNATION GROUP: |>SELECT xx
+--
+ERROR: Column name xx is ambiguous [at 4:10]
+|>SELECT xx
+         ^
+==
+
 # Range variables still hide columns, even after the rename.
 FROM KeyValue kv
 |> RENAME key AS kv
@@ -274,6 +322,57 @@ FROM EnumTable
 --
 ERROR: Name in pipe RENAME is ambiguous; RENAME can only rename columns: Filename [at 3:11]
 |> RENAME Filename AS fff
+          ^
+==
+
+# Note the behavior of NameScope - range variables always override
+# columns, so there can't be an ambiguity between a column and
+# range variable.
+#
+# We special case this for RENAME so that if it finds a column to
+# rename but there's also a range variable found by the scope lookup,
+# we make that an error.  Otherwise, the RENAME would find and
+# rename a different object than SELECT would find.
+FROM KeyValue kv
+|> EXTEND 1.1 AS kv
+|> STATIC_DESCRIBE
+{{|\|> RENAME kv AS xxx}}
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStmt
++-output_column_list=
+| +-KeyValue.Key#1 AS Key [INT64]
+| +-KeyValue.Value#2 AS Value [STRING]
+| +-$pipe_extend.kv#3 AS kv [DOUBLE]
++-query=
+  +-StaticDescribeScan
+    +-column_list=[KeyValue.Key#1, KeyValue.Value#2, $pipe_extend.kv#3]
+    +-describe_text=
+    |   """
+    |   NameList:
+    |     Key INT64 KeyValue.Key#1
+    |     Value STRING KeyValue.Value#2
+    |     kv DOUBLE $pipe_extend.kv#3
+    |   NameScope:
+    |     Names:
+    |       Key -> INT64 (KeyValue.Key#1) (implicit)
+    |       Value -> STRING (KeyValue.Value#2) (implicit)
+    |     Range variables:
+    |       kv -> RANGE_VARIABLE<Key#1,Value#2>
+    |   """
+    +-input_scan=
+      +-ProjectScan
+        +-column_list=[KeyValue.Key#1, KeyValue.Value#2, $pipe_extend.kv#3]
+        +-expr_list=
+        | +-kv#3 := Literal(type=DOUBLE, value=1.1)
+        +-input_scan=
+          +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1], alias="kv")
+--
+ALTERNATION GROUP: |> RENAME kv AS xxx
+--
+ERROR: Name in pipe RENAME is a table alias; RENAME can only rename columns: kv [at 4:11]
+|> RENAME kv AS xxx
           ^
 ==
 

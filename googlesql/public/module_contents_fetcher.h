@@ -136,14 +136,20 @@ typedef std::map<std::vector<std::string>, ModuleContentsInfo,
 
 // Fetches module contents related to the specified <module_name_path>, as well
 // as all transitively imported module contents. If a module is imported
-// multiple times, it appears only once in the returned list. In order to find
-// nested imports, module contents are parsed looking for IMPORT MODULE
-// statements. If a parse error is found while parsing module contents, parsing
-// stops on that module and processing continues for any remaining imported
-// modules.  Clears <errors>, and populates <errors> with all errors found
-// during processing (normally these would be parse errors or module file lookup
-// errors). If an error is found then returns the first error status inserted
-// into <errors>, otherwise returns OK.
+// multiple times, it appears only once in the returned list.
+//
+// In order to find nested imports, module contents are scanned specifically
+// for IMPORT statements. Non-IMPORT statements are skipped during dependency
+// scanning. If an IMPORT statement fails to parse, or if statement skipping
+// fails (e.g. due to a lexical error like an unclosed string literal or
+// comment), an error is added to <errors> and scanning stops for that
+// module.
+//
+// Clears <errors>, and populates <errors> with all errors found during
+// processing (such as module file lookup errors, IMPORT syntax errors, or
+// lexical errors during statement skipping).
+// If an error is found, returns the first error status in <errors>, otherwise
+// returns OK.
 absl::Status FetchAllModuleContents(
     const std::vector<std::string>& module_name_path,
     ModuleContentsFetcher* module_contents_fetcher,

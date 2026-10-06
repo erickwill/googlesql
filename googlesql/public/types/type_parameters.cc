@@ -510,7 +510,7 @@ bool TypeParameters::MatchType(const Type* type) const {
     // extended parameters (and child_list) together match the type.
     return type->IsExtendedType();
   }
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   if (child_list().size() != component_types.size()) {
     return false;
   }

@@ -354,3 +354,32 @@ END;
 ERROR: EXTERNAL SECURITY clause is not supported [at 1:1]
 CREATE PROCEDURE procedure_name()
 ^
+==
+
+# Non SQL procedure with multi-connection
+[language_features=NONE,+NON_SQL_PROCEDURE,+MULTI_CONNECTIONS]
+CREATE PROCEDURE procedure_name()
+WITH CONNECTION (key1="connection1", key2=connection2)
+LANGUAGE python
+AS """
+print("hello")
+""";
+--
+CreateProcedureStmt
++-name_path=procedure_name
++-argument_name_list=[]
++-signature=() -> <void>
++-connection_list=
+| +-ConnectionList
+|   +-connection_kv_list=
+|     +-ConnectionKeyValuePair
+|     | +-key="key1"
+|     | +-connection=
+|     |   +-Connection(connection=connection1)
+|     +-ConnectionKeyValuePair
+|       +-key="key2"
+|       +-connection=
+|         +-Connection(connection=connection2)
++-language="python"
++-code='\nprint("hello")\n'
+

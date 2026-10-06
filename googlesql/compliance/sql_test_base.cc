@@ -1701,6 +1701,7 @@ static std::unique_ptr<ReferenceDriver> CreateTestSetupDriver() {
   options.EnableLanguageFeature(FEATURE_VECTOR_TYPE);
   options.EnableLanguageFeature(FEATURE_DECLARATIVE_TYPE_FRAMEWORK);
   // Allow CREATE TABLE AS SELECT in [prepare_database] statements.
+  options.AddSupportedStatementKind(RESOLVED_CREATE_TABLE_STMT);
   options.AddSupportedStatementKind(RESOLVED_CREATE_TABLE_AS_SELECT_STMT);
   options.AddSupportedStatementKind(RESOLVED_CREATE_CONSTANT_STMT);
   options.AddSupportedStatementKind(RESOLVED_CREATE_TABLE_FUNCTION_STMT);
@@ -2366,7 +2367,8 @@ void SQLTestBase::StepPrepareDatabase() {
     return;
   }
 
-  if (stmt_kind == RESOLVED_CREATE_TABLE_AS_SELECT_STMT) {
+  if (stmt_kind == RESOLVED_CREATE_TABLE_AS_SELECT_STMT ||
+      stmt_kind == RESOLVED_CREATE_TABLE_STMT) {
     ReferenceDriver::ExecuteStatementAuxOutput aux_output;
     CheckCancellation(
         test_setup_driver_

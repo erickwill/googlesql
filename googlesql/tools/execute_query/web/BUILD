@@ -12,8 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//bazel:ts_build_defs.bzl", "js_binary", "ts_library")
 load(":embed_files.bzl", "gen_string_constant_header_file")
 
 package(default_visibility = ["//googlesql/base:googlesql_implementation"])
@@ -24,34 +26,63 @@ gen_string_constant_header_file(
     variable = "kPageTemplate",
 )
 
-gen_string_constant_header_file(
-    name = "local_storage_manager_js_h",
-    src = "local_storage_manager.js",
-    variable = "kLocalStorageManagerJS",
+ts_library(
+    name = "decorate_tree",
+    srcs = ["decorate_tree.ts"],
+)
+
+ts_library(
+    name = "local_storage_manager",
+    srcs = ["local_storage_manager.ts"],
+)
+
+ts_library(
+    name = "splitter",
+    srcs = ["splitter.ts"],
+    deps = [":local_storage_manager"],
+)
+
+ts_library(
+    name = "theme",
+    srcs = ["theme.ts"],
+    deps = [":local_storage_manager"],
+)
+
+ts_library(
+    name = "tree_diff",
+    srcs = ["tree_diff.ts"],
+)
+
+ts_library(
+    name = "rewrite_steps",
+    srcs = ["rewrite_steps.ts"],
+    deps = [":tree_diff"],
+)
+
+ts_library(
+    name = "init",
+    srcs = ["init.ts"],
+    deps = [
+        ":decorate_tree",
+        ":local_storage_manager",
+        ":rewrite_steps",
+        ":splitter",
+        ":theme",
+    ],
+)
+
+js_binary(
+    name = "inline_bundle",
+    entry_point = "init.ts",
+    deps = [
+        ":init",
+    ],
 )
 
 gen_string_constant_header_file(
-    name = "rewrite_steps_js_h",
-    src = "rewrite_steps.js",
-    variable = "kRewriteStepsJS",
-)
-
-gen_string_constant_header_file(
-    name = "splitter_js_h",
-    src = "splitter.js",
-    variable = "kSplitterJS",
-)
-
-gen_string_constant_header_file(
-    name = "theme_js_h",
-    src = "theme.js",
-    variable = "kThemeJS",
-)
-
-gen_string_constant_header_file(
-    name = "init_js_h",
-    src = "init.js",
-    variable = "kInitJS",
+    name = "inline_bundle_js_h",
+    src = "inline_bundle.js",
+    variable = "kInlineBundleJS",
 )
 
 gen_string_constant_header_file(
@@ -76,18 +107,13 @@ cc_library(
     name = "embedded_resources",
     srcs = [
         "embedded_resources.cc",
-        "init.js.h",
-        "local_storage_manager.js.h",
+        "inline_bundle.js.h",
         "page_body.html.h",
         "page_template.html.h",
-        "rewrite_steps.js.h",
-        "splitter.js.h",
         "style.css.h",
         "table.html.h",
-        "theme.js.h",
     ],
     hdrs = ["embedded_resources.h"],
-    deps = ["@com_google_absl//absl/strings"],
 )
 
 bzl_library(

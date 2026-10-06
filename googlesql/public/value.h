@@ -108,6 +108,16 @@ namespace googlesql {
 // produces a new instance that can be used concurrently with the original in
 // arbitrary ways.
 //
+namespace internal {
+// Forward declaration of the adapter that provides ergonomic accessors aligned
+// with the Variant data model.
+class VariantValueAdapter;
+}  // namespace internal
+
+// A view over a GoogleSQL Value providing ergonomic accessors aligned with the
+// Variant data model (Primitive, Object, Array).
+typedef internal::VariantValueAdapter VariantValueView;
+
 class Value {
  public:
   // A lightweight, non-owning view over the elements of an array or fields of a
@@ -266,6 +276,10 @@ class Value {
 
   // RET_CHECKs if is_null() || type_kind() != TYPE_UUID,
   absl::StatusOr<UuidValue> uuid_value() const;
+
+  // Returns a view of the underlying value held by this Variant.
+  // RET_CHECKs that !is_null() && type_kind() == TYPE_VARIANT
+  absl::StatusOr<VariantValueView> variant_value() const;
 
   // Returns the value content of extended type.
   // Caller must check `has_content()`, as an invalid value will be returned.
@@ -825,9 +839,13 @@ class Value {
   static Value NullJson();
   static Value NullTokenList();
   static Value NullUuid();
+  static Value NullVariant();
 
   // Returns an empty but non-null Geography value.
   static Value EmptyGeography();
+
+  // Creates a variant value.
+  static absl::StatusOr<Value> Variant(const Value& inner_value);
 
   // Creates an enum value of the specified 'enum_type'. Unless
   // `allow_unknown_enum_values` is set, 'value' must be a valid numeric value
@@ -1163,6 +1181,10 @@ class Value {
   friend class InternalValue;  // Defined in googlesql/common/internal_value.h.
   friend struct InternalComparer;  // Defined in value.cc.
   friend struct InternalHasher;    // Defined in value.cc
+  // VariantRefImpl needs access to private EqualsInternal to compare inner
+  // values of Variants.
+  friend class internal::VariantRefImpl;
+
   class TypedList;                 // Defined in value_inl.h
   class TypedMap;                  // Defined in value_inl.h
   class TypedMeasure;              // Defined in value_inl.h
@@ -1250,6 +1272,12 @@ class Value {
   explicit Value(tokens::TokenList tokenlist);
 
   explicit Value(const UuidValue& uuid);
+
+  // Takes ownership of 'variant_ptr' without increasing its ref count
+  // (Adopted). The caller must have already acquired a reference (e.g. via `new
+  // VariantRef`). Reference count is increased (Ref()) during standard Value
+  // copy operations.
+  explicit Value(internal::VariantRef* /*absl_nonnull*/ variant_ptr);
 
   // Constructs an enum.
   Value(const EnumType* enum_type, int64_t value,
@@ -1339,8 +1367,8 @@ class Value {
   // indented a number of spaces according to the 'indent' parameter.
   // 'force_type' causes the top-level value to print its type. By
   // default, only Array values print their types.
-  std::string FormatInternal(Type::FormatValueContentOptions options) const;
-
+  std::string FormatInternal(
+      const Type::FormatValueContentOptions& options) const;
 
   // Gets Value's content. Requires: has_content() == true.
   ValueContent GetContent() const;
@@ -1492,6 +1520,8 @@ class Value {
     internal::UuidRef* uuid_ptr_;  // Owned. Used for values of TYPE_UUID.
     internal::ValueContentMeasureRef*
         measure_ptr_;  // Owned. Used for values of TYPE_MEASURE.
+    internal::VariantRef*
+        variant_ptr_;  // Owned. Used for values of TYPE_VARIANT.
   };
   // Intentionally copyable.
 };
@@ -1688,6 +1718,7 @@ Value NullInterval();
 Value NullNumeric();
 Value NullBigNumeric();
 Value NullUuid();
+Value NullVariant();
 Value Null(const Type* type);
 
 // Constructor for an invalid value.

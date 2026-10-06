@@ -180,6 +180,25 @@ select KitchenSink = KitchenSink from ComplexTypes;
        ^
 ==
 
+# VARIANT does not support equality operators.
+[language_features=NONE,+VARIANT_TYPE]
+select cast(1 as VARIANT) = cast(1 as VARIANT);
+--
+ERROR: Equality is not defined for arguments of type VARIANT [at 1:8]
+select cast(1 as VARIANT) = cast(1 as VARIANT);
+       ^
+==
+
+# VARIANT does not support ordering operators.
+[language_features=NONE,+VARIANT_TYPE]
+select cast(1 as VARIANT) < cast(1 as VARIANT);
+--
+ERROR: Less than is not defined for arguments of type VARIANT [at 1:8]
+select cast(1 as VARIANT) < cast(1 as VARIANT);
+       ^
+
+==
+
 [language_features=NONE,{{|+TEMPLATED_SQL_FUNCTION_RESOLVE_WITH_TYPED_ARGS}}]
 select NULL = KitchenSink from ComplexTypes;
 --

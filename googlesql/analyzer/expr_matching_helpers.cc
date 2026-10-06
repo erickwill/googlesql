@@ -86,13 +86,15 @@ namespace {
 //   RETURN_IF_NOT_EQUAL(expr1->field1(), expr1->field1());
 //  ...
 //
-#define RETURN_IF_EXPR_NOT_EQUAL(expr1, expr2, language_options)       \
-  GOOGLESQL_ASSIGN_OR_RETURN(                                                    \
-      TestIsSameExpressionForGroupByResult result,                     \
-      TestIsSameExpressionForGroupBy(expr1, expr2, language_options)); \
-  if (result != TestIsSameExpressionForGroupByResult::kEqual) {        \
-    return result;                                                     \
-  }
+#define RETURN_IF_EXPR_NOT_EQUAL(expr1, expr2, language_options)         \
+  do {                                                                   \
+    GOOGLESQL_ASSIGN_OR_RETURN(                                                    \
+        TestIsSameExpressionForGroupByResult result,                     \
+        TestIsSameExpressionForGroupBy(expr1, expr2, language_options)); \
+    if (result != TestIsSameExpressionForGroupByResult::kEqual) {        \
+      return result;                                                     \
+    }                                                                    \
+  } while (false)
 
 }  // namespace
 
@@ -309,6 +311,15 @@ TestIsSameExpressionForGroupBy(const ResolvedExpr* expr1,
                                     json_field2->field_name());
       break;
     }
+    case RESOLVED_GET_VARIANT_FIELD: {
+      const auto* variant_field1 = expr1->GetAs<ResolvedGetVariantField>();
+      const auto* variant_field2 = expr2->GetAs<ResolvedGetVariantField>();
+      RETURN_IF_EXPR_NOT_EQUAL(variant_field1->expr(), variant_field2->expr(),
+                               language_options);
+      RETURN_IF_PRIMITIVE_NOT_EQUAL(variant_field1->field_name(),
+                                    variant_field2->field_name());
+      break;
+    }
     case RESOLVED_GRAPH_GET_ELEMENT_PROPERTY: {
       const auto* get_prop1 = expr1->GetAs<ResolvedGraphGetElementProperty>();
       const auto* get_prop2 = expr2->GetAs<ResolvedGraphGetElementProperty>();
@@ -326,6 +337,21 @@ TestIsSameExpressionForGroupBy(const ResolvedExpr* expr1,
 
       RETURN_IF_PRIMITIVE_NOT_EQUAL(get_prop1->property(),
                                     get_prop2->property());
+      break;
+    }
+    case RESOLVED_MAKE_MAP: {
+      const auto* make_map1 = expr1->GetAs<ResolvedMakeMap>();
+      const auto* make_map2 = expr2->GetAs<ResolvedMakeMap>();
+      RETURN_IF_PRIMITIVE_NOT_EQUAL(make_map1->entry_list_size(),
+                                    make_map2->entry_list_size());
+      for (int i = 0; i < make_map1->entry_list_size(); ++i) {
+        const ResolvedMakeMapEntry* entry1 = make_map1->entry_list(i);
+        const ResolvedMakeMapEntry* entry2 = make_map2->entry_list(i);
+        RETURN_IF_EXPR_NOT_EQUAL(entry1->key(), entry2->key(),
+                                 language_options);
+        RETURN_IF_EXPR_NOT_EQUAL(entry1->value(), entry2->value(),
+                                 language_options);
+      }
       break;
     }
     case RESOLVED_MAKE_STRUCT: {
@@ -402,6 +428,12 @@ static const ResolvedExpr* UnwindFieldAccesses(
       name_path->mutable_name_path()->push_back(
           id_string_pool->Make(get_json_field->field_name()));
       resolved_expr = get_json_field->expr();
+    } else if (resolved_expr->node_kind() == RESOLVED_GET_VARIANT_FIELD) {
+      const ResolvedGetVariantField* get_variant_field =
+          resolved_expr->GetAs<ResolvedGetVariantField>();
+      name_path->mutable_name_path()->push_back(
+          id_string_pool->Make(get_variant_field->field_name()));
+      resolved_expr = get_variant_field->expr();
     } else if (resolved_expr->node_kind() ==
                RESOLVED_GRAPH_GET_ELEMENT_PROPERTY) {
       const ResolvedGraphGetElementProperty* get_element_property =
@@ -490,6 +522,15 @@ size_t FieldPathHash(const ResolvedExpr* expr) {
                           json_field->field_name(),
                           FieldPathHash(json_field->expr())));
     }
+    case RESOLVED_GET_VARIANT_FIELD: {
+      const ResolvedGetVariantField* variant_field =
+          expr->GetAs<ResolvedGetVariantField>();
+      // Note that this only hashes the top-level type (e.g. ARRAY).
+      return absl::Hash<std::tuple<int, int, std::string, size_t>>()(
+          std::make_tuple(expr->node_kind(), expr->type()->kind(),
+                          variant_field->field_name(),
+                          FieldPathHash(variant_field->expr())));
+    }
     case RESOLVED_GRAPH_GET_ELEMENT_PROPERTY: {
       const auto* get_prop = expr->GetAs<ResolvedGraphGetElementProperty>();
       // Note that this only hashes the top-level type (e.g. ARRAY).
@@ -530,6 +571,7 @@ static bool IsContainerFieldAccess(const ResolvedNode* node) {
   return node->node_kind() == RESOLVED_GET_PROTO_FIELD ||
          node->node_kind() == RESOLVED_GET_STRUCT_FIELD ||
          node->node_kind() == RESOLVED_GET_JSON_FIELD ||
+         node->node_kind() == RESOLVED_GET_VARIANT_FIELD ||
          node->node_kind() == RESOLVED_GRAPH_GET_ELEMENT_PROPERTY ||
          node->node_kind() == RESOLVED_GET_ROW_FIELD;
 }
@@ -728,6 +770,10 @@ bool ContainsTableArrayNamePathWithFreeColumnRef(const ResolvedExpr* node,
     return ContainsTableArrayNamePathWithFreeColumnRef(
         node->GetAs<ResolvedGetJsonField>()->expr(), column_id);
   }
+  if (node->node_kind() == RESOLVED_GET_VARIANT_FIELD) {
+    return ContainsTableArrayNamePathWithFreeColumnRef(
+        node->GetAs<ResolvedGetVariantField>()->expr(), column_id);
+  }
   if (node->node_kind() == RESOLVED_GRAPH_GET_ELEMENT_PROPERTY) {
     return ContainsTableArrayNamePathWithFreeColumnRef(
         node->GetAs<ResolvedGraphGetElementProperty>()->expr(), column_id);
@@ -828,6 +874,23 @@ bool IsSameFieldPath(const ResolvedExpr* field_path1,
           get_json_field1->type()->Equals(get_json_field2->type()) &&
           IsSameFieldPath(get_json_field1->expr(), get_json_field2->expr(),
                           match_option);
+      return field_paths_match;
+    }
+    case RESOLVED_GET_VARIANT_FIELD: {
+      // Variant field access always takes a VARIANT and returns a VARIANT.
+      // It has no special access options (unlike Proto or Struct), so all
+      // `match_option` modes behave the same here and are simply passed to
+      // the parent expression.
+      const ResolvedGetVariantField* get_variant_field1 =
+          field_path1->GetAs<ResolvedGetVariantField>();
+      const ResolvedGetVariantField* get_variant_field2 =
+          field_path2->GetAs<ResolvedGetVariantField>();
+      const bool field_paths_match =
+          get_variant_field1->field_name() ==
+              get_variant_field2->field_name() &&
+          get_variant_field1->type()->Equals(get_variant_field2->type()) &&
+          IsSameFieldPath(get_variant_field1->expr(),
+                          get_variant_field2->expr(), match_option);
       return field_paths_match;
     }
     default:

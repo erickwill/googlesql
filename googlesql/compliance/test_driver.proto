@@ -83,6 +83,16 @@ message TestTableOptionsProto {
   // the table.
   // Pseudo-columns can be selected explicitly but do not show up in SELECT *.
   repeated bool pseudo_columns = 8;
+
+  // Default values for each column of the table. `column_default_values` is
+  // either empty or has the same number of elements as the number of the
+  // columns in the table.
+  // An unset value field indicates that the corresponding table column does
+  // not have a default value.
+  message ColumnDefaultValueProto {
+    optional googlesql.ValueProto value = 1;
+  }
+  repeated ColumnDefaultValueProto column_default_values = 9;
 }
 
 message TestTableProto {

@@ -264,6 +264,11 @@ absl::StatusOr<bool> HasGroupingCallNode(const ResolvedNode* node);
 // Checks whether the node has any ResolvedWithScan nodes.
 absl::StatusOr<bool> ContainsWithScan(const googlesql::ResolvedNode& node);
 
+// Returns true if `node` contains any non-terminal ResolvedInsertScan (i.e.
+// an InsertScan that is not directly wrapped by ResolvedFinishScan, or an
+// InsertScan whose query contains nested InsertScans).
+bool HasNonTerminalInsertScan(const ResolvedNode* node);
+
 // Contains helper functions that reduce boilerplate in rewriting rules logic
 // related to constructing new ResolvedFunctionCall instances.
 // TODO: Move FunctionCallBuilder class from rewriter utils

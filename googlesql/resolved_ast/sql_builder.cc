@@ -124,6 +124,7 @@
 #include "absl/strings/substitute.h"
 #include "absl/types/span.h"
 #include "googlesql/base/case.h"
+#include "google/protobuf/descriptor.h"
 #include "googlesql/base/map_util.h"
 #include "googlesql/base/stl_util.h"
 #include "googlesql/base/ret_check.h"
@@ -169,6 +170,56 @@ std::string SQLBuilder::UpdateColumnAlias(const ResolvedColumn& column) {
 SQLBuilder::SQLBuilder(const SQLBuilderOptions& options) : options_(options) {}
 
 namespace {
+absl::StatusOr<std::string> GetConnectionClauseString(
+    const ResolvedConnection* connection) {
+  if (connection == nullptr) {
+    return "";
+  }
+  return ToIdentifierLiteral(connection->connection()->Name());
+}
+
+absl::StatusOr<std::string> GetConnectionClauseString(
+    const ResolvedConnectionList* connection_list) {
+  if (connection_list == nullptr) {
+    return "";
+  }
+  if (connection_list->connection() != nullptr) {
+    return GetConnectionClauseString(connection_list->connection());
+  }
+  if (connection_list->connection_kv_list().empty()) {
+    return "";
+  }
+  std::vector<std::string> kv_strs;
+  kv_strs.reserve(connection_list->connection_kv_list_size());
+  for (const auto& kv_pair : connection_list->connection_kv_list()) {
+    const std::string key = ToIdentifierLiteral(kv_pair->key());
+    const std::string val =
+        ToStringLiteral(kv_pair->connection()->connection()->Name());
+    kv_strs.push_back(absl::StrCat(key, "=", val));
+  }
+  return absl::StrCat("(", absl::StrJoin(kv_strs, ", "), ")");
+}
+
+absl::StatusOr<std::string> GetWithConnectionClauseString(
+    const ResolvedConnection* connection) {
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string conn_str,
+                   GetConnectionClauseString(connection));
+  if (conn_str.empty()) {
+    return "";
+  }
+  return absl::StrCat(" WITH CONNECTION ", conn_str, " ");
+}
+
+absl::StatusOr<std::string> GetWithConnectionClauseString(
+    const ResolvedConnectionList* connection_list) {
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string conn_str,
+                   GetConnectionClauseString(connection_list));
+  if (conn_str.empty()) {
+    return "";
+  }
+  return absl::StrCat(" WITH CONNECTION ", conn_str, " ");
+}
+
 constexpr absl::string_view khalf_of_int64max_str = "4611686018427387903";
 
 // In some cases GoogleSQL name resolution rules cause table names to be
@@ -194,6 +245,9 @@ class ColumnNameCollector : public ResolvedASTVisitor {
 
  private:
   void Register(absl::string_view col_name) {
+    if (col_name.empty()) {
+      return;
+    }
     std::string name = absl::AsciiStrToLower(col_name);
     // Value tables do not currently participate in FilterScan flattening, so
     // avoid complexities and don't worry about refs to them.
@@ -201,6 +255,27 @@ class ColumnNameCollector : public ResolvedASTVisitor {
       col_ref_names_->insert(name);
     }
   }
+
+  void RegisterTypeFields(const Type* type) {
+    if (type == nullptr) {
+      return;
+    }
+    if (type->IsStruct()) {
+      for (const auto& field : type->AsStruct()->fields()) {
+        Register(field.name);
+      }
+    } else if (type->IsProto()) {
+      const google::protobuf::Descriptor* descriptor = type->AsProto()->descriptor();
+      if (descriptor != nullptr) {
+        for (int i = 0; i < descriptor->field_count(); ++i) {
+          const google::protobuf::FieldDescriptor* field = descriptor->field(i);
+          Register(field->name());
+          Register(absl::StrCat("has_", field->name()));
+        }
+      }
+    }
+  }
+
   absl::Status VisitResolvedColumnRef(const ResolvedColumnRef* node) override {
     Register(node->column().name());
     return absl::OkStatus();
@@ -213,12 +288,30 @@ class ColumnNameCollector : public ResolvedASTVisitor {
     } else {
       if (t->IsValueTable()) {
         value_table_names_.insert(absl::AsciiStrToLower(node->table()->Name()));
+        if (t->NumColumns() > 0) {
+          RegisterTypeFields(t->GetColumn(0)->GetType());
+        }
       }
       for (int i = 0; i < t->NumColumns(); i++) {
         Register(t->GetColumn(i)->Name());
       }
     }
     return absl::OkStatus();
+  }
+
+  absl::Status VisitResolvedTVFScan(const ResolvedTVFScan* node) override {
+    if (node->signature() != nullptr) {
+      const TVFRelation& result_schema = node->signature()->result_schema();
+      if (result_schema.is_value_table()) {
+        if (result_schema.num_columns() > 0) {
+          RegisterTypeFields(result_schema.column(0).type);
+        }
+      }
+      for (int i = 0; i < result_schema.num_columns(); i++) {
+        Register(result_schema.column(i).name);
+      }
+    }
+    return DefaultVisit(node);
   }
 
   // Default implementation for ProjectScan visits expr list before input
@@ -2787,6 +2880,24 @@ absl::Status SQLBuilder::VisitResolvedGetJsonField(
   return absl::OkStatus();
 }
 
+absl::Status SQLBuilder::VisitResolvedGetVariantField(
+    const ResolvedGetVariantField* node) {
+  GOOGLESQL_RET_CHECK(node->type()->IsVariant());
+
+  std::string text;
+  GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<QueryFragment> result,
+                   ProcessNode(node->expr()));
+  std::string result_sql = result->GetSQL();
+
+  const std::string& field_name = node->field_name();
+  if (result_sql != kEmptyAlias) {
+    absl::StrAppend(&text, result_sql, ".");
+  }
+  absl::StrAppend(&text, ToIdentifierLiteral(field_name));
+  PushQueryFragment(node, text);
+  return absl::OkStatus();
+}
+
 absl::Status SQLBuilder::VisitResolvedGetRowField(
     const ResolvedGetRowField* node) {
   GOOGLESQL_RET_CHECK(node->expr()->type()->IsRowOrTable())
@@ -3810,10 +3921,10 @@ absl::StatusOr<std::string> SQLBuilder::ProcessResolvedTVFScan(
       continue;
     }
 
-    if (argument->connection() != nullptr) {
-      const std::string connection_alias =
-          ToIdentifierLiteral(argument->connection()->connection()->Name());
-      argument_list.push_back(absl::StrCat("CONNECTION ", connection_alias));
+    GOOGLESQL_ASSIGN_OR_RETURN(const std::string connection_str,
+                     GetConnectionClauseString(argument->connection_list()));
+    if (!connection_str.empty()) {
+      argument_list.push_back(absl::StrCat("CONNECTION ", connection_str));
       continue;
     }
 
@@ -3991,15 +4102,68 @@ absl::StatusOr<std::string> SQLBuilder::ProcessResolvedTVFScan(
         }
       }
 
-      GOOGLESQL_RETURN_IF_ERROR(
-          WrapQueryExpression(scan, result->query_expression.get()));
-      GOOGLESQL_RET_CHECK(result->query_expression->TrySetSelectClause(
-          arg_col_list_select_items, ""));
+      std::string arg_sql;
+      if ((argument->partition_by_list_size() > 0 ||
+           argument->order_by_list_size() > 0) &&
+          scan->Is<ResolvedTableScan>()) {
+        const auto* table_scan = scan->GetAs<ResolvedTableScan>();
+        arg_sql = ToIdentifierLiteral(table_scan->table()->Name());
+      } else {
+        GOOGLESQL_RETURN_IF_ERROR(
+            WrapQueryExpression(scan, result->query_expression.get()));
+        GOOGLESQL_RET_CHECK(result->query_expression->TrySetSelectClause(
+            arg_col_list_select_items, ""));
+        arg_sql = absl::StrCat("(", result->GetSQL(), ")");
+      }
 
-      if (arg_idx == 0) {
+      if (argument->partition_by_list_size() > 0 ||
+          argument->order_by_list_size() > 0) {
+        absl::flat_hash_map<int, std::string> saved_pending_columns;
+        for (const ResolvedColumn& col : argument->argument_column_list()) {
+          auto it = mutable_pending_columns().find(col.column_id());
+          if (it != mutable_pending_columns().end()) {
+            saved_pending_columns[col.column_id()] = it->second;
+          }
+          mutable_pending_columns()[col.column_id()] =
+              ToIdentifierLiteral(col.name());
+        }
+
+        std::string modifiers;
+        if (argument->partition_by_list_size() > 0) {
+          absl::StrAppend(&modifiers, " PARTITION BY ");
+          for (int i = 0; i < argument->partition_by_list_size(); ++i) {
+            if (i > 0) absl::StrAppend(&modifiers, ", ");
+            GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<QueryFragment> partition_fragment,
+                             ProcessNode(argument->partition_by_list(i)));
+            absl::StrAppend(&modifiers, partition_fragment->GetSQL());
+          }
+        }
+        if (argument->order_by_list_size() > 0) {
+          absl::StrAppend(&modifiers, " ORDER BY ");
+          for (int i = 0; i < argument->order_by_list_size(); ++i) {
+            if (i > 0) absl::StrAppend(&modifiers, ", ");
+            GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<QueryFragment> order_by_fragment,
+                             ProcessNode(argument->order_by_list(i)));
+            absl::StrAppend(&modifiers, order_by_fragment->GetSQL());
+          }
+        }
+        arg_sql = absl::StrCat("TABLE(", arg_sql, modifiers, ")");
+
+        for (const ResolvedColumn& col : argument->argument_column_list()) {
+          auto it = saved_pending_columns.find(col.column_id());
+          if (it != saved_pending_columns.end()) {
+            mutable_pending_columns()[col.column_id()] = it->second;
+          } else {
+            mutable_pending_columns().erase(col.column_id());
+          }
+        }
+      }
+
+      if (arg_idx == 0 && argument->partition_by_list_size() == 0 &&
+          argument->order_by_list_size() == 0) {
         is_first_arg_query = true;
       }
-      argument_list.push_back("(" + result->GetSQL() + ")");
+      argument_list.push_back(arg_sql);
     }
   }
   GOOGLESQL_RET_CHECK_EQ(argument_list.size() + unset_arg_indices.size(),
@@ -7053,11 +7217,9 @@ absl::Status SQLBuilder::VisitResolvedCreateExternalSchemaStmt(
   std::string sql;
   GOOGLESQL_RETURN_IF_ERROR(GetCreateStatementPrefix(node, "EXTERNAL SCHEMA", &sql));
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
                    GetHintListString(node->option_list()));
@@ -7109,11 +7271,9 @@ absl::Status SQLBuilder::VisitResolvedCreateTableStmt(
     GOOGLESQL_RETURN_IF_ERROR(GetPartitionByListString(node->cluster_by_list(), &sql));
   }
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   if (!node->option_list().empty()) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
@@ -7190,11 +7350,9 @@ absl::Status SQLBuilder::VisitResolvedCreateTableAsSelectStmtImpl(
     GOOGLESQL_RETURN_IF_ERROR(GetPartitionByListString(node->cluster_by_list(), &sql));
   }
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   if (!node->option_list().empty()) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
@@ -7337,11 +7495,9 @@ absl::Status SQLBuilder::VisitResolvedCreateModelStmt(
   }
 
   // Restore WITH CONNECTION.
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   // Restore OPTIONS list.
   if (!node->option_list().empty()) {
@@ -7506,11 +7662,9 @@ absl::Status SQLBuilder::VisitResolvedCreateIndexStmt(
     GOOGLESQL_RETURN_IF_ERROR(GetPartitionByListString(node->partition_by_list(), &sql));
   }
 
-  if (node->connection() != nullptr) {
-    absl::StrAppend(
-        &sql, " WITH CONNECTION ",
-        ToIdentifierLiteral(node->connection()->connection()->Name()), " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection()));
+  absl::StrAppend(&sql, with_connection_str);
 
   GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
                    GetHintListString(node->option_list()));
@@ -7547,11 +7701,9 @@ absl::Status SQLBuilder::VisitResolvedCreateLiveTableStmt(
     GOOGLESQL_RETURN_IF_ERROR(GetPartitionByListString(node->cluster_by_list(), &sql));
   }
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   if (!node->option_list().empty()) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
@@ -7678,11 +7830,9 @@ absl::Status SQLBuilder::VisitResolvedCreateExternalTableStmt(
         ProcessWithPartitionColumns(&sql, node->with_partition_columns()));
   }
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
                    GetHintListString(node->option_list()));
@@ -7747,20 +7897,18 @@ absl::Status SQLBuilder::VisitResolvedCreateFunctionStmt(
     if (is_remote && options_.language_options.LanguageFeatureEnabled(
                          FEATURE_REMOTE_FUNCTION)) {
       absl::StrAppend(&sql, " REMOTE");
-      if (node->connection() != nullptr) {
-        const std::string connection_alias =
-            ToIdentifierLiteral(node->connection()->connection()->Name());
-        absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-      }
+      GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                       GetWithConnectionClauseString(node->connection_list()));
+      absl::StrAppend(&sql, with_connection_str);
     } else {
       absl::StrAppend(&sql, " LANGUAGE ",
                       ToIdentifierLiteral(node->language()));
       if (options_.language_options.LanguageFeatureEnabled(
-              FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION) &&
-          node->connection() != nullptr) {
-        const std::string connection_alias =
-            ToIdentifierLiteral(node->connection()->connection()->Name());
-        absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
+              FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION)) {
+        GOOGLESQL_ASSIGN_OR_RETURN(
+            const std::string with_connection_str,
+            GetWithConnectionClauseString(node->connection_list()));
+        absl::StrAppend(&sql, with_connection_str);
       }
     }
   }
@@ -7815,11 +7963,9 @@ absl::Status SQLBuilder::VisitResolvedCreateTableFunctionStmt(
     absl::StrAppend(&sql, " OPTIONS(", options_string, ") ");
   }
 
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias);
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
 
   bool is_sql_language = googlesql_base::CaseEqual(node->language(), "SQL");
   bool is_undeclared_language =
@@ -7866,11 +8012,9 @@ absl::Status SQLBuilder::VisitResolvedCreateProcedureStmt(
                             node->argument_name_list(),
                             options_.language_options.product_mode()));
   absl::StrAppend(&sql, GetExternalSecuritySql(node->external_security()));
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias, " ");
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
   if (node->option_list_size() > 0) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string options_string,
                      GetHintListString(node->option_list()));
@@ -7926,11 +8070,12 @@ absl::Status SQLBuilder::VisitResolvedExportDataStmtImpl(
     GOOGLESQL_RETURN_IF_ERROR(AppendHintsIfPresent(node->hint_list(), &sql));
     absl::StrAppend(&sql, " ");
   }
-  absl::StrAppend(&sql, "EXPORT DATA ");
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, "WITH CONNECTION ", connection_alias, " ");
+  absl::StrAppend(&sql, "EXPORT DATA");
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
+  if (with_connection_str.empty()) {
+    absl::StrAppend(&sql, " ");
   }
   if (node->option_list_size() > 0) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string result,
@@ -7970,11 +8115,11 @@ absl::Status SQLBuilder::VisitResolvedExportModelStmt(
   }
   absl::StrAppend(&sql, "EXPORT MODEL ");
   absl::StrAppend(&sql, IdentifierPathToString(node->model_name_path()));
-  absl::StrAppend(&sql, " ");
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, "WITH CONNECTION ", connection_alias, " ");
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
+  if (with_connection_str.empty()) {
+    absl::StrAppend(&sql, " ");
   }
   if (node->option_list_size() > 0) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string result,
@@ -7996,11 +8141,9 @@ absl::Status SQLBuilder::VisitResolvedExportMetadataStmt(
   absl::StrAppend(&sql, ToIdentifierLiteral(node->schema_object_kind()));
   absl::StrAppend(&sql, " METADATA FROM ");
   absl::StrAppend(&sql, IdentifierPathToString(node->name_path()));
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, " WITH CONNECTION ", connection_alias);
-  }
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string with_connection_str,
+                   GetWithConnectionClauseString(node->connection_list()));
+  absl::StrAppend(&sql, with_connection_str);
   if (node->option_list_size() > 0) {
     GOOGLESQL_ASSIGN_OR_RETURN(const std::string result,
                      GetHintListString(node->option_list()));
@@ -10055,7 +10198,7 @@ std::string SQLBuilder::GetTableAliasForVisitResolvedTableScan(
 }
 
 std::string SQLBuilder::GenerateUniqueAliasName() {
-  return absl::StrCat("a_", GetUniqueId());
+  return MakeNonconflictingAlias("a");
 }
 
 absl::Status SQLBuilder::VisitResolvedRecursiveScan(
@@ -10381,10 +10524,10 @@ absl::Status SQLBuilder::VisitResolvedAuxLoadDataStmt(
     GOOGLESQL_RETURN_IF_ERROR(
         ProcessWithPartitionColumns(&sql, node->with_partition_columns()));
   }
-  if (node->connection() != nullptr) {
-    const std::string connection_alias =
-        ToIdentifierLiteral(node->connection()->connection()->Name());
-    absl::StrAppend(&sql, "\nWITH CONNECTION ", connection_alias, " ");
+  GOOGLESQL_ASSIGN_OR_RETURN(const std::string conn_str,
+                   GetConnectionClauseString(node->connection_list()));
+  if (!conn_str.empty()) {
+    absl::StrAppend(&sql, "\nWITH CONNECTION ", conn_str, " ");
   }
   PushQueryFragment(node, sql);
   return absl::OkStatus();
@@ -10471,6 +10614,15 @@ absl::Status SQLBuilder::VisitResolvedUpdateConstructor(
   mutable_pending_columns().erase(node->update_element_column().column_id());
 
   PushQueryFragment(node, text);
+  return absl::OkStatus();
+}
+
+absl::Status SQLBuilder::VisitResolvedMakeColumnListSpec(
+    const ResolvedMakeColumnListSpec* node) {
+  GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<QueryFragment> column_name_list,
+                   ProcessNode(node->column_name_list()));
+  PushQueryFragment(node,
+                    absl::StrCat("COLUMNS(", column_name_list->GetSQL(), ")"));
   return absl::OkStatus();
 }
 
@@ -11268,7 +11420,7 @@ absl::Status SQLBuilder::ProcessGqlSubquery(const ResolvedSubqueryExpr* node,
           limit_offset->offset()->MarkFieldsAccessed();
         }
       }
-      absl::StrAppend(&output_sql, "VALUE {", graph_subquery, "}");
+      absl::StrAppend(&output_sql, "(VALUE {", graph_subquery, "})");
       return absl::OkStatus();
     }
   }

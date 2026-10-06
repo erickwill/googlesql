@@ -17,6 +17,7 @@
 #ifndef GOOGLESQL_PUBLIC_TYPES_GRAPH_PATH_TYPE_H_
 #define GOOGLESQL_PUBLIC_TYPES_GRAPH_PATH_TYPE_H_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -50,9 +51,7 @@ class GraphPathType : public ListBackedType {
 
   const GraphPathType* AsGraphPath() const override { return this; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    return {node_type_, edge_type_};
-  }
+  TypeListView ComponentTypes() const override { return component_types_; }
 
   bool SupportsOrdering(const LanguageOptions& language_options,
                         std::string* type_description) const override;
@@ -152,6 +151,8 @@ class GraphPathType : public ListBackedType {
 
   // The super type of all edges in this path.
   const GraphElementType* const edge_type_;
+
+  const std::array<const Type*, 2> component_types_;
 
   // The deepest nesting depth in the type tree rooted at this GraphPathType.
   // This field is not serialized. It is recalculated during deserialization.

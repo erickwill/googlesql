@@ -227,8 +227,8 @@ struct FunctionOptions {
   // Construct FunctionOptions with support for an OVER clause.
   FunctionOptions(WindowOrderSupport window_ordering_support_in,
                   bool window_framing_support_in)
-      : supports_over_clause(true),
-        window_ordering_support(window_ordering_support_in),
+      : window_ordering_support(window_ordering_support_in),
+        supports_over_clause(true),
         supports_window_framing(window_framing_support_in) {}
 
   static absl::Status Deserialize(
@@ -482,10 +482,10 @@ struct FunctionOptions {
   // argument error message when certain argument conditions are not met.
   BadArgumentErrorPrefixCallback bad_argument_error_prefix_callback = nullptr;
 
-  // Indicates whether the OVER clause is supported.
-  bool supports_over_clause = false;
   // Indicates the support for ORDER BY in a window definition.
   WindowOrderSupport window_ordering_support = ORDER_UNSUPPORTED;
+  // Indicates whether the OVER clause is supported.
+  bool supports_over_clause = false;
   // Indicates whether the window framing clause is allowed.
   bool supports_window_framing = false;
 
@@ -507,16 +507,16 @@ struct FunctionOptions {
   // messages.
   std::string sql_name;
 
-  // Indicates whether this function is allowed to be used in PRODUCT_EXTERNAL
-  // mode.
-  bool allow_external_usage = true;
-
   // The volatility of a function determines how multiple executions of
   // a function are related.  Optimizers may use this property when considering
   // transformations like common subexpression elimination.
   // This is used via IsConstantExpression in
   // ../analyzer/expr_resolver_helper.h.
   FunctionEnums::Volatility volatility = FunctionEnums::IMMUTABLE;
+
+  // Indicates whether this function is allowed to be used in PRODUCT_EXTERNAL
+  // mode.
+  bool allow_external_usage = true;
 
   // Indicates whether this function supports ORDER BY in arguments (affects
   // aggregate functions only).
@@ -563,6 +563,7 @@ struct FunctionOptions {
   // Must only be true for differential privacy functions.
   bool supports_clamped_between_modifier = false;
 
+  // Only GoogleSQL built-in functions support WITHIN clause.
   // Whether a Function supports WITHIN clause depends on its MODE in general.
   // FunctionEnums::AGGREGATE supports WITHIN, whereas FunctionEnums::SCALAR
   // doesn't. FunctionEnums::ANALYTIC are special they supports WITHIN clause if
@@ -570,6 +571,19 @@ struct FunctionOptions {
   // Indicates whether this function supports WITHIN clause (affects analytic
   // functions only).
   bool supports_within_clause = false;
+
+  // A set of LanguageFeatures that need to be enabled for the function to be
+  // loaded in GetBuiltinFunctionsAndTypes.
+  std::set<LanguageFeature> required_language_features;
+
+  // The module name path of corresponding the IMPORT MODULE statement. Empty if
+  // the function is not from a module.
+  std::vector<std::string> module_name_from_import;
+
+  // Indicates this function's default handling of null values. This value is
+  // only relevant for aggregate functions and window functions.
+  FunctionEnums::DefaultNullHandling default_null_handling =
+      FunctionEnums::DEFAULT_NULL_HANDLING_UNSPECIFIED;
 
   // Indicates whether to use upper case name in SQLName() and GetSQL(), which
   // are used in (but not limited to) error messages such as
@@ -586,10 +600,6 @@ struct FunctionOptions {
   // signatures and potentially mismatch reasons for each signature are not
   // printed.
   bool hide_supported_signatures = false;
-
-  // A set of LanguageFeatures that need to be enabled for the function to be
-  // loaded in GetBuiltinFunctionsAndTypes.
-  std::set<LanguageFeature> required_language_features;
 
   // Indicates whether this function might suppress deferred side effects,
   // usually due to short-circuiting of computations or effects of some of its
@@ -622,15 +632,6 @@ struct FunctionOptions {
   // See ResolvedDeferredComputedColumn
   // and (broken link) for more details.
   bool may_suppress_side_effects = false;
-
-  // Indicates this function's default handling of null values. This value is
-  // only relevant for aggregate functions and window functions.
-  FunctionEnums::DefaultNullHandling default_null_handling =
-      FunctionEnums::DEFAULT_NULL_HANDLING_UNSPECIFIED;
-
-  // The module name path of corresponding the IMPORT MODULE statement. Empty if
-  // the function is not from a module.
-  std::vector<std::string> module_name_from_import;
   // Copyable.
 };
 
@@ -1021,12 +1022,12 @@ class Function {
 
   std::vector<std::string> function_name_path_;
   std::string group_;
-  Mode mode_;
   std::vector<FunctionSignature> function_signatures_;
   const FunctionOptions function_options_;
+  std::string language_;
+  Mode mode_;
   ResolvedCreateStatementEnums::SqlSecurity sql_security_ =
       ResolvedCreateStatementEnums::SQL_SECURITY_UNSPECIFIED;
-  std::string language_;
 
   // The GoogleSQL statement context in which this object was defined,
   // indicating the context in which it was analyzed or needs to be analyzed.

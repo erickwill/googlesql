@@ -634,6 +634,8 @@ class SQLBuilder : public ResolvedASTVisitor {
       const ResolvedGetStructField* node) override;
   absl::Status VisitResolvedGetJsonField(
       const ResolvedGetJsonField* node) override;
+  absl::Status VisitResolvedGetVariantField(
+      const ResolvedGetVariantField* node) override;
   absl::Status VisitResolvedGetRowField(
       const ResolvedGetRowField* node) override;
   absl::Status VisitResolvedOrderByItem(
@@ -770,6 +772,8 @@ class SQLBuilder : public ResolvedASTVisitor {
       const ResolvedAuxLoadDataStmt* node) override;
   absl::Status VisitResolvedUpdateConstructor(
       const ResolvedUpdateConstructor* node) override;
+  absl::Status VisitResolvedMakeColumnListSpec(
+      const ResolvedMakeColumnListSpec* node) override;
 
   absl::Status VisitResolvedLockMode(const ResolvedLockMode* node) override;
 

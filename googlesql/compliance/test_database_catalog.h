@@ -133,6 +133,8 @@ class TestDatabaseCatalog {
   // Holds the analyzer outputs for measure definitions as well as UDFs and UDAs
   // needed for measure definitions.
   std::vector<std::unique_ptr<const AnalyzerOutput>> sql_object_artifacts_;
+  // Holds owned ResolvedExpr objects for column default/generated expressions.
+  std::vector<std::unique_ptr<const ResolvedExpr>> owned_resolved_exprs_;
 };
 
 }  // namespace googlesql

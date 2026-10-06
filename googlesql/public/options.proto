@@ -121,7 +121,7 @@ message LanguageFeatureOptions {
 //
 // It's deprecated to use an enum ID which corresponds to a version. All new
 // enum names should use the next available ID starting from 0.
-// Next ID: 187
+// Next ID: 193
 enum LanguageFeature {
   reserved 3 to 4, 36 to 39, 44 to 46, 48, 54, 55, 74, 99, 107, 108, 110, 124,
       132, 134, 140, 163, 13003, 13046, 14001, 14012, 14022, 14024, 14040,
@@ -964,8 +964,7 @@ enum LanguageFeature {
 
   // Enables JSON_EXISTS, JSON_EXISTS_ANY, and JSON_EXISTS_ALL functions.
   // See (broken link) for details.
-  FEATURE_JSON_EXISTS_FUNCTIONS = 173
-      [(language_feature_options).in_development = true];
+  FEATURE_JSON_EXISTS_FUNCTIONS = 173;
 
   // Enable the Vector Type.
   FEATURE_VECTOR_TYPE = 174 [(language_feature_options).in_development = true];
@@ -994,6 +993,16 @@ enum LanguageFeature {
 
   // Enables support for inline edges in property graphs.
   FEATURE_PROPERTY_GRAPH_INLINE_EDGES = 184
+      [(language_feature_options).in_development = true];
+
+  // Enables JSONPath wildcard and descendant operators (.*, [*], ..).
+  // See (broken link) for details.
+  FEATURE_JSONPATH_WILDCARDS_AND_DESCENDANT = 188
+      [(language_feature_options).in_development = true];
+
+  // Enable support for specifying multiple connections in WITH CONNECTION
+  // clause. See (broken link).
+  FEATURE_MULTI_CONNECTIONS = 192
       [(language_feature_options).in_development = true];
 
   // -> Add more cross-version features here.
@@ -1588,12 +1597,22 @@ enum LanguageFeature {
     (language_feature_options).in_development = true
   ];
 
-  // Enables terminal DML DELETE on graph queries.
+  // Enables terminal DML DELETE without support for a RETURN clause on graph
+  // queries.
   // See (broken link):dml-delete.
   // REQUIRES: SQL_GRAPH feature to be enabled.
-  FEATURE_SQL_GRAPH_TERMINAL_DELETE = 186 [
+  FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_DELETE = 186 [
     (language_feature_options).language_version = VERSION_1_5,
     // TODO: Remove in_development once implementation is complete.
+    (language_feature_options).in_development = true
+  ];
+
+  // Enables terminal DML UPDATE (SET and REMOVE) on graph queries. This
+  // feature does not support RETURN clause.
+  // See (broken link):dml-update.
+  // REQUIRES: SQL_GRAPH feature to be enabled.
+  FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE = 189 [
+    (language_feature_options).language_version = VERSION_1_5,
     (language_feature_options).in_development = true
   ];
 
@@ -2262,6 +2281,20 @@ enum LanguageFeature {
   // TODO: b/542615303 - Remove in_development = true when the feature
   // implementation is complete and fully tested across engines.
   FEATURE_DML_DELETE_WITH_JOIN = 185 [
+    (language_feature_options).language_version = VERSION_1_5,
+    (language_feature_options).in_development = true
+  ];
+
+  // Enables PARTITION BY and ORDER BY clauses on table arguments passed to
+  // Table-Valued Functions (TVFs), e.g.:
+  //   TABLE(my_table PARTITION BY user_id ORDER BY timestamp)
+  // See (broken link).
+  FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER = 187 [
+    (language_feature_options).language_version = VERSION_1_5,
+    (language_feature_options).in_development = true
+  ];
+  // Enable AGG(m WHERE f).
+  FEATURE_MEASURE_FILTER = 190 [
     (language_feature_options).language_version = VERSION_1_5,
     (language_feature_options).in_development = true
   ];

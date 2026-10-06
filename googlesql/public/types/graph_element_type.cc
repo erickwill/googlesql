@@ -135,6 +135,18 @@ absl::StatusOr<std::string> MakePropertyTypeName(
                       std::move(type_name));
 }
 
+namespace {
+std::vector<const Type*> MakeComponentTypes(
+    absl::Span<const GraphElementType::PropertyType> property_types) {
+  std::vector<const Type*> component_types;
+  component_types.reserve(property_types.size());
+  for (const GraphElementType::PropertyType& property_type : property_types) {
+    component_types.push_back(property_type.value_type);
+  }
+  return component_types;
+}
+}  // namespace
+
 GraphElementType::GraphElementType(
     const internal::GraphReference* graph_reference, ElementKind element_kind,
     const TypeFactory& factory,
@@ -144,6 +156,7 @@ GraphElementType::GraphElementType(
       graph_reference_(graph_reference),
       element_kind_(element_kind),
       property_types_(SortPropertyTypes(std::move(property_types))),
+      component_types_(MakeComponentTypes(property_types_)),
       nesting_depth_(nesting_depth),
       is_dynamic_(is_dynamic) {}
 
@@ -420,6 +433,7 @@ int64_t GraphElementType::GetEstimatedOwnedMemoryBytesSize() const {
   for (const PropertyType& property_type : property_types_) {
     result += GetEstimatedPropertyTypeOwnedMemoryBytesSize(property_type);
   }
+  result += internal::GetExternallyAllocatedMemoryEstimate(component_types_);
 
   // Map property_name_to_index_map_ is built lazily, we account its memory
   // in advance, which potentially can lead to overestimation.

@@ -67,6 +67,13 @@ class VectorLengthAnnotation : public DefaultAnnotationSpec {
       const ResolvedColumnRef& column_ref,
       AnnotationMap* result_annotation_map) override;
 
+  // Propagates vector length annotations from the query parameter. Vector
+  // parameters (or nested vector slots) are assigned kUnconstrained (-1), since
+  // the length of a bound parameter value is not known at analysis time.
+  absl::Status CheckAndPropagateForParameter(
+      const ResolvedParameter& parameter,
+      AnnotationMap* result_annotation_map) override;
+
   // Determines whether the vector length should be propagated to the function's
   // result. Handles specific vector functions such as ENCODE_VECTOR as well
   // as general function signatures (e.g. ARRAY_CONCAT, IF, CASE).

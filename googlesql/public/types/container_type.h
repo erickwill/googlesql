@@ -141,8 +141,8 @@ class ContainerType : public Type {
   // Returns a FormatValueContentOptions with debug options set, for use
   // printing ValueContent in error messages.
   FormatValueContentOptions DebugFormatValueContentOptions() const {
-    Type::FormatValueContentOptions format_options;
-    format_options.set_product_mode(ProductMode::PRODUCT_INTERNAL);
+    auto format_options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_INTERNAL);
     format_options.mode = Type::FormatValueContentOptions::Mode::kDebug;
     return format_options;
   }

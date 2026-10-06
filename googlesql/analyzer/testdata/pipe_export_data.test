@@ -259,8 +259,10 @@ GeneralizedQueryStmt
   +-PipeExportDataScan
     +-export_data_stmt=
       +-ExportDataStmt
-        +-connection=
-        | +-Connection(connection=connection1)
+        +-connection_list=
+        | +-ConnectionList
+        |   +-connection=
+        |     +-Connection(connection=connection1)
         +-output_column_list=
         | +-KeyValue.Key#1 AS Key [INT64]
         | +-KeyValue.Value#2 AS Value [STRING]
@@ -269,8 +271,10 @@ GeneralizedQueryStmt
 
 [REWRITTEN AST]
 ExportDataStmt
-+-connection=
-| +-Connection(connection=connection1)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection1)
 +-output_column_list=
 | +-KeyValue.Key#1 AS Key [INT64]
 | +-KeyValue.Value#2 AS Value [STRING]
@@ -286,8 +290,10 @@ GeneralizedQueryStmt
   +-PipeExportDataScan
     +-export_data_stmt=
       +-ExportDataStmt
-        +-connection=
-        | +-Connection(connection=connection1)
+        +-connection_list=
+        | +-ConnectionList
+        |   +-connection=
+        |     +-Connection(connection=connection1)
         +-option_list=
         | +-xxx := Literal(type=STRING, value="yyy")
         +-output_column_list=
@@ -298,8 +304,10 @@ GeneralizedQueryStmt
 
 [REWRITTEN AST]
 ExportDataStmt
-+-connection=
-| +-Connection(connection=connection1)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection1)
 +-option_list=
 | +-xxx := Literal(type=STRING, value="yyy")
 +-output_column_list=

@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "googlesql/common/errors.h"
@@ -579,6 +580,11 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
       : column_factory_(column_factory),
         fn_builder_(analyzer_options, catalog, type_factory) {}
 
+  // Checks that all parameter bindings have been cleaned up and none leaked.
+  bool has_no_active_param_bindings() const {
+    return fn_param_bindings_.empty();
+  }
+
  private:
   absl::Status VisitResolvedSubqueryExpr(
       const ResolvedSubqueryExpr* node) override {
@@ -611,11 +617,24 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
       const ResolvedFunctionCall* node) override {
     const Function* function = node->function();
     if (function != nullptr && function->IsFunctionTypedParameter()) {
-      auto it = lambda_arg_map_.find(function->Name());
-      GOOGLESQL_RET_CHECK(it != lambda_arg_map_.end())
-          << "No lambda builder found for UDF lambda parameter: "
-          << function->Name();
-      return InlineLambdaCall(node, it->second);
+      auto it = fn_param_bindings_.find(function->Name());
+      if (it != fn_param_bindings_.end()) {
+        if (std::holds_alternative<const ResolvedInlineLambda*>(it->second)) {
+          return InlineLambdaCall(
+              node, std::get<const ResolvedInlineLambda*>(it->second));
+        }
+        // If the function-typed parameter is mapped to an enclosing function
+        // parameter, retarget the call to the outer parameter.
+        const Function* target_fn = std::get<const Function*>(it->second);
+        GOOGLESQL_RETURN_IF_ERROR(CopyVisitResolvedFunctionCall(node));
+        auto call_copy = ConsumeTopOfStack<ResolvedFunctionCall>();
+        call_copy->set_function(target_fn);
+        PushNodeToStack(std::move(call_copy));
+        return absl::OkStatus();
+      }
+      // If the function-typed parameter is not present in the bindings map, it
+      // belongs to the enclosing UDF definition and cannot be inlined yet.
+      return CopyVisitResolvedFunctionCall(node);
     }
 
     std::vector<std::string> arg_names;
@@ -631,12 +650,40 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
     return CopyVisitResolvedFunctionCall(node);
   }
 
+  // Retargets function references when an inlined function body forwards its
+  // formal function-typed parameter to a non-inlined function (e.g. built-ins
+  // like ARRAY_TRANSFORM) as a function reference argument (FUNCTION f).
+  absl::Status VisitResolvedFunctionRef(
+      const ResolvedFunctionRef* node) override {
+    const Function* function = node->function();
+    GOOGLESQL_RET_CHECK_NE(function, nullptr);
+    GOOGLESQL_RET_CHECK(function->IsFunctionTypedParameter())
+        << "Only function-typed parameter references are supported in SQL "
+        << "function inliner: " << node->DebugString();
+
+    auto it = fn_param_bindings_.find(function->Name());
+    if (it != fn_param_bindings_.end()) {
+      GOOGLESQL_RET_CHECK(std::holds_alternative<const Function*>(it->second))
+          << "Function reference parameter '" << function->Name()
+          << "' unexpectedly bound to lambda in VisitResolvedFunctionRef.";
+      const Function* target_fn = std::get<const Function*>(it->second);
+      GOOGLESQL_RETURN_IF_ERROR(CopyVisitResolvedFunctionRef(node));
+      auto ref_copy = ConsumeTopOfStack<ResolvedFunctionRef>();
+      ref_copy->set_function(target_fn);
+      PushNodeToStack(std::move(ref_copy));
+      return absl::OkStatus();
+    }
+    return CopyVisitResolvedFunctionRef(node);
+  }
+
   absl::Status VisitResolvedFunctionArgument(
       const ResolvedFunctionArgument* node) override {
     const bool is_function_typed_param =
         node->function_ref() != nullptr &&
         node->function_ref()->function() != nullptr &&
         node->function_ref()->function()->IsFunctionTypedParameter();
+    // Arguments that are not function-typed parameters (e.g. expressions or
+    // scans) do not participate in lambda parameter substitution.
     if (!is_function_typed_param) {
       return CopyVisitResolvedFunctionArgument(node);
     }
@@ -646,22 +693,32 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
     // Looks up the concrete lambda bound to this parameter in an enclosing call
     // site and replaces the function_ref with a copy of the lambda.
     const Function* function = node->function_ref()->function();
-    auto it = lambda_arg_map_.find(function->Name());
-    GOOGLESQL_RET_CHECK(it != lambda_arg_map_.end())
-        << "No lambda builder found for UDF lambda parameter: "
-        << function->Name();
-    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ResolvedInlineLambda> lambda_copy,
-                     ResolvedASTDeepCopyVisitor::Copy(it->second));
-    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ResolvedFunctionArgument> arg_copy,
-                     ResolvedASTDeepCopyVisitor::Copy(node));
-    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedFunctionArgument> built,
-                     ToBuilder(std::move(arg_copy))
-                         .set_function_ref(nullptr)
-                         .set_inline_lambda(std::move(lambda_copy))
-                         .Build());
-    PushNodeToStack(absl::WrapUnique(
-        const_cast<ResolvedFunctionArgument*>(built.release())));
-    return absl::OkStatus();
+    auto it = fn_param_bindings_.find(function->Name());
+    if (it != fn_param_bindings_.end() &&
+        std::holds_alternative<const ResolvedInlineLambda*>(it->second)) {
+      // Visit the bound lambda through this visitor to ensure that any nested
+      // UDF or parameter calls in its body are inlined before substituting it
+      // into the argument.
+      const auto* lambda = std::get<const ResolvedInlineLambda*>(it->second);
+      GOOGLESQL_RETURN_IF_ERROR(lambda->Accept(this));
+      auto lambda_copy = ConsumeTopOfStack<ResolvedInlineLambda>();
+
+      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ResolvedFunctionArgument> arg_copy,
+                       ResolvedASTDeepCopyVisitor::Copy(node));
+      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedFunctionArgument> built,
+                       ToBuilder(std::move(arg_copy))
+                           .set_function_ref(nullptr)
+                           .set_inline_lambda(std::move(lambda_copy))
+                           .Build());
+      PushNodeToStack(absl::WrapUnique(
+          const_cast<ResolvedFunctionArgument*>(built.release())));
+      return absl::OkStatus();
+    }
+
+    // If the parameter is not bound to a concrete lambda (i.e. it is unbound or
+    // forwarded to another Function* parameter), fall through to CopyVisit so
+    // VisitResolvedFunctionRef can retarget or preserve the reference.
+    return CopyVisitResolvedFunctionArgument(node);
   }
 
   // This function replaces a ResolvedFunctionCall that invokes a SQL function
@@ -675,6 +732,9 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
   //   arg1 AS Expr1,
   //   FunctionBodyExpr
   // )
+  //
+  // Evaluates argument expressions in the caller scope, substitutes arguments
+  // in the function body, and delegates to FinishInliningBody.
   absl::Status InlineSqlFunction(const ResolvedFunctionCall* call,
                                  absl::Span<const std::string> argument_names,
                                  const ResolvedExpr* fn_expression) {
@@ -692,28 +752,17 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
                      CopyResolvedASTAndRemapColumns(
                          *fn_expression, *column_factory_, column_map));
 
-    if (call->error_mode() == ResolvedFunctionCall::SAFE_ERROR_MODE) {
-      GOOGLESQL_RETURN_IF_ERROR(
-          fn_builder_.CheckCatalogSupportsSafeMode(call->function()->Name()));
-      Value null_value = Value::Null(body_expr->type());
-      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> iferror_call,
-                       fn_builder_.IfError(std::move(body_expr),
-                                           MakeResolvedLiteral(null_value)));
-      body_expr =
-          absl::WrapUnique(const_cast<ResolvedExpr*>(iferror_call.release()));
-    }
-
-    // Nullary functions get special treatment because we don't have to do any
-    // special argument processing.
+    // Nullary functions peel one layer per rewriter pass to maintain
+    // convergence limits across rewriter iterations.
     if (argument_names.empty()) {
-      PushNodeToStack(std::move(body_expr));
-      return absl::OkStatus();
+      return FinishInliningBody(call, std::move(body_expr),
+                                /*with_bindings=*/{}, /*visit_body=*/false);
     }
 
-    // Restores lambda parameter mappings upon exiting this call-site to prevent
-    // them from leaking into enclosing or sibling function calls.
-    absl::Cleanup restore_lambdas = [saved = lambda_arg_map_, this] {
-      lambda_arg_map_ = saved;
+    // Restores parameter bindings upon exiting this call-site to prevent them
+    // from leaking into enclosing or sibling function calls.
+    absl::Cleanup restore_bindings = [saved = fn_param_bindings_, this] {
+      fn_param_bindings_ = saved;
     };
 
     ArgNameToExprMap arg_map;
@@ -727,17 +776,20 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
       if (use_generic) {
         const auto* gen_arg = call->generic_argument_list(i);
         if (gen_arg->inline_lambda() != nullptr) {
-          lambda_arg_map_[argument_names[i]] = gen_arg->inline_lambda();
+          fn_param_bindings_[argument_names[i]] = gen_arg->inline_lambda();
           continue;
         }
         if (gen_arg->function_ref() != nullptr) {
           const Function* fn = gen_arg->function_ref()->function();
-          auto it =
-              fn ? lambda_arg_map_.find(fn->Name()) : lambda_arg_map_.end();
-          GOOGLESQL_RET_CHECK(it != lambda_arg_map_.end())
-              << "Passing function references directly as UDF arguments is not "
-                 "supported by the inliner.";
-          lambda_arg_map_[argument_names[i]] = it->second;
+          GOOGLESQL_RET_CHECK(fn != nullptr && fn->IsFunctionTypedParameter())
+              << "Passing non-parameter function references as UDF arguments "
+                 "is not supported by the inliner.";
+          auto it = fn_param_bindings_.find(fn->Name());
+          // If fn is already bound (to a lambda or outer parameter), forward
+          // its binding; otherwise, fn is an unbound parameter from the
+          // enclosing definition.
+          fn_param_bindings_[argument_names[i]] =
+              (it != fn_param_bindings_.end()) ? it->second : fn;
           continue;
         }
       }
@@ -760,51 +812,24 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
 
     // Rewrite the function body so that it references the columns in
     // with_expr_bindings rather than having ResolvedArgumentRefs.
-    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> inlined,
-                     InlineFunction(std::move(body_expr), arg_map,
-                                    std::move(with_expr_bindings)));
-    if (call->type_annotation_map() != nullptr) {
-      const_cast<ResolvedExpr*>(inlined.get())
-          ->set_type_annotation_map(call->type_annotation_map());
-    }
-    return inlined->Accept(this);
-  }
-
-  // Performs parameter substitution across the copied function 'body' using
-  // 'ResolvedArgumentRefReplacer', mapping argument names to their
-  // inlined column expressions in 'argument_map'. If 'with_expr_bindings' is
-  // non-empty, wraps the substituted body inside a ResolvedWithExpr.
-  static absl::StatusOr<std::unique_ptr<const ResolvedExpr>> InlineFunction(
-      std::unique_ptr<const ResolvedExpr> body,
-      const ArgNameToExprMap& argument_map,
-      std::vector<std::unique_ptr<const ResolvedComputedColumn>>
-          with_expr_bindings) {
     absl::flat_hash_set<ResolvedColumn> outer_columns;
+    outer_columns.reserve(with_expr_bindings.size());
     for (const auto& binding : with_expr_bindings) {
       outer_columns.insert(binding->column());
     }
-
     GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> replaced_body,
                      ResolvedArgumentRefReplacer::Replace(
-                         std::move(body), argument_map, /*table_arg_map=*/{},
+                         std::move(body_expr), arg_map, /*table_arg_map=*/{},
                          outer_columns));
 
-    if (with_expr_bindings.empty()) {
-      return std::move(replaced_body);
-    }
-
-    return ResolvedWithExprBuilder()
-        .set_type(replaced_body->type())
-        .set_type_annotation_map(replaced_body->type_annotation_map())
-        .set_assignment_list(std::move(with_expr_bindings))
-        .set_expr(std::move(replaced_body))
-        .Build();
+    return FinishInliningBody(call, std::move(replaced_body),
+                              std::move(with_expr_bindings));
   }
 
   // Prepares actual argument expressions for a lambda call site, remaps
   // lambda parameters directly to intermediate WITH expression columns in-place
-  // via CopyResolvedASTAndRemapColumns, wraps the remapped body in a
-  // ResolvedWithExpr, and recursively visits the inlined expression.
+  // via CopyResolvedASTAndRemapColumns, uncorrelates captured outer column
+  // references, and delegates to FinishInliningBody.
   absl::Status InlineLambdaCall(const ResolvedFunctionCall* call,
                                 const ResolvedInlineLambda* lambda) {
     GOOGLESQL_RET_CHECK_EQ(lambda->argument_list_size(), call->argument_list_size());
@@ -856,45 +881,85 @@ class SqlFunctionInlineVisitor : public ResolvedASTDeepCopyVisitor {
           UncorrelateTopLevelColumnRefs(body.get(), captured_columns));
     }
 
-    // Handle SAFE error mode by wrapping the function body in an IFERROR call.
+    return FinishInliningBody(call, std::move(body), std::move(with_bindings));
+  }
+
+  // Finalizes inlining of a function or lambda call by applying SAFE error
+  // mode wrapping, optionally visiting the substituted body expression to
+  // inline nested calls, preserving call-site type annotations, and wrapping
+  // intermediate argument bindings in a ResolvedWithExpr.
+  //
+  // call: The function call AST node being inlined. Provides the error mode,
+  //   function name for catalog validation, and call-site type annotations.
+  // body: The substituted or remapped body expression to inline.
+  // with_bindings: Intermediate computed column bindings for argument
+  //   expressions evaluated in the caller scope. If non-empty, wraps 'body'
+  //   in a ResolvedWithExpr.
+  // visit_body: Controls whether 'body' is recursively visited. When true,
+  //   inlines nested function calls in the body expression. When false, avoids
+  //   visiting 'body' so that callers (such as nullary SQL functions) peel a
+  //   single layer per rewriter pass to preserve convergence limits.
+  absl::Status FinishInliningBody(
+      const ResolvedFunctionCall* call,
+      std::unique_ptr<const ResolvedExpr> body,
+      std::vector<std::unique_ptr<const ResolvedComputedColumn>> with_bindings,
+      bool visit_body = true) {
     if (call->error_mode() == ResolvedFunctionCall::SAFE_ERROR_MODE) {
       GOOGLESQL_RETURN_IF_ERROR(
           fn_builder_.CheckCatalogSupportsSafeMode(call->function()->Name()));
       Value null_value = Value::Null(body->type());
-      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> iferror_call,
+      GOOGLESQL_ASSIGN_OR_RETURN(body,
                        fn_builder_.IfError(std::move(body),
                                            MakeResolvedLiteral(null_value)));
-      body =
-          absl::WrapUnique(const_cast<ResolvedExpr*>(iferror_call.release()));
     }
 
-    std::unique_ptr<const ResolvedExpr> inlined;
-    if (with_bindings.empty()) {
-      inlined = std::move(body);
+    std::unique_ptr<ResolvedExpr> inlined_body;
+    if (visit_body) {
+      // Visit only the body expression; argument expressions in with_bindings
+      // were already visited and rewritten in the caller environment.
+      GOOGLESQL_RETURN_IF_ERROR(body->Accept(this));
+      inlined_body = ConsumeTopOfStack<ResolvedExpr>();
     } else {
-      GOOGLESQL_ASSIGN_OR_RETURN(inlined,
-                       ResolvedWithExprBuilder()
-                           .set_type(body->type())
-                           .set_type_annotation_map(body->type_annotation_map())
-                           .set_assignment_list(std::move(with_bindings))
-                           .set_expr(std::move(body))
-                           .Build());
+      inlined_body =
+          absl::WrapUnique(const_cast<ResolvedExpr*>(body.release()));
     }
 
-    if (call->type_annotation_map() != nullptr) {
-      const_cast<ResolvedExpr*>(inlined.get())
-          ->set_type_annotation_map(call->type_annotation_map());
+    const AnnotationMap* annotation_map =
+        call->type_annotation_map() != nullptr
+            ? call->type_annotation_map()
+            : inlined_body->type_annotation_map();
+
+    if (with_bindings.empty()) {
+      if (call->type_annotation_map() != nullptr) {
+        inlined_body->set_type_annotation_map(annotation_map);
+      }
+      PushNodeToStack(std::move(inlined_body));
+      return absl::OkStatus();
     }
 
-    // Inline any nested function calls.
-    GOOGLESQL_RETURN_IF_ERROR(inlined->Accept(this));
+    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<const ResolvedExpr> with_expr,
+                     ResolvedWithExprBuilder()
+                         .set_type(inlined_body->type())
+                         .set_type_annotation_map(annotation_map)
+                         .set_assignment_list(std::move(with_bindings))
+                         .set_expr(std::move(inlined_body))
+                         .Build());
+
+    PushNodeToStack(
+        absl::WrapUnique(const_cast<ResolvedExpr*>(with_expr.release())));
     return absl::OkStatus();
   }
 
   ColumnFactory* column_factory_;
   FunctionCallBuilder fn_builder_;
   int in_subquery_depth_ = 0;
-  absl::flat_hash_map<std::string, const ResolvedInlineLambda*> lambda_arg_map_;
+
+  // Tracks formal function-typed parameter bindings in active inlining scopes.
+  // Each parameter name maps to either a concrete lambda expression or an
+  // unbound outer function parameter.
+  using FunctionParamBinding =
+      std::variant<const ResolvedInlineLambda*, const Function*>;
+  absl::flat_hash_map<std::string, FunctionParamBinding> fn_param_bindings_;
 };
 
 class SqlFunctionInliner : public Rewriter {
@@ -910,6 +975,8 @@ class SqlFunctionInliner : public Rewriter {
     SqlFunctionInlineVisitor rewriter(options, catalog, &column_factory,
                                       type_factory);
     GOOGLESQL_RETURN_IF_ERROR(input.Accept(&rewriter));
+    GOOGLESQL_RET_CHECK(rewriter.has_no_active_param_bindings())
+        << "Internal error: Leaked function parameter bindings after inlining.";
     return rewriter.ConsumeRootNode<ResolvedNode>();
   }
 

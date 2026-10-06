@@ -135,6 +135,37 @@ absl::Status EvaluationContext::AddTableAsArray(
   return absl::OkStatus();
 }
 
+absl::Status EvaluationContext::UpdateTableAsArray(absl::string_view table_name,
+                                                   Value array) {
+  GOOGLESQL_RET_CHECK(array.type()->IsArray());
+  auto it = tables_.find(table_name);
+  GOOGLESQL_RET_CHECK(it != tables_.end()) << "Table not found: " << table_name;
+  it->second = array;
+  if (parent_context_ != nullptr) {
+    return parent_context_->UpdateTableAsArray(table_name, array);
+  }
+  return absl::OkStatus();
+}
+
+void EvaluationContext::IncrementNumRowsModified(absl::string_view table_name,
+                                                 int64_t count) {
+  num_rows_modified_.try_emplace(table_name, 0).first->second += count;
+  if (parent_context_ != nullptr) {
+    parent_context_->IncrementNumRowsModified(table_name, count);
+  }
+}
+
+int64_t EvaluationContext::GetNumRowsModified(
+    absl::string_view table_name) const {
+  auto it = num_rows_modified_.find(table_name);
+  if (it != num_rows_modified_.end()) {
+    return it->second;
+  }
+  return 0;
+}
+
+void EvaluationContext::ClearNumRowsModified() { num_rows_modified_.clear(); }
+
 Value EvaluationContext::GetFunctionArgumentRef(std::string arg_name) {
   const auto it = udf_argument_references_.find(arg_name);
   if (it != udf_argument_references_.end()) {

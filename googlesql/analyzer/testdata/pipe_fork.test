@@ -353,6 +353,24 @@ MultiStmt
       +-WithRefScan(column_list=KeyValue.[Key#1, Value#2], with_query_name="$fork_cte_1")
 ==
 
+# FORK in a set operation input.
+(FROM KeyValue {{|\|> FORK ()}})
+UNION ALL
+(FROM KeyValue |> FORK ())
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: FORK is only allowed as part of the outermost query in a statement [at 3:16]
+(FROM KeyValue |> FORK ())
+               ^
+--
+ALTERNATION GROUP: |> FORK ()
+--
+ERROR: FORK is only allowed as part of the outermost query in a statement [at 1:16]
+(FROM KeyValue |> FORK ())
+               ^
+==
+
 # FORK in expression subquery.
 FROM KeyValue
 |> SELECT (
@@ -1656,6 +1674,30 @@ QueryStmt
     | +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
     +-filter_expr=
       +-Literal(type=BOOL, value=false)
+==
+
+# Check for error if we try to return an unretunable type (GRAPH_ELEMENT).
+# We get the same error for an outer query and a query inside FORK.
+[language_features=NONE,+PIPES,+PIPE_FORK,+SQL_GRAPH,+SQL_GRAPH_EXPOSE_GRAPH_ELEMENT]
+FROM GRAPH_TABLE(
+  aml
+  MATCH (a IS Person) -[e]-> (b IS Account)
+)
+|> {{FORK ( \|> SELECT a )| SELECT a| WHERE true}}
+--
+ALTERNATION GROUP: FORK ( |> SELECT a )
+--
+ERROR: Returning expressions of type GRAPH_ELEMENT is not allowed [at 5:9]
+|> FORK ( |> SELECT a )
+        ^
+--
+ALTERNATION GROUPS:
+     SELECT a
+     WHERE true
+--
+ERROR: Returning expressions of type GRAPH_ELEMENT is not allowed [at 1:1]
+FROM GRAPH_TABLE(
+^
 ==
 
 # FORK with other terminal operators inside

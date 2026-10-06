@@ -55,7 +55,7 @@ static absl::StatusOr<const Type*> ReconstructFromComponents(
   }
 
   // Exit early if the component types are unchanged.
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   if (component_types.size() == rewritten_components.size()) {
     bool all_equal = true;
     for (int i = 0; i < component_types.size(); ++i) {
@@ -136,7 +136,7 @@ absl::Status TypeVisitor::Visit(AnnotatedType annotated_type) {
 
   GOOGLESQL_RET_CHECK(type != nullptr);
 
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
 
   GOOGLESQL_ASSIGN_OR_RETURN(
       const StructAnnotationMap* composite_annotation_map,
@@ -162,7 +162,7 @@ absl::StatusOr<AnnotatedType> TypeRewriter::Visit(
 
   GOOGLESQL_RET_CHECK(type != nullptr);
 
-  std::vector<const Type*> component_types = type->ComponentTypes();
+  TypeListView component_types = type->ComponentTypes();
   std::vector<AnnotatedType> rewritten_components;
   rewritten_components.reserve(component_types.size());
 

@@ -34,6 +34,7 @@
 #include "googlesql/base/logging.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "googlesql/common/errors.h"
+#include "absl/base/no_destructor.h"
 #include "googlesql/common/thread_stack.h"
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/options.pb.h"
@@ -487,17 +488,45 @@ std::string Type::TypeListToString(TypeListView types, ProductMode mode,
   return absl::StrJoin(type_strings, ", ");
 }
 
-Type::FormatValueContentOptions::FormatValueContentOptions(
-    LanguageOptions language_options)
-    : language_options_(std::move(language_options)) {}
+Type::FormatValueContentOptions::FormatValueContentOptions()
+    : language_options_(
+          &GetDefaultLanguageOptions(ProductMode::PRODUCT_EXTERNAL)) {}
 
 Type::FormatValueContentOptions::FormatValueContentOptions(
-    LanguageOptions language_options, bool use_external_float32)
+    const LanguageOptions& language_options)
+    : language_options_(&language_options) {}
+
+Type::FormatValueContentOptions::FormatValueContentOptions(
+    const LanguageOptions& language_options, bool use_external_float32)
     : use_external_float32(use_external_float32),
-      language_options_(std::move(language_options)) {}
+      language_options_(&language_options) {}
+
+Type::FormatValueContentOptions Type::FormatValueContentOptions::DefaultForMode(
+    ProductMode mode) {
+  return FormatValueContentOptions(GetDefaultLanguageOptions(mode));
+}
+
+const LanguageOptions&
+Type::FormatValueContentOptions::GetDefaultLanguageOptions(ProductMode mode) {
+  if (mode == ProductMode::PRODUCT_INTERNAL) {
+    static const absl::NoDestructor<LanguageOptions> default_options_int([] {
+      LanguageOptions opts;
+      opts.set_product_mode(ProductMode::PRODUCT_INTERNAL);
+      return opts;
+    }());
+    return *default_options_int;
+  } else {
+    static const absl::NoDestructor<LanguageOptions> default_options_ext([] {
+      LanguageOptions opts;
+      opts.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+      return opts;
+    }());
+    return *default_options_ext;
+  }
+}
 
 Type::FormatValueContentOptions
-Type::FormatValueContentOptions::IncreaseIndent() {
+Type::FormatValueContentOptions::IncreaseIndent() const {
   FormatValueContentOptions ret = *this;
   ret.indent += kIndentStep;
   // `force_type` only applies at the topmost level

@@ -3,8 +3,10 @@ CREATE EXTERNAL SCHEMA foo WITH CONNECTION connection1 OPTIONS()
 --
 CreateExternalSchemaStmt
 +-name_path=foo
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 CREATE EXTERNAL SCHEMA foo WITH CONNECTION `` OPTIONS()
@@ -33,8 +35,10 @@ CreateExternalSchemaStmt
 +-option_list=
 | +-a := Literal(type=INT64, value=1)
 | +-b := Literal(type=STRING, value="cde")
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 --
 ALTERNATION GROUP: IF NOT EXISTS
 --
@@ -44,8 +48,10 @@ CreateExternalSchemaStmt
 +-option_list=
 | +-a := Literal(type=INT64, value=1)
 | +-b := Literal(type=STRING, value="cde")
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 --
 ALTERNATION GROUP: OR REPLACE,
 --
@@ -55,8 +61,10 @@ CreateExternalSchemaStmt
 +-option_list=
 | +-a := Literal(type=INT64, value=1)
 | +-b := Literal(type=STRING, value="cde")
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 --
 ALTERNATION GROUP: OR REPLACE,IF NOT EXISTS
 --
@@ -87,8 +95,10 @@ ALTERNATION GROUPS:
 CreateExternalSchemaStmt
 +-name_path=foo
 +-create_scope=CREATE_TEMP
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 --
 ALTERNATION GROUP: public
 --
@@ -120,10 +130,76 @@ CREATE EXTERNAL SCHEMA foo WITH CONNECTION connection1 OPTIONS(x=1)
 
 ==
 
-# TODO: Support multi-connection syntax.
 CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="connection1", key2="connection1") OPTIONS()
 --
 ERROR: Multiple connections in CONNECTION clause is not supported [at 1:33]
 CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="connection1", key2="connect...
                                 ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="connection1", key2=connection2) OPTIONS()
+--
+CreateExternalSchemaStmt
++-name_path=foo
++-connection_list=
+  +-ConnectionList
+    +-connection_kv_list=
+      +-ConnectionKeyValuePair
+      | +-key="key1"
+      | +-connection=
+      |   +-Connection(connection=connection1)
+      +-ConnectionKeyValuePair
+        +-key="key2"
+        +-connection=
+          +-Connection(connection=connection2)
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="connection1", KEY1=connection2) OPTIONS()
+--
+ERROR: Duplicate connection key KEY1 [at 1:65]
+...SCHEMA foo WITH CONNECTION (key1="connection1", KEY1=connection2) OPTIONS()
+                                                   ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="not_found_conn") OPTIONS()
+--
+ERROR: Connection not found: not_found_conn [at 1:50]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="not_found_conn") OPTIONS()
+                                                 ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1=not_found_conn) OPTIONS()
+--
+ERROR: Connection not found: not_found_conn [at 1:50]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1=not_found_conn) OPTIONS()
+                                                 ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="") OPTIONS()
+--
+ERROR: Path strings cannot be empty [at 1:50]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="") OPTIONS()
+                                                 ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="a..b") OPTIONS()
+--
+ERROR: Path string contains an empty path component [at 1:50]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1="a..b") OPTIONS()
+                                                 ^
+==
+
+[language_features=NONE,+EXTERNAL_SCHEMA_DDL,+MULTI_CONNECTIONS]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1=123) OPTIONS()
+--
+ERROR: Connection name must be a path expression or string literal [at 1:50]
+CREATE EXTERNAL SCHEMA foo WITH CONNECTION (key1=123) OPTIONS()
+                                                 ^
+
 

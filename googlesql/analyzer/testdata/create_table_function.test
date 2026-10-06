@@ -4237,8 +4237,10 @@ CreateTableFunctionStmt
 +-signature=() -> TABLE<x STRING>
 +-has_explicit_return_schema=TRUE
 +-language="python"
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 # WITH CONNECTION connection not found
@@ -4288,8 +4290,10 @@ CreateTableFunctionStmt
 +-signature=() -> TABLE<x STRING>
 +-has_explicit_return_schema=TRUE
 +-language="javascript"
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 # WITH CONNECTION with Python case-insensitive (success)
@@ -4304,5 +4308,226 @@ CreateTableFunctionStmt
 +-signature=() -> TABLE<x STRING>
 +-has_explicit_return_schema=TRUE
 +-language="PyThOn"
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
+==
+
+# WITH CONNECTION multi-connection success
+[language_features=MAXIMUM,+CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION,+MULTI_CONNECTIONS]
+create table function myfunc()
+  returns table<x string>
+  with connection (key1="connection1", key2=connection2)
+  language python;
+--
+CreateTableFunctionStmt
++-name_path=myfunc
++-signature=() -> TABLE<x STRING>
++-has_explicit_return_schema=TRUE
++-language="python"
++-connection_list=
+  +-ConnectionList
+    +-connection_kv_list=
+      +-ConnectionKeyValuePair
+      | +-key="key1"
+      | +-connection=
+      |   +-Connection(connection=connection1)
+      +-ConnectionKeyValuePair
+        +-key="key2"
+        +-connection=
+          +-Connection(connection=connection2)
+==
+
+################################################################################
+#
+# Positive test cases for COLUMN_LIST_SPEC
+#
+################################################################################
+#
+
+[language_features=MAXIMUM,+COLUMN_LIST_SPEC]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+# TVF with COLUMN_LIST_SPEC parameter and ANY TABLE, body not analyzed
+create temporary table function my_tvf_any_table(t ANY TABLE, c COLUMN_LIST_SPEC)
+AS (
+  SELECT **c FROM t
+);
+--
+CreateTableFunctionStmt(name_path=my_tvf_any_table, create_scope=CREATE_TEMP, argument_name_list=[t, c], signature=(ANY TABLE t, COLUMN_LIST_SPEC {must_be_analysis_constant: true, must_be_non_null: true} c) -> ANY TABLE, language="SQL", code="SELECT **c FROM t")
+
+==
+
+################################################################################
+#
+# Negative test cases for COLUMN_LIST_SPEC
+#
+################################################################################
+#
+[language_features=MAXIMUM,+COLUMN_LIST_SPEC]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+# Bad default values for COLUMN_LIST_SPEC
+create temporary table function my_tvf(
+  t TABLE<a INT64, b STRING>,
+  c COLUMN_LIST_SPEC default "a")
+AS (
+  SELECT **c FROM t
+);
+--
+ERROR: Default argument value does not match the argument type. Got: STRING, expected: COLUMN_LIST_SPEC [at 4:30]
+  c COLUMN_LIST_SPEC default "a")
+                             ^
+==
+
+# SQL UDF with COLUMN_LIST_SPEC parameter
+[language_features=NONE,+COLUMN_LIST_SPEC,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary function my_udf(c COLUMN_LIST_SPEC)
+returns int64
+as (1);
+--
+CreateFunctionStmt(name_path=my_udf, create_scope=CREATE_TEMP, has_explicit_return_type=TRUE, return_type=INT64, argument_name_list=[c], signature=(COLUMN_LIST_SPEC {must_be_analysis_constant: true, must_be_non_null: true} c) -> INT64, language="SQL", code="1")
+==
+
+# SQL UDA with COLUMN_LIST_SPEC parameter (not aggregate)
+[language_features=NONE,+COLUMN_LIST_SPEC,+CREATE_AGGREGATE_FUNCTION,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary aggregate function my_uda(c COLUMN_LIST_SPEC NOT AGGREGATE)
+returns int64
+as (count(1));
+--
+CreateFunctionStmt(name_path=my_uda, create_scope=CREATE_TEMP, has_explicit_return_type=TRUE, return_type=INT64, argument_name_list=[c], signature=(COLUMN_LIST_SPEC {must_be_analysis_constant: true, must_be_non_null: true, is_not_aggregate: true} c) -> INT64, is_aggregate=TRUE, language="SQL", code="count(1)")
+==
+
+# SQL UDA with COLUMN_LIST_SPEC parameter (aggregate)
+[language_features=NONE,+COLUMN_LIST_SPEC,+CREATE_AGGREGATE_FUNCTION,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary aggregate function my_uda_agg(c COLUMN_LIST_SPEC)
+returns int64
+as (count(1));
+--
+CreateFunctionStmt(name_path=my_uda_agg, create_scope=CREATE_TEMP, has_explicit_return_type=TRUE, return_type=INT64, argument_name_list=[c], signature=(COLUMN_LIST_SPEC {must_be_analysis_constant: true, must_be_non_null: true} c) -> INT64, is_aggregate=TRUE, language="SQL", code="count(1)")
+==
+
+# COLUMN_LIST_SPEC is not allowed in non-SQL scalar functions
+[language_features=NONE,+COLUMN_LIST_SPEC,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary function my_udf_non_sql(c COLUMN_LIST_SPEC)
+returns int64
+language testlang as "code";
+--
+ERROR: COLUMN_LIST_SPEC arguments are only allowed in SQL functions [at 1:27]
+create temporary function my_udf_non_sql(c COLUMN_LIST_SPEC)
+                          ^
+==
+
+# COLUMN_LIST_SPEC is not allowed in non-SQL aggregate functions
+[language_features=NONE,+COLUMN_LIST_SPEC,+CREATE_AGGREGATE_FUNCTION,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary aggregate function my_uda_non_sql(c COLUMN_LIST_SPEC NOT AGGREGATE)
+returns int64
+language testlang as "code";
+--
+ERROR: COLUMN_LIST_SPEC arguments are only allowed in SQL functions [at 1:37]
+create temporary aggregate function my_uda_non_sql(c COLUMN_LIST_SPEC NOT AGG...
+                                    ^
+==
+
+# COLUMN_LIST_SPEC is not allowed in non-SQL table-valued functions
+[language_features=MAXIMUM,+COLUMN_LIST_SPEC]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary table function my_tvf_non_sql(c COLUMN_LIST_SPEC)
+returns table<x int64>
+language testlang as "code";
+--
+ERROR: COLUMN_LIST_SPEC arguments are only allowed in SQL table-valued functions [at 1:33]
+create temporary table function my_tvf_non_sql(c COLUMN_LIST_SPEC)
+                                ^
+==
+
+# COLUMN_LIST_SPEC nested in ARRAY
+[language_features=NONE,+COLUMN_LIST_SPEC,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary function nested_array(c ARRAY<COLUMN_LIST_SPEC>)
+returns int64
+as (1);
+--
+CreateFunctionStmt
++-name_path=nested_array
++-create_scope=CREATE_TEMP
++-has_explicit_return_type=TRUE
++-return_type=INT64
++-argument_name_list=[c]
++-signature=(ARRAY<COLUMN_LIST_SPEC> c) -> INT64
++-language="SQL"
++-code="1"
++-function_expression=
+  +-Literal(type=INT64, value=1)
+==
+
+# COLUMN_LIST_SPEC nested in STRUCT
+[language_features=NONE,+COLUMN_LIST_SPEC,+TEMPLATE_FUNCTIONS,+FUNCTION_ARGUMENTS_WITH_DEFAULTS]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary function nested_struct(c STRUCT<a COLUMN_LIST_SPEC>)
+returns int64
+as (1);
+--
+CreateFunctionStmt
++-name_path=nested_struct
++-create_scope=CREATE_TEMP
++-has_explicit_return_type=TRUE
++-return_type=INT64
++-argument_name_list=[c]
++-signature=(STRUCT<a COLUMN_LIST_SPEC> c) -> INT64
++-language="SQL"
++-code="1"
++-function_expression=
+  +-Literal(type=INT64, value=1)
+==
+
+# COLUMN_LIST_SPEC nested in TABLE
+[language_features=MAXIMUM,+COLUMN_LIST_SPEC]
+[use_constant_evaluator]
+[java]
+[run_deserializer]
+create temporary table function nested_table(t TABLE<a COLUMN_LIST_SPEC>)
+returns table<x int64>
+as (select 1 x);
+--
+CreateTableFunctionStmt
++-name_path=nested_table
++-create_scope=CREATE_TEMP
++-argument_name_list=[t]
++-signature=(TABLE<a COLUMN_LIST_SPEC> t) -> TABLE<x INT64>
++-has_explicit_return_schema=TRUE
++-language="SQL"
++-code="select 1 x"
++-query=
+| +-ProjectScan
+|   +-column_list=[$query.x#1]
+|   +-expr_list=
+|   | +-x#1 := Literal(type=INT64, value=1)
+|   +-input_scan=
+|     +-SingleRowScan
++-output_column_list=
+  +-$query.x#1 AS x [INT64]

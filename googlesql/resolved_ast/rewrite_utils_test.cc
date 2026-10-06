@@ -3698,5 +3698,106 @@ TEST(RewriteUtilsTest, CreateResolvedExecuteAsRoleScanBothViewAndTVFSet) {
                          "original_inlined_tvf should be set.")));
 }
 
+TEST(RewriteUtilsTest, HasNonTerminalInsertScan) {
+  EXPECT_FALSE(HasNonTerminalInsertScan(nullptr));
+
+  SimpleTable table("tab");
+  auto table_scan = MakeResolvedTableScan({}, &table, nullptr);
+  EXPECT_FALSE(HasNonTerminalInsertScan(table_scan.get()));
+
+  // Terminal insert scan: FinishScan wrapping an InsertScan with single row
+  // query.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto terminal_insert_stmt,
+      ResolvedInsertStmtBuilder()
+          .set_table_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .set_insert_mode(ResolvedInsertStmt::OR_ERROR)
+          .set_query(MakeResolvedSingleRowScan())
+          .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto terminal_insert_scan,
+                       ResolvedInsertScanBuilder()
+                           .set_insert_stmt(std::move(terminal_insert_stmt))
+                           .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto finish_scan,
+                       ResolvedFinishScanBuilder()
+                           .set_input_scan(std::move(terminal_insert_scan))
+                           .Build());
+  EXPECT_FALSE(HasNonTerminalInsertScan(finish_scan.get()));
+
+  // Non-terminal insert scan: InsertScan not wrapped by FinishScan.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto non_terminal_insert_stmt,
+      ResolvedInsertStmtBuilder()
+          .set_table_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .set_insert_mode(ResolvedInsertStmt::OR_ERROR)
+          .set_query(MakeResolvedSingleRowScan())
+          .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto non_terminal_insert_scan,
+                       ResolvedInsertScanBuilder()
+                           .set_insert_stmt(std::move(non_terminal_insert_stmt))
+                           .Build());
+  EXPECT_TRUE(HasNonTerminalInsertScan(non_terminal_insert_scan.get()));
+
+  // Nested insert scan in query: FinishScan wrapping an InsertScan, but the
+  // InsertScan's query contains another InsertScan.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto inner_insert_stmt,
+      ResolvedInsertStmtBuilder()
+          .set_table_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .set_insert_mode(ResolvedInsertStmt::OR_ERROR)
+          .set_query(MakeResolvedSingleRowScan())
+          .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto inner_insert_scan,
+                       ResolvedInsertScanBuilder()
+                           .set_insert_stmt(std::move(inner_insert_stmt))
+                           .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto outer_insert_stmt,
+      ResolvedInsertStmtBuilder()
+          .set_table_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .set_insert_mode(ResolvedInsertStmt::OR_ERROR)
+          .set_query(std::move(inner_insert_scan))
+          .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto outer_insert_scan,
+                       ResolvedInsertScanBuilder()
+                           .set_insert_stmt(std::move(outer_insert_stmt))
+                           .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto outer_finish_scan,
+                       ResolvedFinishScanBuilder()
+                           .set_input_scan(std::move(outer_insert_scan))
+                           .Build());
+  EXPECT_TRUE(HasNonTerminalInsertScan(outer_finish_scan.get()));
+
+  // FinishScan wrapping a non-insert scan (TableScan) with no insert scans.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto finish_table_scan,
+      ResolvedFinishScanBuilder()
+          .set_input_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .Build());
+  EXPECT_FALSE(HasNonTerminalInsertScan(finish_table_scan.get()));
+
+  // FinishScan wrapping a non-insert scan (TableScan), while a non-terminal
+  // insert scan exists in a WithScan entry.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto with_insert_stmt,
+      ResolvedInsertStmtBuilder()
+          .set_table_scan(MakeResolvedTableScan({}, &table, nullptr))
+          .set_insert_mode(ResolvedInsertStmt::OR_ERROR)
+          .set_query(MakeResolvedSingleRowScan())
+          .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto with_insert_scan,
+                       ResolvedInsertScanBuilder()
+                           .set_insert_stmt(std::move(with_insert_stmt))
+                           .Build());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto with_scan,
+                       ResolvedWithScanBuilder()
+                           .add_with_entry_list(MakeResolvedWithEntry(
+                               "cte", std::move(with_insert_scan)))
+                           .set_query(std::move(finish_table_scan))
+                           .set_recursive(false)
+                           .Build());
+  EXPECT_TRUE(HasNonTerminalInsertScan(with_scan.get()));
+}
+
 }  // namespace
 }  // namespace googlesql

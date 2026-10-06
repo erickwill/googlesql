@@ -51,7 +51,9 @@ void GetMeasureFunctions(TypeFactory* type_factory,
           .set_supports_having_modifier(false)
           .set_supports_group_by_modifier(false)
           .set_supports_clamped_between_modifier(false)
-          .set_supports_where_modifier(false)
+          .set_supports_where_modifier(
+              options.language_options.LanguageFeatureEnabled(
+                  FEATURE_MEASURE_FILTER))
           .set_supports_having_filter_modifier(false));
 }
 

@@ -1413,27 +1413,27 @@ QueryStmt
 SELECT
   ARRAY(
     SELECT
-      a_5 AS a_5
+      a_7 AS a_7
     FROM
-      UNNEST(WITH(a_4 AS projectscan_2.a_1, a_4) AS a_5)
+      UNNEST(WITH(a_5 AS projectscan_3.a_2, a_5) AS a_7)
   ) AS unnest_scan2
 FROM
   (
     SELECT
-      ARRAY< INT64 >[1, 2, 3] AS a_1
-  ) AS projectscan_2;
+      ARRAY< INT64 >[1, 2, 3] AS a_2
+  ) AS projectscan_3;
 
 [SQLBUILDER_TARGET_SYNTAX_MODE pipe]
 [SQLBUILDER_OUTPUT]
 SELECT
-  ARRAY< INT64 >[1, 2, 3] AS a_1
-|> AS projectscan_2
+  ARRAY< INT64 >[1, 2, 3] AS a_2
+|> AS projectscan_3
 |> SELECT
      ARRAY(
        FROM
-         UNNEST(WITH(a_4 AS projectscan_2.a_1, a_4) AS a_5)
+         UNNEST(WITH(a_5 AS projectscan_3.a_2, a_5) AS a_7)
        |> SELECT
-            a_5 AS a_5
+            a_7 AS a_7
      ) AS unnest_scan2;
 
 [REWRITTEN AST]
@@ -1485,41 +1485,41 @@ QueryStmt
 SELECT
   ARRAY(
     SELECT
-      a_7 AS a_7
+      a_8 AS a_8
     FROM
       UNNEST((
         SELECT
-          projectscan_5.a_4 AS a_6
+          projectscan_6.a_5 AS a_7
         FROM
           (
             SELECT
-              projectscan_2.a_1 AS a_4
-          ) AS projectscan_5
-      ) AS a_7)
+              projectscan_3.a_2 AS a_5
+          ) AS projectscan_6
+      ) AS a_8)
   ) AS unnest_scan2
 FROM
   (
     SELECT
-      ARRAY< INT64 >[1, 2, 3] AS a_1
-  ) AS projectscan_2;
+      ARRAY< INT64 >[1, 2, 3] AS a_2
+  ) AS projectscan_3;
 
 [SQLBUILDER_TARGET_SYNTAX_MODE pipe]
 [SQLBUILDER_OUTPUT]
 SELECT
-  ARRAY< INT64 >[1, 2, 3] AS a_1
-|> AS projectscan_2
+  ARRAY< INT64 >[1, 2, 3] AS a_2
+|> AS projectscan_3
 |> SELECT
      ARRAY(
        FROM
          UNNEST((
            SELECT
-             projectscan_2.a_1 AS a_4
-           |> AS projectscan_5
+             projectscan_3.a_2 AS a_5
+           |> AS projectscan_6
            |> SELECT
-                projectscan_5.a_4 AS a_6
-         ) AS a_7)
+                projectscan_6.a_5 AS a_7
+         ) AS a_8)
        |> SELECT
-            a_7 AS a_7
+            a_8 AS a_8
      ) AS unnest_scan2;
 
 ==

@@ -1507,6 +1507,35 @@ absl::StatusOr<JSONValue> JsonQueryLax(JSONValueConstRef input,
   return walker.ConsumeResult();
 }
 
+absl::StatusOr<bool> JsonExists(JSONValueConstRef input,
+                                const JsonPathEvaluator& evaluator) {
+  return evaluator.Extract(input).has_value();
+}
+
+absl::StatusOr<bool> JsonExistsAny(
+    JSONValueConstRef input,
+    absl::Span<const JsonPathEvaluator* const> evaluators) {
+  for (const JsonPathEvaluator* evaluator : evaluators) {
+    GOOGLESQL_RET_CHECK(evaluator != nullptr);
+    if (evaluator->Extract(input).has_value()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+absl::StatusOr<bool> JsonExistsAll(
+    JSONValueConstRef input,
+    absl::Span<const JsonPathEvaluator* const> evaluators) {
+  for (const JsonPathEvaluator* evaluator : evaluators) {
+    GOOGLESQL_RET_CHECK(evaluator != nullptr);
+    if (!evaluator->Extract(input).has_value()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool JsonContainsImpl(JSONValueConstRef input, JSONValueConstRef target,
                       bool compare_numbers_in_decimal, bool is_top_level) {
   if (target.IsObject()) {

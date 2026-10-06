@@ -40,7 +40,6 @@
 #include "google/protobuf/descriptor.pb.h"
 #include "googlesql/analyzer/analytic_function_resolver.h"
 #include "googlesql/analyzer/column_cycle_detector.h"
-#include "googlesql/analyzer/column_list_spec.h"
 #include "googlesql/analyzer/conflicting_field_paths_validator.h"
 #include "googlesql/analyzer/constant_resolver_helper.h"
 #include "googlesql/analyzer/expr_matching_helpers.h"
@@ -1438,6 +1437,12 @@ absl::Status Resolver::ResolveExpr(
              << "Syntax error: Unexpected braced constructor";
     }
 
+    case AST_COLUMN_LIST_SPEC:
+      GOOGLESQL_RETURN_IF_ERROR(
+          ResolveColumnListSpec(ast_expr->GetAsOrDie<ASTColumnListSpec>(),
+                                expr_resolution_info.get(), resolved_expr_out));
+      break;
+
     default:
       return MakeSqlErrorAt(ast_expr) << "Unhandled expression for node kind "
                                       << ast_expr->GetNodeKindString() << ":\n"
@@ -2462,6 +2467,10 @@ absl::Status Resolver::ResolveParameterExpr(
           auto param =
               MakeResolvedParameter(types::Int64Type(), lowercase_param_name,
                                     /*position=*/0, /*is_untyped=*/true);
+
+          GOOGLESQL_RETURN_IF_ERROR(
+              CheckAndPropagateAnnotations(param_expr, param.get()));
+
           // Note: We always attach a parse location for a parameter
           // (regardless of whether or not the AnalyzerOptions is set to
           // record_parse_locations), because we use that parse location as
@@ -2492,6 +2501,9 @@ absl::Status Resolver::ResolveParameterExpr(
           auto param =
               MakeResolvedParameter(types::Int64Type(), lowercase_param_name,
                                     position, /*is_untyped=*/true);
+          GOOGLESQL_RETURN_IF_ERROR(
+              CheckAndPropagateAnnotations(param_expr, param.get()));
+
           param->SetParseLocationRange(param_expr->location());
           *resolved_expr_out = std::move(param);
           // Record the new location, no collisions are possible.
@@ -2514,6 +2526,8 @@ absl::Status Resolver::ResolveParameterExpr(
 
   auto param = MakeResolvedParameter(param_type, lowercase_param_name, position,
                                      /*is_untyped=*/false);
+  GOOGLESQL_RETURN_IF_ERROR(CheckAndPropagateAnnotations(param_expr, param.get()));
+
   MaybeRecordParseLocation(param_expr, param.get());
   *resolved_expr_out = std::move(param);
   return absl::OkStatus();
@@ -2746,15 +2760,41 @@ absl::Status Resolver::MaybeResolveStructFieldAccess(
 }
 
 absl::Status Resolver::ResolveJsonFieldAccess(
-    const ASTIdentifier* identifier,
+    const ParseLocationRange& parse_location, const ASTIdentifier* identifier,
     std::unique_ptr<const ResolvedExpr> resolved_lhs,
     std::unique_ptr<const ResolvedExpr>* resolved_expr_out) {
   *resolved_expr_out = nullptr;
 
   GOOGLESQL_RET_CHECK(resolved_lhs->type()->IsJson());
 
-  *resolved_expr_out = MakeResolvedGetJsonField(
-      types::JsonType(), std::move(resolved_lhs), identifier->GetAsString());
+  std::unique_ptr<ResolvedGetJsonField> resolved_node =
+      MakeResolvedGetJsonField(types::JsonType(), std::move(resolved_lhs),
+                               identifier->GetAsString());
+  MaybeRecordFieldAccessParseLocation(parse_location, identifier,
+                                      resolved_node.get());
+  *resolved_expr_out = std::move(resolved_node);
+  return absl::OkStatus();
+}
+
+absl::Status Resolver::ResolveVariantFieldAccess(
+    const ASTIdentifier* identifier,
+    std::unique_ptr<const ResolvedExpr> resolved_lhs,
+    std::unique_ptr<const ResolvedExpr>* resolved_expr_out) {
+  GOOGLESQL_RET_CHECK(identifier != nullptr);
+  GOOGLESQL_RET_CHECK(resolved_lhs != nullptr);
+  GOOGLESQL_RET_CHECK(resolved_expr_out != nullptr);
+  *resolved_expr_out = nullptr;
+
+  GOOGLESQL_RET_CHECK(resolved_lhs->type()->IsVariant());
+  if (!language().LanguageFeatureEnabled(FEATURE_VARIANT_TYPE)) {
+    return MakeSqlErrorAt(identifier)
+           << "Cannot access field " << identifier->GetAsIdString()
+           << " on a value with type "
+           << resolved_lhs->type()->ShortTypeName(product_mode());
+  }
+
+  *resolved_expr_out = MakeResolvedGetVariantField(
+      types::VariantType(), std::move(resolved_lhs), identifier->GetAsString());
   return absl::OkStatus();
 }
 
@@ -3041,7 +3081,7 @@ absl::Status Resolver::ResolveGraphIsLabeledPredicate(
 absl::Status Resolver::ResolveColumnListSpec(
     const ASTColumnListSpec* column_list_spec,
     ExprResolutionInfo* expr_resolution_info,
-    std::unique_ptr<const ColumnListSpec>* column_list_spec_out) {
+    std::unique_ptr<const ResolvedExpr>* resolved_expr_out) {
   if (!language().LanguageFeatureEnabled(FEATURE_COLUMN_LIST_SPEC)) {
     return MakeSqlErrorAt(column_list_spec)
            << "Column list spec is not supported";
@@ -3049,7 +3089,7 @@ absl::Status Resolver::ResolveColumnListSpec(
 
   GOOGLESQL_RET_CHECK_NE(column_list_spec, nullptr);
   GOOGLESQL_RET_CHECK_NE(expr_resolution_info, nullptr);
-  GOOGLESQL_RET_CHECK_NE(column_list_spec_out, nullptr);
+  GOOGLESQL_RET_CHECK_NE(resolved_expr_out, nullptr);
 
   const ASTExpression* columns = column_list_spec->column_names();
   if (columns == nullptr) {
@@ -3061,12 +3101,15 @@ absl::Status Resolver::ResolveColumnListSpec(
   GOOGLESQL_RETURN_IF_ERROR(ResolveExpr(columns, expr_resolution_info, &columns_expr,
                               types::StringArrayType()));
 
-  GOOGLESQL_ASSIGN_OR_RETURN(
-      std::vector<IdString> column_names,
-      ValidateAndExtractColumnListSpecColumnNames(*columns, *columns_expr));
+  std::vector<const ResolvedNode*> literal_nodes;
+  columns_expr->GetDescendantsWithKinds({RESOLVED_LITERAL}, &literal_nodes);
+  for (const ResolvedNode* node : literal_nodes) {
+    const_cast<ResolvedLiteral*>(node->GetAs<ResolvedLiteral>())
+        ->set_preserve_in_literal_remover(true);
+  }
 
-  *column_list_spec_out =
-      std::make_unique<ColumnListSpec>(std::move(column_names));
+  *resolved_expr_out = MakeResolvedMakeColumnListSpec(
+      types::ColumnListSpecType(), std::move(columns_expr));
   return absl::OkStatus();
 }
 
@@ -3075,15 +3118,15 @@ static absl::Status ValidateColumnListSpecElement(
     const Value& element_value, const ASTExpression& columns_expr) {
   if (element_value.is_null()) {
     return MakeSqlErrorAt(&columns_expr)
-           << "Column name in Column list spec cannot be NULL";
+           << "Column name in column list spec cannot be NULL";
   }
   if (!element_value.type()->IsString()) {
     return MakeSqlErrorAt(&columns_expr)
-           << "Column list spec array element must be string";
+           << "Column list spec array element must be a string";
   }
   if (element_value.string_value().empty()) {
     return MakeSqlErrorAt(&columns_expr)
-           << "Column name in Column list spec cannot be empty string";
+           << "Column name in column list spec cannot be an empty string";
   }
   return absl::OkStatus();
 }
@@ -3186,8 +3229,12 @@ absl::Status Resolver::ResolveFieldAccess(
                                                   std::move(resolved_lhs),
                                                   resolved_expr_out));
   } else if (lhs_type.type->IsJson()) {
-    GOOGLESQL_RETURN_IF_ERROR(ResolveJsonFieldAccess(identifier, std::move(resolved_lhs),
+    GOOGLESQL_RETURN_IF_ERROR(ResolveJsonFieldAccess(parse_location, identifier,
+                                           std::move(resolved_lhs),
                                            resolved_expr_out));
+  } else if (lhs_type.type->IsVariant()) {
+    GOOGLESQL_RETURN_IF_ERROR(ResolveVariantFieldAccess(
+        identifier, std::move(resolved_lhs), resolved_expr_out));
   } else if (lhs_type.type->IsRowOrTable()) {
     GOOGLESQL_RETURN_IF_ERROR(ResolveGetRowField(
         identifier, flatten_state, std::move(resolved_lhs), resolved_expr_out));
@@ -7705,6 +7752,18 @@ absl::Status Resolver::ResolveExplicitCast(
             Value::Array(resolved_cast_type->AsArray(), /*values=*/{}),
             /*has_explicit_type=*/true);
         return absl::OkStatus();
+      } else if (resolved_cast_type->IsVariant()) {
+        // If the target type is Variant, then return a Variant containing an
+        // empty array.
+        GOOGLESQL_ASSIGN_OR_RETURN(const ArrayType* array_type,
+                         type_factory()->MakeArrayType(
+                             type_factory()->get_variant(), language()));
+        Value empty_array = Value::EmptyArray(array_type);
+        GOOGLESQL_ASSIGN_OR_RETURN(Value variant_value, Value::Variant(empty_array));
+        *resolved_expr_out =
+            MakeResolvedLiteral(cast, annotated_cast_type, variant_value,
+                                /*has_explicit_type=*/true);
+        return absl::OkStatus();
       } else {
         return CastResolutionError(cast->expr(), resolved_argument->type(),
                                    resolved_cast_type, product_mode());
@@ -9620,14 +9679,6 @@ absl::Status Resolver::ResolveArrayConstructor(
     GOOGLESQL_RETURN_IF_ERROR(ResolveExpr(element, expr_resolution_info, &resolved_expr,
                                 inferred_element_type));
 
-    if (!language().LanguageFeatureEnabled(FEATURE_ARRAY_OF_ARRAY) &&
-        resolved_expr->type()->IsArray()) {
-      return MakeSqlErrorAt(element)
-             << "Cannot construct array with element type "
-             << resolved_expr->type()->ShortTypeName(product_mode())
-             << " because nested arrays are not supported";
-    }
-
     // If at least one element looks like an expression, the array's type should
     // be as firm as an expression's type for supertyping, function signature
     // matching, etc.
@@ -9647,6 +9698,25 @@ absl::Status Resolver::ResolveArrayConstructor(
 
   // If array type is not explicitly mentioned, use the common supertype of the
   // element type set as the array element type.
+  const Type* target_element_type =
+      array_type != nullptr ? array_type->element_type() : nullptr;
+  if (array_type == nullptr && !resolved_elements.empty()) {
+    GOOGLESQL_RETURN_IF_ERROR(
+        coercer_.GetCommonSuperType(element_type_set, &target_element_type));
+  }
+
+  if (!language().LanguageFeatureEnabled(FEATURE_ARRAY_OF_ARRAY) &&
+      (target_element_type == nullptr || !target_element_type->IsVariant())) {
+    for (int i = 0; i < resolved_elements.size(); ++i) {
+      if (resolved_elements[i]->type()->IsArray()) {
+        return MakeSqlErrorAt(ast_array_constructor->elements()[i])
+               << "Cannot construct array with element type "
+               << resolved_elements[i]->type()->ShortTypeName(product_mode())
+               << " because nested arrays are not supported";
+      }
+    }
+  }
+
   if (array_type == nullptr) {
     if (resolved_elements.empty()) {
       // If neither array_type nor element is specified, empty array [] is
@@ -9655,9 +9725,7 @@ absl::Status Resolver::ResolveArrayConstructor(
       GOOGLESQL_ASSIGN_OR_RETURN(array_type, type_factory_->MakeArrayType(
                                        type_factory_->get_int64(), language()));
     } else {
-      const Type* super_type = nullptr;
-      GOOGLESQL_RETURN_IF_ERROR(
-          coercer_.GetCommonSuperType(element_type_set, &super_type));
+      const Type* super_type = target_element_type;
       if (super_type == nullptr) {
         // We need a special case for a literal array with a mix of INT64 and
         // UINT64 arguments.  Normally, there is no supertype.  But given that

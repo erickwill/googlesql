@@ -942,10 +942,13 @@ absl::Status InitializeExecuteQueryConfig(ExecuteQueryConfig& config) {
   GOOGLESQL_RETURN_IF_ERROR(SetToolModeFromFlags(config));
   GOOGLESQL_RETURN_IF_ERROR(SetSqlModeFromFlags(config));
   GOOGLESQL_RETURN_IF_ERROR(SetTargetSyntaxModeFromFlags(config));
-  GOOGLESQL_RETURN_IF_ERROR(config.SetCatalogFromString(absl::GetFlag(FLAGS_catalog)));
   GOOGLESQL_RETURN_IF_ERROR(SetLanguageOptionsFromFlags(config));
   GOOGLESQL_RETURN_IF_ERROR(SetAnalyzerOptionsFromFlags(config));
   GOOGLESQL_RETURN_IF_ERROR(SetEvaluatorOptionsFromFlags(config));
+  // Catalog initialization has to happen after language options are set.
+  // Otherwise language_feature checks in the catalog will use the default
+  // value of analyzer options.
+  GOOGLESQL_RETURN_IF_ERROR(config.SetCatalogFromString(absl::GetFlag(FLAGS_catalog)));
   GOOGLESQL_RETURN_IF_ERROR(AddTablesFromFlags(config));
 
   // Support for modules.

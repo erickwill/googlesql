@@ -230,10 +230,10 @@ class TableRefType : public RowOrTableType {
 
   // The element type when scanning the TableRefType like an array.
   // This is currently always a RowType.
-  const RowType* element_type() const { return element_type_; }
+  const RowType* element_type() const { return element_type_->AsRowType(); }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    return {element_type_};
+  TypeListView ComponentTypes() const override {
+    return absl::MakeConstSpan(&element_type_, 1);
   }
 
  private:
@@ -253,7 +253,7 @@ class TableRefType : public RowOrTableType {
   // False if this TABLE has UNIQUE. (It's an N:1 join.)
   bool multi_row_;
 
-  const RowType* element_type_;
+  const Type* element_type_;
 
   friend class TypeFactory;
 };

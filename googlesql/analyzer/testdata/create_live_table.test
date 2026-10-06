@@ -152,8 +152,10 @@ CreateLiveTableAsSelectStmt
 +-name_path=t
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#2)
-+-connection=
-| +-Connection(connection=connection1)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection1)
 +-output_column_list=
 | +-$create_as.a#1 AS a [INT64]
 +-query=
@@ -292,8 +294,10 @@ CreateLiveTableAsSelectStmt
 +-name_path=t
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=t.a#1)
-+-connection=
-| +-Connection(connection=connection1)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection1)
 +-output_column_list=
 | +-$create_as.a#2 AS a [INT64]
 +-query=
@@ -328,8 +332,10 @@ CreateLiveTableStmt
 +-name_path=queryless_with_connection
 +-column_definition_list=
 | +-ColumnDefinition(name="a", type=INT64, column=queryless_with_connection.a#1)
-+-connection=
-  +-Connection(connection=connection1)
++-connection_list=
+  +-ConnectionList
+    +-connection=
+      +-Connection(connection=connection1)
 ==
 
 # 2. Queryless PARTITION BY
@@ -384,4 +390,3 @@ CreateLiveTableStmt
 | +-ColumnDefinition(name="a", type=INT64, column=queryless_pk.a#1)
 +-primary_key=
   +-PrimaryKey(column_offset_list=[0], column_name_list=[a])
-==

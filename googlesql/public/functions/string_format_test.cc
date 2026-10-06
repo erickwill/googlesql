@@ -253,5 +253,24 @@ TEST(CheckStringFormat, SupportedForDeclarativeTypesWithCustomCallback) {
   EXPECT_EQ(output, "LITERAL(42)");
 }
 
+TEST(StringFormat, GroupingWithPrecision) {
+  // Test cases where precision_digits < leading_digits (case B in ConvertInt)
+  // to ensure no uninitialized stack memory is read or leaked.
+  std::string output;
+  bool is_null = false;
+
+  GOOGLESQL_EXPECT_OK(StringFormatUtf8("%'.2d", {values::Int64(5)},
+                             ProductMode::PRODUCT_INTERNAL, &output, &is_null));
+  EXPECT_EQ(output, "05");
+
+  GOOGLESQL_EXPECT_OK(StringFormatUtf8("%'.5d", {values::Int64(1234)},
+                             ProductMode::PRODUCT_INTERNAL, &output, &is_null));
+  EXPECT_EQ(output, "01,234");
+
+  GOOGLESQL_EXPECT_OK(StringFormatUtf8("%'.23o", {values::Uint64(uint64_t{1} << 63)},
+                             ProductMode::PRODUCT_INTERNAL, &output, &is_null));
+  EXPECT_EQ(output, "010,0000,0000,0000,0000,0000");
+}
+
 }  // namespace functions
 }  // namespace googlesql

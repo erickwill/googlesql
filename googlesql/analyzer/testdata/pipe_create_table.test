@@ -729,8 +729,10 @@ GeneralizedQueryStmt
         +-column_definition_list=
         | +-ColumnDefinition(name="Key", type=INT64, column=t2.Key#3)
         | +-ColumnDefinition(name="Value", type=STRING, column=t2.Value#4)
-        +-connection=
-        | +-Connection(connection=connection2)
+        +-connection_list=
+        | +-ConnectionList
+        |   +-connection=
+        |     +-Connection(connection=connection2)
         +-output_column_list=
         | +-KeyValue.Key#1 AS Key [INT64]
         | +-KeyValue.Value#2 AS Value [STRING]

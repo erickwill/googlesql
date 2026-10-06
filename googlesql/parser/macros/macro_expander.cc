@@ -27,7 +27,6 @@
 #include <utility>
 #include <vector>
 
-#include "googlesql/base/arena.h"
 #include "googlesql/base/arena_allocator.h"
 #include "googlesql/common/thread_stack.h"
 #include "googlesql/parser/macros/diagnostic.h"
@@ -58,6 +57,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/span.h"
+#include "googlesql/base/arena.h"
 #include "googlesql/base/ret_check.h"
 
 namespace googlesql {
@@ -87,6 +87,22 @@ absl::StatusOr<int> ParseMacroArgIndex(absl::string_view text) {
   int arg_index;
   GOOGLESQL_RET_CHECK(absl::SimpleAtoi(text.substr(1), &arg_index));
   return arg_index;
+}
+
+// Returns true if `kind` is a macro invocation (user or built-in).
+static bool IsMacroInvocation(Token kind) {
+  return kind == Token::MACRO_INVOCATION ||
+         kind == Token::MACRO_BUILTIN_INVOCATION;
+}
+
+// Returns true if `kind` is a macro argument reference.
+static bool IsMacroArgumentReference(Token kind) {
+  return kind == Token::MACRO_ARGUMENT_REFERENCE;
+}
+
+// Returns true if `kind` is any macro item (invocation or argument reference).
+static bool IsMacroItem(Token kind) {
+  return IsMacroInvocation(kind) || IsMacroArgumentReference(kind);
 }
 
 // Similar to IsKeywordOrUnquotedIdentifier, but also returns true for
@@ -312,11 +328,13 @@ static bool CanUnexpandedTokensSplice(bool last_was_macro_invocation,
     return false;
   }
 
-  if (token.kind == Token::MACRO_INVOCATION ||
-      token.kind == Token::MACRO_ARGUMENT_REFERENCE) {
-    // Invocations and macro args can splice with pretty much anything.
-    // Safer to always load them.
-    return true;
+  if (IsMacroItem(token.kind)) {
+    // Only load a macro invocation or argument reference into the current chunk
+    // if the token on the left can actually splice with its expansion (see
+    // `CanSplice`).
+    return last_was_macro_invocation ||
+           IsMacroArgumentReference(last_token.kind) ||
+           TokenCanBeKeywordOrUnquotedIdentifier(last_token);
   }
 
   if (token.kind == Token::DECIMAL_INTEGER_LITERAL ||
@@ -334,8 +352,7 @@ static bool CanUnexpandedTokensSplice(bool last_was_macro_invocation,
   if (!TokenCanBeKeywordOrUnquotedIdentifier(token)) {
     return false;
   }
-  return last_was_macro_invocation ||
-         last_token.kind == Token::MACRO_ARGUMENT_REFERENCE;
+  return last_was_macro_invocation || IsMacroArgumentReference(last_token.kind);
 }
 
 static absl::string_view AllocateString(absl::string_view str,
@@ -440,8 +457,7 @@ absl::Status MacroExpander::LoadPotentiallySplicingTokens() {
       return absl::OkStatus();
     }
 
-    if (token.kind == Token::MACRO_INVOCATION ||
-        token.kind == Token::MACRO_BUILTIN_INVOCATION) {
+    if (IsMacroInvocation(token.kind)) {
       GOOGLESQL_RETURN_IF_ERROR(LoadArgsIfAny());
       last_was_macro_invocation = true;
     } else {
@@ -457,8 +473,7 @@ absl::Status MacroExpander::LoadArgsIfAny() {
   GOOGLESQL_RET_CHECK(!splicing_buffer_.empty())
       << "Splicing buffer cannot be empty. This method should not be "
          "called except after a macro invocation has been loaded";
-  GOOGLESQL_RET_CHECK(splicing_buffer_.back().kind == Token::MACRO_INVOCATION ||
-            splicing_buffer_.back().kind == Token::MACRO_BUILTIN_INVOCATION)
+  GOOGLESQL_RET_CHECK(IsMacroInvocation(splicing_buffer_.back().kind))
       << "This method should not be called except after a macro invocation "
          "has been loaded";
   GOOGLESQL_ASSIGN_OR_RETURN(TokenWithLocation token, token_provider_->PeekNextToken());
@@ -555,12 +570,11 @@ absl::StatusOr<TokenWithLocation> MacroExpander::Splice(
 absl::StatusOr<TokenWithLocation> MacroExpander::ExpandAndMaybeSpliceMacroItem(
     TokenWithLocation unexpanded_macro_token, TokenWithLocation pending_token) {
   std::vector<TokenWithLocation> expanded_tokens;
-  if (unexpanded_macro_token.kind == Token::MACRO_ARGUMENT_REFERENCE) {
+  if (IsMacroArgumentReference(unexpanded_macro_token.kind)) {
     GOOGLESQL_RETURN_IF_ERROR(
         ExpandMacroArgumentReference(unexpanded_macro_token, expanded_tokens));
   } else {
-    GOOGLESQL_RET_CHECK(unexpanded_macro_token.kind == Token::MACRO_INVOCATION ||
-              unexpanded_macro_token.kind == Token::MACRO_BUILTIN_INVOCATION);
+    GOOGLESQL_RET_CHECK(IsMacroInvocation(unexpanded_macro_token.kind));
     GOOGLESQL_ASSIGN_OR_RETURN(absl::string_view macro_name,
                      GetMacroName(unexpanded_macro_token));
     GOOGLESQL_ASSIGN_OR_RETURN(StackFrame * invocation_stack_frame,
@@ -723,9 +737,7 @@ absl::Status MacroExpander::ExpandPotentiallySplicingTokens() {
       GOOGLESQL_ASSIGN_OR_RETURN(
           pending_token,
           AdvancePendingToken(std::move(pending_token), std::move(token)));
-    } else if (token.kind == Token::MACRO_ARGUMENT_REFERENCE ||
-               token.kind == Token::MACRO_INVOCATION ||
-               token.kind == Token::MACRO_BUILTIN_INVOCATION) {
+    } else if (IsMacroItem(token.kind)) {
       GOOGLESQL_ASSIGN_OR_RETURN(pending_token,
                        ExpandAndMaybeSpliceMacroItem(std::move(token),
                                                      std::move(pending_token)));
@@ -1206,9 +1218,7 @@ absl::Status MacroExpander::ValidateStringBuiltinInvocation(
 
   // Argument must be exactly a single macro invocation or macro argument.
   const TokenWithLocation& first_arg = unexpanded_args.front();
-  if (first_arg.kind != Token::MACRO_INVOCATION &&
-      first_arg.kind != Token::MACRO_BUILTIN_INVOCATION &&
-      first_arg.kind != Token::MACRO_ARGUMENT_REFERENCE) {
+  if (!IsMacroItem(first_arg.kind)) {
     return MakeSqlErrorAt(first_arg.location.start(), arg_spec);
   }
 
@@ -1224,15 +1234,13 @@ absl::Status MacroExpander::ValidateStringBuiltinInvocation(
   }
 
   // When the argument is a macro argument reference, it must be the only token
-  if (first_arg.kind == Token::MACRO_ARGUMENT_REFERENCE &&
-      unexpanded_args.size() > 1) {
+  if (IsMacroArgumentReference(first_arg.kind) && unexpanded_args.size() > 1) {
     return MakeSqlErrorAt(unexpanded_args[1].location.start(), arg_spec);
   }
 
   // We now know for a fact that the first argument is a macro invocation
   // followed by additional tokens.
-  GOOGLESQL_RET_CHECK(first_arg.kind == Token::MACRO_INVOCATION ||
-            first_arg.kind == Token::MACRO_BUILTIN_INVOCATION);
+  GOOGLESQL_RET_CHECK(IsMacroInvocation(first_arg.kind));
 
   // If the macro invocation is followed by additional tokens, they should
   // strictly constitute an argument list to be considered a valid single macro
@@ -1634,8 +1642,7 @@ absl::Status MacroExpander::ExpandMacrosInternal(
 
 absl::StatusOr<StackFrame*> MacroExpander::MakeInvocationStackFrame(
     const TokenWithLocation& invocation_token) {
-  GOOGLESQL_RET_CHECK(invocation_token.kind == Token::MACRO_INVOCATION ||
-            invocation_token.kind == Token::MACRO_BUILTIN_INVOCATION);
+  GOOGLESQL_RET_CHECK(IsMacroInvocation(invocation_token.kind));
 
   absl::string_view name_suffix =
       invocation_token.kind == Token::MACRO_INVOCATION ? "macro:"

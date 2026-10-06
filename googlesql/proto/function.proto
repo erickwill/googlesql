@@ -61,9 +61,16 @@ message TVFModelProto {
   optional string full_name = 2;
 }
 
+message TVFConnectionKeyValuePairProto {
+  optional string key = 1;
+  optional string name = 2;
+  optional string full_name = 3;
+}
+
 message TVFConnectionProto {
   optional string name = 1;
   optional string full_name = 2;
+  repeated TVFConnectionKeyValuePairProto connection_kv_pair = 3;
 }
 
 message TVFDescriptorProto {
@@ -125,6 +132,18 @@ message FunctionArgumentTypeOptionsProto {
   // point in the future. Please set the appropriate constness_level instead.
   optional bool must_be_constant_expression = 27 [deprecated = true];
   optional ConstnessLevelProto.Level constness_level = 28;
+  // If true, callers are permitted to specify an ORDER BY clause on this
+  // relation argument in a table-valued function call.
+  //
+  // Note: While PARTITION BY is universally supported on all single-table TVF
+  // arguments whenever FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER is enabled
+  // (because partitioning is handled externally by the query engine shuffling
+  // rows into independent partitions), ORDER BY requires explicit signature
+  // opt-in via this flag. Sorting distributed input data incurs significant
+  // shuffle and CPU overhead, so requiring TVF signatures to declare
+  // `supports_order_by` prevents queries from silently wasting cluster
+  // resources sorting rows for order-agnostic TVFs (e.g. pure SQL TVFs).
+  optional bool supports_order_by = 29 [default = false];
 }
 
 message ArgumentTypeLambdaProto {

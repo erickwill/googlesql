@@ -19,14 +19,13 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "googlesql/base/logging.h"
 #include "googlesql/compliance/runtime_expected_errors.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 
 namespace googlesql {
@@ -259,6 +258,24 @@ TEST(ErrorMatcherTest, RuntimeExpectedErrorMatcher) {
                                             cosine_distance_error_message)));
   EXPECT_TRUE(matcher->HasMatches());
   EXPECT_EQ(3, matcher->MatchCount());
+
+  // Error matchers for parameterized type violations
+  EXPECT_TRUE(matcher->Matches(absl::Status(
+      absl::StatusCode::kOutOfRange,
+      "STRING(5) has maximum length 5 but got a value with length 10")));
+  EXPECT_TRUE(matcher->Matches(absl::Status(
+      absl::StatusCode::kOutOfRange,
+      "BYTES(2) has maximum length 2 but got a value with length 4")));
+  EXPECT_TRUE(matcher->Matches(absl::Status(
+      absl::StatusCode::kOutOfRange,
+      "NUMERIC(5, 2) has precision 5 and scale 2 but got a value that is not "
+      "in range of [-999.99, 999.99]")));
+  EXPECT_TRUE(matcher->Matches(absl::Status(
+      absl::StatusCode::kOutOfRange,
+      "BIGNUMERIC(38, 9) has precision 38 and scale 9 but got a value that is "
+      "not in range of [-99999999999999999999999999999.999999999, "
+      "99999999999999999999999999999.999999999]")));
+  EXPECT_EQ(7, matcher->MatchCount());
 
   ABSL_LOG(INFO) << matcher->MatcherSummary();
 }

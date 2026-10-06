@@ -761,7 +761,7 @@ FROM
 # Null in column list
 SELECT **COLUMNS(['Key', NULL]) FROM KeyValue
 --
-ERROR: Column name in Column list spec cannot be NULL [at 1:18]
+ERROR: Column name in column list spec cannot be NULL [at 1:18]
 SELECT **COLUMNS(['Key', NULL]) FROM KeyValue
                  ^
 ==
@@ -769,7 +769,7 @@ SELECT **COLUMNS(['Key', NULL]) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS(['Key', NULL])
 --
-ERROR: Column name in Column list spec cannot be NULL [at 1:35]
+ERROR: Column name in column list spec cannot be NULL [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS(['Key', NULL])
                                   ^
 ==
@@ -1082,7 +1082,7 @@ FROM KeyValue |> SELECT **COLUMNS(TestConstantString)
 # Argument is not a constant array of strings - array of wrong type
 SELECT **COLUMNS(TestConstantInt64Array) FROM KeyValue
 --
-ERROR: Column list spec array element must be string [at 1:18]
+ERROR: Column list spec array element must be a string [at 1:18]
 SELECT **COLUMNS(TestConstantInt64Array) FROM KeyValue
                  ^
 ==
@@ -1090,7 +1090,7 @@ SELECT **COLUMNS(TestConstantInt64Array) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantInt64Array)
 --
-ERROR: Column list spec array element must be string [at 1:35]
+ERROR: Column list spec array element must be a string [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantInt64Array)
                                   ^
 ==
@@ -1162,7 +1162,7 @@ FROM KeyValue |> SELECT **COLUMNS(CAST(NULL AS ARRAY<STRING>))
 # NULL element in constant array
 SELECT **COLUMNS(TestConstantStringArrayWithNull) FROM KeyValue
 --
-ERROR: Column name in Column list spec cannot be NULL [at 1:18]
+ERROR: Column name in column list spec cannot be NULL [at 1:18]
 SELECT **COLUMNS(TestConstantStringArrayWithNull) FROM KeyValue
                  ^
 ==
@@ -1170,7 +1170,7 @@ SELECT **COLUMNS(TestConstantStringArrayWithNull) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithNull)
 --
-ERROR: Column name in Column list spec cannot be NULL [at 1:35]
+ERROR: Column name in column list spec cannot be NULL [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithNull)
                                   ^
 ==
@@ -1178,7 +1178,7 @@ FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithNull)
 # Empty string element in literal array
 SELECT **COLUMNS(['']) FROM KeyValue
 --
-ERROR: Column name in Column list spec cannot be empty string [at 1:18]
+ERROR: Column name in column list spec cannot be an empty string [at 1:18]
 SELECT **COLUMNS(['']) FROM KeyValue
                  ^
 ==
@@ -1186,7 +1186,7 @@ SELECT **COLUMNS(['']) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS([''])
 --
-ERROR: Column name in Column list spec cannot be empty string [at 1:35]
+ERROR: Column name in column list spec cannot be an empty string [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS([''])
                                   ^
 ==
@@ -1194,7 +1194,7 @@ FROM KeyValue |> SELECT **COLUMNS([''])
 # Empty string element in constant array
 SELECT **COLUMNS(TestConstantStringArrayWithEmpty) FROM KeyValue
 --
-ERROR: Column name in Column list spec cannot be empty string [at 1:18]
+ERROR: Column name in column list spec cannot be an empty string [at 1:18]
 SELECT **COLUMNS(TestConstantStringArrayWithEmpty) FROM KeyValue
                  ^
 ==
@@ -1202,7 +1202,7 @@ SELECT **COLUMNS(TestConstantStringArrayWithEmpty) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithEmpty)
 --
-ERROR: Column name in Column list spec cannot be empty string [at 1:35]
+ERROR: Column name in column list spec cannot be an empty string [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithEmpty)
                                   ^
 ==
@@ -1210,7 +1210,7 @@ FROM KeyValue |> SELECT **COLUMNS(TestConstantStringArrayWithEmpty)
 # Element not a string in literal array
 SELECT **COLUMNS([1]) FROM KeyValue
 --
-ERROR: Column list spec array element must be string [at 1:18]
+ERROR: Column list spec array element must be a string [at 1:18]
 SELECT **COLUMNS([1]) FROM KeyValue
                  ^
 ==
@@ -1218,7 +1218,7 @@ SELECT **COLUMNS([1]) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS([1])
 --
-ERROR: Column list spec array element must be string [at 1:35]
+ERROR: Column list spec array element must be a string [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS([1])
                                   ^
 ==
@@ -1226,7 +1226,7 @@ FROM KeyValue |> SELECT **COLUMNS([1])
 # Element not a string in constant array element
 SELECT **COLUMNS([TestConstantInt64]) FROM KeyValue
 --
-ERROR: Column list spec array element must be string [at 1:18]
+ERROR: Column list spec array element must be a string [at 1:18]
 SELECT **COLUMNS([TestConstantInt64]) FROM KeyValue
                  ^
 ==
@@ -1234,7 +1234,7 @@ SELECT **COLUMNS([TestConstantInt64]) FROM KeyValue
 [sql_builder_target_syntax_mode=pipe]
 FROM KeyValue |> SELECT **COLUMNS([TestConstantInt64])
 --
-ERROR: Column list spec array element must be string [at 1:35]
+ERROR: Column list spec array element must be a string [at 1:35]
 FROM KeyValue |> SELECT **COLUMNS([TestConstantInt64])
                                   ^
 ==

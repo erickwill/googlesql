@@ -68,6 +68,9 @@ class DefaultAnnotationSpec : public AnnotationSpec {
   absl::Status CheckAndPropagateForColumnRef(
       const ResolvedColumnRef& column_ref,
       AnnotationMap* result_annotation_map) override;
+  absl::Status CheckAndPropagateForParameter(
+      const ResolvedParameter& parameter,
+      AnnotationMap* result_annotation_map) override;
   absl::Status CheckAndPropagateForGetStructField(
       const ResolvedGetStructField& get_struct_field,
       AnnotationMap* result_annotation_map) final;
@@ -163,10 +166,11 @@ class DefaultAnnotationSpec : public AnnotationSpec {
       AnnotationMap* result_annotation_map) const;
 };
 
-// Helper function to retrieve argument `i` from `function_call`, removing
-// the need to distinguish between `argument_list` and
-// `generic_argument_list`.
-const ResolvedNode* GetFunctionCallArgument(
+// Helper function to retrieve the expression or inline lambda argument `i` from
+// `function_call`, removing the need to distinguish between `argument_list` and
+// `generic_argument_list`. Returns nullptr if argument `i` is neither an
+// expression nor an inline lambda (e.g. if it is a function_ref or SEQUENCE).
+const ResolvedNode* GetFunctionCallArgumentIfExprOrLambda(
     const ResolvedFunctionCallBase& function_call, int i);
 
 }  // namespace googlesql

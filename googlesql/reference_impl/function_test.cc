@@ -50,6 +50,7 @@
 #include "googlesql/reference_impl/evaluation.h"
 #include "googlesql/reference_impl/functions/graph.h"
 #include "googlesql/reference_impl/functions/hash.h"
+#include "googlesql/reference_impl/functions/json.h"
 #include "googlesql/reference_impl/operator.h"
 #include "googlesql/reference_impl/tuple.h"
 #include "googlesql/reference_impl/variable_id.h"
@@ -1584,6 +1585,110 @@ TEST(JaroWinklerSimilarityFunctionTest, ReferenceImplEval) {
     EXPECT_FALSE(call_expr->Eval({}, &context, &slot, &status));
     EXPECT_THAT(status, StatusIs(absl::StatusCode::kOutOfRange));
   }
+}
+
+TEST(FunctionEvaluationTest, JsonExistsFunctionEval) {
+  RegisterBuiltinJsonFunctions();
+  EvaluationContext context{/*options=*/{}};
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_obj, JSONValue::ParseJSONString(
+                                               R"json({"a": 1, "b": 2})json"));
+  const Value json_val = Value::Json(std::move(json_obj));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Value single_path_array,
+      Value::MakeArray(types::StringArrayType(), {Value::String("$.a")}));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Value int64_array,
+      Value::MakeArray(types::Int64ArrayType(), {Value::Int64(1)}));
+
+  auto eval = [&](FunctionKind kind,
+                  absl::Span<const Value> args) -> absl::StatusOr<Value> {
+    auto status_or_fn =
+        BuiltinFunctionRegistry::GetScalarFunction(kind, types::BoolType(), {});
+    if (!status_or_fn.ok()) {
+      return status_or_fn.status();
+    }
+    auto fn = absl::WrapUnique<BuiltinScalarFunction>(status_or_fn.value());
+    Value result;
+    absl::Status status;
+    if (!fn->Eval(/*params=*/{}, args, &context, &result, &status)) {
+      return status;
+    }
+    return result;
+  };
+
+  // 1. Argument count check (GOOGLESQL_RET_CHECK_EQ(args.size(), 2)).
+  //
+  // kJsonExists
+  EXPECT_THAT(eval(FunctionKind::kJsonExists, {}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExists, {json_val}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExists,
+                   {json_val, Value::String("$.a"), Value::String("extra")}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // kJsonExistsAny
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAny, {}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAny, {json_val}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAny,
+                   {json_val, single_path_array, Value::String("extra")}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // kJsonExistsAll
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAll, {}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAll, {json_val}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAll,
+                   {json_val, single_path_array, Value::String("extra")}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // 2. Argument type check (unreachable from SQL due to analyzer checks).
+  //
+  // kJsonExists
+  EXPECT_THAT(
+      eval(FunctionKind::kJsonExists, {Value::Int64(1), Value::String("$.a")}),
+      StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExists, {json_val, Value::Int64(1)}),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExists, {json_val, single_path_array}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // kJsonExistsAny
+  EXPECT_THAT(
+      eval(FunctionKind::kJsonExistsAny, {Value::Int64(1), single_path_array}),
+      StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(
+      eval(FunctionKind::kJsonExistsAny, {json_val, Value::String("$.a")}),
+      StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAny, {json_val, int64_array}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // kJsonExistsAll
+  EXPECT_THAT(
+      eval(FunctionKind::kJsonExistsAll, {Value::Int64(1), single_path_array}),
+      StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(
+      eval(FunctionKind::kJsonExistsAll, {json_val, Value::String("$.a")}),
+      StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAll, {json_val, int64_array}),
+              StatusIs(absl::StatusCode::kInternal));
+
+  // 3. Unvalidated JSON string parsing error handling.
+  const Value unvalidated_invalid_json =
+      Value::UnvalidatedJsonString("invalid json");
+  EXPECT_THAT(eval(FunctionKind::kJsonExists,
+                   {unvalidated_invalid_json, Value::String("$.a")}),
+              StatusIs(absl::StatusCode::kOutOfRange));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAny,
+                   {unvalidated_invalid_json, single_path_array}),
+              StatusIs(absl::StatusCode::kOutOfRange));
+  EXPECT_THAT(eval(FunctionKind::kJsonExistsAll,
+                   {unvalidated_invalid_json, single_path_array}),
+              StatusIs(absl::StatusCode::kOutOfRange));
 }
 
 }  // namespace

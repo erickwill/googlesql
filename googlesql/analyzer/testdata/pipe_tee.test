@@ -604,6 +604,88 @@ ERROR: TEE is only allowed as part of the outermost query in a statement [at 3:3
   ^
 ==
 
+# TEE in a parenthesized query, possibly with a pipe operator after.
+# It's allowed without the pipe operator because that's still
+# the outer query.
+# The other case could be allowed but isn't currently.
+(
+FROM KeyValue
+|> TEE ()
+)
+{{|\|> LIMIT 1}}
+--
+ALTERNATION GROUP: <empty>
+--
+GeneralizedQueryStmt
++-output_schema=
+| +-OutputSchema
+|   +-output_column_list=
+|     +-KeyValue.Key#1 AS Key [INT64]
+|     +-KeyValue.Value#2 AS Value [STRING]
++-query=
+  +-PipeTeeScan
+    +-column_list=KeyValue.[Key#1, Value#2]
+    +-input_scan=
+    | +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+    +-subpipeline_list=
+      +-GeneralizedQuerySubpipeline
+        +-subpipeline=
+        | +-Subpipeline
+        |   +-scan=
+        |     +-SubpipelineInputScan(column_list=KeyValue.[Key#1, Value#2])
+        +-output_schema=
+          +-OutputSchema
+            +-output_column_list=
+              +-KeyValue.Key#1 AS Key [INT64]
+              +-KeyValue.Value#2 AS Value [STRING]
+
+[REWRITTEN AST]
+MultiStmt
++-statement_list=
+  +-CreateWithEntryStmt
+  | +-with_entry=
+  |   +-WithEntry
+  |     +-with_query_name="$tee_cte_1"
+  |     +-with_subquery=
+  |       +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+  +-QueryStmt
+  | +-output_column_list=
+  | | +-KeyValue.Key#1 AS Key [INT64]
+  | | +-KeyValue.Value#2 AS Value [STRING]
+  | +-query=
+  |   +-WithRefScan(column_list=KeyValue.[Key#1, Value#2], with_query_name="$tee_cte_1")
+  +-QueryStmt
+    +-output_column_list=
+    | +-KeyValue.Key#1 AS Key [INT64]
+    | +-KeyValue.Value#2 AS Value [STRING]
+    +-query=
+      +-WithRefScan(column_list=KeyValue.[Key#1, Value#2], with_query_name="$tee_cte_1")
+--
+ALTERNATION GROUP: |> LIMIT 1
+--
+ERROR: TEE is only allowed as part of the outermost query in a statement [at 3:1]
+|> TEE ()
+^
+==
+
+# TEE in a set operation input.
+(FROM KeyValue {{|\|> TEE ()}})
+UNION ALL
+(FROM KeyValue |> TEE ())
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: TEE is only allowed as part of the outermost query in a statement [at 3:16]
+(FROM KeyValue |> TEE ())
+               ^
+--
+ALTERNATION GROUP: |> TEE ()
+--
+ERROR: TEE is only allowed as part of the outermost query in a statement [at 1:16]
+(FROM KeyValue |> TEE ())
+               ^
+==
+
 # TEE in expression subquery.
 FROM KeyValue
 |> SELECT (

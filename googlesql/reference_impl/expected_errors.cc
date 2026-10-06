@@ -47,28 +47,12 @@ std::unique_ptr<MatcherCollection<absl::Status>> ReferenceExpectedErrorMatcher(
     std::string matcher_name) {
   std::vector<std::unique_ptr<MatcherBase<absl::Status>>> error_matchers;
   error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
-      absl::StatusCode::kUnimplemented,
-      "Unsupported built-in function: (st_accum|st_askml|st_geogfromkml"
-      "|st_unaryunion)"));
-  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
       absl::StatusCode::kResourceExhausted,
       "The statement has been aborted because the statement deadline (.+) was "
       "exceeded\\."));
   // TABLESAMPLE is not supported by the reference implementation.
   error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
       absl::StatusCode::kInvalidArgument, "TABLESAMPLE not supported"));
-  // The reference implementation does not support KMS and AEAD envelope
-  // encryption functions since they depend on an external service.
-  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
-      absl::StatusCode::kUnimplemented,
-      "Unsupported built-in function: kms.*"));
-  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
-      absl::StatusCode::kUnimplemented,
-      "Unsupported built-in function: aead\\.envelope.*"));
-  // The reference implementation does not support KEYS.KEYSET_CHAIN function.
-  error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
-      absl::StatusCode::kUnimplemented,
-      "Unsupported built-in function: keys\\.keyset_chain"));
   // The RQG can produce assignments to repeated proto values that contain
   // NULL.
   error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
@@ -198,24 +182,11 @@ std::unique_ptr<MatcherCollection<absl::Status>> ReferenceExpectedErrorMatcher(
         "in ORDER_BY_AND_LIMIT_IN_AGGREGATE rewriter"));
   }
 
-  error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
-      absl::StatusCode::kOutOfRange,
-      "Invalid input to JSON_OBJECT: Unsupported argument type "
-      "TOKENLIST for TO_JSON"));
-  error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
-      absl::StatusCode::kOutOfRange,
-      "Invalid input to JSON_ARRAY: Unsupported argument type "
-      "TOKENLIST for TO_JSON"));
-  // The status code is Unimplemented because the function implementation is
-  // throws that status.
-  // TODO: Investigate why TOKENLIST is generated in RQG for
-  // TO_JSON.
-  error_matchers.emplace_back(std::make_unique<StatusSubstringMatcher>(
-      absl::StatusCode::kUnimplemented,
-      "Unsupported argument type TOKENLIST for TO_JSON"));
+  // Types without a JSON encoding (e.g. MAP, TOKENLIST) are rejected at
+  // analysis time when passed to a JSON conversion function.
   error_matchers.emplace_back(std::make_unique<StatusRegexMatcher>(
       absl::StatusCode::kInvalidArgument,
-      "Unsupported argument to (JSON_OBJECT|JSON_ARRAY): MAP.* "
+      "Unsupported argument to (JSON_OBJECT|JSON_ARRAY): (MAP|TOKENLIST).* "
       "does not support conversion to JSON"));
 
   return std::make_unique<MatcherCollection<absl::Status>>(

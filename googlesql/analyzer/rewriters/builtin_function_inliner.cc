@@ -29,15 +29,19 @@
 #include "googlesql/public/function_signature.h"
 #include "googlesql/public/options.pb.h"
 #include "googlesql/public/rewriter_interface.h"
+#include "googlesql/public/types/type.h"
 #include "googlesql/public/types/type_factory.h"
+#include "googlesql/resolved_ast/column_factory.h"
 #include "googlesql/resolved_ast/resolved_ast.h"
 #include "googlesql/resolved_ast/resolved_ast_deep_copy_visitor.h"
+#include "googlesql/resolved_ast/resolved_column.h"
 #include "googlesql/resolved_ast/resolved_node.h"
 #include "googlesql/resolved_ast/rewrite_utils.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "googlesql/base/ret_check.h"
@@ -48,10 +52,12 @@ namespace {
 class BuiltinFunctionInlinerVisitor : public ResolvedASTDeepCopyVisitor {
  public:
   BuiltinFunctionInlinerVisitor(const AnalyzerOptions& analyzer_options,
-                                Catalog* catalog, TypeFactory* type_factory)
+                                Catalog* catalog, TypeFactory* type_factory,
+                                ColumnFactory* column_factory)
       : analyzer_options_(analyzer_options),
         catalog_(catalog),
-        type_factory_(type_factory) {}
+        type_factory_(type_factory),
+        column_factory_(column_factory) {}
 
  private:
   absl::Status ValidateFunctionArgumentTypeOptions(
@@ -61,6 +67,43 @@ class BuiltinFunctionInlinerVisitor : public ResolvedASTDeepCopyVisitor {
         << "Missing argument name for argument " << arg_idx;
     return absl::OkStatus();
   }
+
+  // Synthesizes a ResolvedInlineLambda that invokes `fn_ref` on its lambda
+  // arguments, allowing function-typed parameter references (e.g., FUNCTION f)
+  // passed to built-in higher-order functions to be inlined via
+  // AnalyzeSubstitute.
+  absl::StatusOr<std::unique_ptr<ResolvedInlineLambda>>
+  MakeLambdaFromFunctionRef(const ResolvedFunctionRef* fn_ref) {
+    GOOGLESQL_RET_CHECK_NE(fn_ref, nullptr);
+    const Function* fn = fn_ref->function();
+    GOOGLESQL_RET_CHECK_NE(fn, nullptr);
+    const FunctionSignature& fn_sig = fn_ref->signature();
+    GOOGLESQL_RET_CHECK(fn_sig.IsConcrete());
+
+    std::vector<ResolvedColumn> arg_columns;
+    std::vector<std::unique_ptr<const ResolvedExpr>> call_args;
+    const int num_fn_args = fn_sig.NumConcreteArguments();
+    arg_columns.reserve(num_fn_args);
+    call_args.reserve(num_fn_args);
+    for (int i = 0; i < num_fn_args; ++i) {
+      const Type* arg_type = fn_sig.ConcreteArgumentType(i);
+      GOOGLESQL_RET_CHECK_NE(arg_type, nullptr);
+      ResolvedColumn col =
+          column_factory_->MakeCol("$lambda", absl::StrCat("arg", i), arg_type);
+      arg_columns.push_back(col);
+      call_args.push_back(
+          MakeResolvedColumnRef(arg_type, col, /*is_correlated=*/false));
+    }
+
+    const Type* result_type = fn_sig.result_type().type();
+    GOOGLESQL_RET_CHECK_NE(result_type, nullptr);
+    std::unique_ptr<ResolvedExpr> body =
+        MakeResolvedFunctionCall(result_type, fn, fn_sig, std::move(call_args),
+                                 ResolvedFunctionCallBase::DEFAULT_ERROR_MODE);
+    return MakeResolvedInlineLambda(std::move(arg_columns),
+                                    /*parameter_list=*/{}, std::move(body));
+  }
+
   absl::Status Rewrite(const ResolvedFunctionCall* node,
                        absl::string_view rewrite_template,
                        bool allow_table_references,
@@ -84,9 +127,15 @@ class BuiltinFunctionInlinerVisitor : public ResolvedASTDeepCopyVisitor {
     for (int i = 0; i < num_arguments; ++i) {
       const ResolvedFunctionArgument* arg =
           use_generic_arguments ? node->generic_argument_list(i) : nullptr;
-      if (use_generic_arguments && arg->inline_lambda() != nullptr) {
-        const ResolvedInlineLambda* lambda = arg->inline_lambda();
-        GOOGLESQL_ASSIGN_OR_RETURN(processed_lambdas.emplace_back(), ProcessNode(lambda));
+      if (use_generic_arguments &&
+          (arg->inline_lambda() != nullptr || arg->function_ref() != nullptr)) {
+        if (arg->inline_lambda() != nullptr) {
+          GOOGLESQL_ASSIGN_OR_RETURN(processed_lambdas.emplace_back(),
+                           ProcessNode(arg->inline_lambda()));
+        } else {
+          GOOGLESQL_ASSIGN_OR_RETURN(processed_lambdas.emplace_back(),
+                           MakeLambdaFromFunctionRef(arg->function_ref()));
+        }
 
         const FunctionArgumentTypeOptions& arg_options =
             node->signature().ConcreteArgument(i).options();
@@ -170,6 +219,7 @@ class BuiltinFunctionInlinerVisitor : public ResolvedASTDeepCopyVisitor {
   const AnalyzerOptions& analyzer_options_;
   Catalog* catalog_;
   TypeFactory* type_factory_;
+  ColumnFactory* column_factory_;
 };
 
 class BuiltinFunctionInliner : public Rewriter {
@@ -180,7 +230,11 @@ class BuiltinFunctionInliner : public Rewriter {
       AnalyzerOutputProperties& output_properties) const override {
     GOOGLESQL_RET_CHECK_NE(options.id_string_pool(), nullptr);
     GOOGLESQL_RET_CHECK_NE(options.column_id_sequence_number(), nullptr);
-    BuiltinFunctionInlinerVisitor rewriter(options, &catalog, &type_factory);
+    ColumnFactory column_factory(/*max_seen_col_id=*/0,
+                                 *options.id_string_pool(),
+                                 *options.column_id_sequence_number());
+    BuiltinFunctionInlinerVisitor rewriter(options, &catalog, &type_factory,
+                                           &column_factory);
     GOOGLESQL_RETURN_IF_ERROR(input.Accept(&rewriter));
     return rewriter.ConsumeRootNode<ResolvedNode>();
   }

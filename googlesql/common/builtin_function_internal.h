@@ -275,7 +275,7 @@ absl::Status CheckBitwiseOperatorFirstArgumentIsIntegerOrBytes(
 
 absl::Status CheckDateDatetimeTimeTimestampTruncArguments(
     absl::string_view function_name,
-    const std::vector<InputArgumentType>& arguments,
+    absl::Span<const InputArgumentType> arguments,
     const LanguageOptions& language_options);
 
 absl::Status CheckLastDayArguments(
@@ -352,7 +352,7 @@ std::string NoMatchingSignatureForFunctionUsingInterval(
     int index_of_interval_argument);
 
 std::string NoMatchingSignatureForDateOrTimeAddOrSubFunction(
-    const std::string& qualified_function_name,
+    absl::string_view qualified_function_name,
     absl::Span<const InputArgumentType> arguments, ProductMode product_mode);
 
 std::string NoMatchingSignatureForGenerateDateOrTimestampArrayFunction(
@@ -464,17 +464,6 @@ bool CanStringConcatCoerceFrom(const googlesql::Type* arg_type);
 absl::StatusOr<const Type*> ComputeResultTypeForTopStruct(
     const std::string& field2_name, Catalog* catalog, TypeFactory* type_factory,
     CycleDetector* cycle_detector, const FunctionSignature& /*signature*/,
-    absl::Span<const InputArgumentType> arguments,
-    const AnalyzerOptions& analyzer_options);
-
-// Compute the result type for ST_NEAREST_NEIGHBORS.
-// The output type is
-//   ARRAY<
-//     STRUCT<`neighbor` <arguments[0].type>,
-//            `distance` Double> >
-absl::StatusOr<const Type*> ComputeResultTypeForNearestNeighborsStruct(
-    Catalog* catalog, TypeFactory* type_factory, CycleDetector* cycle_detector,
-    const FunctionSignature& /*signature*/,
     absl::Span<const InputArgumentType> arguments,
     const AnalyzerOptions& analyzer_options);
 

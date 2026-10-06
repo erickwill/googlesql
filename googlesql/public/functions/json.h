@@ -833,6 +833,27 @@ absl::StatusOr<JSONValue> JsonQueryLax(
     JSONValueConstRef input,
     json_internal::StrictJSONPathIterator& path_iterator);
 
+// Returns true if the JSONPath `evaluator` matches any value (including JSON
+// null) in the JSON `input`. Otherwise, returns false.
+absl::StatusOr<bool> JsonExists(JSONValueConstRef input,
+                                const JsonPathEvaluator& evaluator);
+
+// Returns true if any of the JSONPaths in `evaluators` match any value in the
+// JSON `input`. Otherwise, returns false.
+// All pointers in `evaluators` must be non-null. Three-valued logic (3VL) for
+// SQL NULL array elements should be handled by the caller.
+absl::StatusOr<bool> JsonExistsAny(
+    JSONValueConstRef input,
+    absl::Span<const JsonPathEvaluator* const> evaluators);
+
+// Returns true if all of the JSONPaths in `evaluators` match any value in the
+// JSON `input`. Otherwise, returns false.
+// All pointers in `evaluators` must be non-null. Three-valued logic (3VL) for
+// SQL NULL array elements should be handled by the caller.
+absl::StatusOr<bool> JsonExistsAll(
+    JSONValueConstRef input,
+    absl::Span<const JsonPathEvaluator* const> evaluators);
+
 // Returns true if a given JSON document `target` is contained within a JSON
 // document `input`. Otherwise, returns false.
 //

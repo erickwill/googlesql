@@ -330,6 +330,21 @@ const CastHashMap* InitializeGoogleSQLCasts() {
   ADD_TO_MAP(STRING,     UUID,       EXPLICIT_OR_LITERAL_OR_PARAMETER);
   ADD_TO_MAP(BYTES,      UUID,       EXPLICIT);
   ADD_TO_MAP(COLUMN_LIST_SPEC, COLUMN_LIST_SPEC, IMPLICIT);
+
+  // Add universal casts for VARIANT.
+  for (int i = 1; i <= TypeKind_MAX; ++i) {
+    if (!TypeKind_IsValid(i)) continue;
+    TypeKind kind = static_cast<TypeKind>(i);
+    if (kind == TYPE_VARIANT) continue;
+    // Casts from TYPE_UNKNOWN, TYPE_MEASURE, and TYPE_ROW to VARIANT are not
+    // supported.
+    if (kind == TYPE_UNKNOWN || kind == TYPE_MEASURE || kind == TYPE_ROW) {
+      continue;
+    }
+
+    AddToCastMap(kind, TYPE_VARIANT, IMPLICIT, map);
+  }
+
   // clang-format on
 
   return map;
@@ -536,6 +551,29 @@ bool IsTypeCastableToJson(const Type* from_type,
   }
 }
 
+bool IsTypeCastableToVariant(const Type* from_type,
+                             const LanguageOptions& language_options) {
+  // VARIANT implicitly coerces to VARIANT.
+  if (from_type->IsVariant()) {
+    return true;
+  }
+  if (!language_options.LanguageFeatureEnabled(
+          LanguageFeature::FEATURE_VARIANT_TYPE)) {
+    return false;
+  }
+  switch (from_type->kind()) {
+    case TYPE_UNKNOWN:
+    case TYPE_MEASURE:
+    case TYPE_ROW:
+      return false;
+    default:
+      return absl::c_all_of(
+          from_type->ComponentTypes(), [&](const Type* component_type) {
+            return IsTypeCastableToVariant(component_type, language_options);
+          });
+  }
+}
+
 namespace {
 
 enum class JsonCastProperty { kEqualityPreserving, kOrderPreserving };
@@ -605,6 +643,12 @@ const CastHashMap& GetGoogleSQLCasts() {
 const CastFunctionProperty* GetCastProperty(
     TypeKind from_type_kind, TypeKind to_type_kind,
     const LanguageOptions* language_options) {
+  // Non-identity casts involving VARIANT require FEATURE_VARIANT_TYPE.
+  if ((from_type_kind == TYPE_VARIANT || to_type_kind == TYPE_VARIANT) &&
+      from_type_kind != to_type_kind && language_options != nullptr &&
+      !language_options->LanguageFeatureEnabled(FEATURE_VARIANT_TYPE)) {
+    return nullptr;
+  }
   // TODO: check language options here for future JSON casts.
   return googlesql_base::FindOrNull(GetGoogleSQLCasts(),
                          TypeKindPair(from_type_kind, to_type_kind));
@@ -823,7 +867,19 @@ absl::StatusOr<Value> CastContext::CastValue(
     return v;
   }
 
-  if (from_value.type()->IsExtendedType() || to_type->IsExtendedType()) {
+  if (to_type->IsVariant()) {
+    if (!IsTypeCastableToVariant(v.type(), language_options())) {
+      return MakeSqlError()
+             << "Unsupported cast from "
+             << v.type()->ShortTypeName(language_options().product_mode())
+             << " to "
+             << to_type->ShortTypeName(language_options().product_mode());
+    }
+    return Value::Variant(v);
+  }
+
+  if ((from_value.type()->IsExtendedType() || to_type->IsExtendedType()) &&
+      !from_value.type()->IsVariant()) {
     return CastWithExtendedType(from_value, to_type);
   }
 
@@ -1462,7 +1518,7 @@ absl::StatusOr<Value> CastContext::CastValue(
       const Type* to_element_type = to_type->AsArray()->element_type();
       std::vector<Value> casted_elements(v.num_elements());
       for (int i = 0; i < v.num_elements(); ++i) {
-        if (v.element(i).is_null()) {
+        if (v.element(i).is_null() && !to_element_type->IsVariant()) {
           casted_elements[i] = Value::Null(to_element_type);
         } else {
           absl::StatusOr<Value> element_cast_result =

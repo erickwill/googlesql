@@ -395,153 +395,18 @@ ERROR: Analytic function PERCENT_RANK does not support a WITHIN clause [at 7:11]
           ^
 ==
 
-# UDAFs support within clause
+# UDAFs do not support within clause
 FROM TimeseriesTable
 |> ALIGN (
   TIMESTAMP ts_col
   PERIOD INTERVAL 1 MINUTE
   ORIGIN TIMESTAMP('2000-01-01')
-  METRICS {{uda_valid_templated_return_sum_int64_arg(requests)|uda_valid_templated_return_int64_not_aggregate_arg(requests)|uda_valid_templated_return_int64_not_aggregate_arg(1)|uda_valid_templated_return_int64_aggregate_and_not_aggregate_arg(requests, 1)}} WITHIN (1 PERIOD PRECEDING) AS m
+  METRICS uda_valid_templated_return_sum_int64_arg(requests) WITHIN (1 PERIOD PRECEDING) AS m
 )
 --
-ALTERNATION GROUP: uda_valid_templated_return_sum_int64_arg(requests)
---
-QueryStmt
-+-output_column_list=
-| +-$align.m#8 AS m [INT64]
-| +-$align.aligned_timestamp#6 AS ts_col [TIMESTAMP]
-+-query=
-  +-ProjectScan
-    +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7, $align.m#8]
-    +-expr_list=
-    | +-m#8 := ColumnRef(type=INT64, column=$estimator.$estimator1#7)
-    +-input_scan=
-      +-AlignScan
-        +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7]
-        +-input_scan=
-        | +-TableScan(column_list=TimeseriesTable.[ts_col#3, requests#5], table=TimeseriesTable, column_index_list=[2, 4])
-        +-timestamp_column=
-        | +-ColumnRef(type=TIMESTAMP, column=TimeseriesTable.ts_col#3)
-        +-period=
-        | +-FunctionCall(GoogleSQL:$interval(INT64, ENUM<googlesql.functions.DateTimestampPart>) -> INTERVAL)
-        |   +-Literal(type=INT64, value=1)
-        |   +-Literal(type=ENUM<googlesql.functions.DateTimestampPart>, value=MINUTE)
-        +-origin=
-        | +-FunctionCall(GoogleSQL:timestamp(STRING, optional(0) STRING) -> TIMESTAMP)
-        |   +-Literal(type=STRING, value="2000-01-01")
-        +-output_within=
-        | +-WithinBounds
-        |   +-lower_bound=
-        |   | +-WithinBoundExpr(within_bound_kind=UNBOUNDED PRECEDING)
-        |   +-upper_bound=
-        |     +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
-        +-aligned_timestamp_column=$align.aligned_timestamp#6
-        +-estimator_function_list=
-          +-$estimator1#7 :=
-            +-EstimatorFunctionCall(Templated_SQL_Function:uda_valid_templated_return_sum_int64_arg(INT64) -> INT64)
-              +-ColumnRef(type=INT64, column=TimeseriesTable.requests#5)
-              +-within_bounds=
-                +-WithinBounds
-                  +-lower_bound=
-                  | +-WithinBoundExpr(within_bound_kind=PERIOD PRECEDING)
-                  |   +-Literal(type=INT64, value=1)
-                  +-upper_bound=
-                    +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
---
-ALTERNATION GROUP: uda_valid_templated_return_int64_not_aggregate_arg(requests)
---
-ERROR: The argument to TEMPLATED_SQL_FUNCTION:UDA_VALID_TEMPLATED_RETURN_INT64_NOT_AGGREGATE_ARG must be a literal or query parameter [at 6:62]
-...uda_valid_templated_return_int64_not_aggregate_arg(requests) WITHIN (1 PER...
-                                                      ^
---
-ALTERNATION GROUP: uda_valid_templated_return_int64_not_aggregate_arg(1)
---
-QueryStmt
-+-output_column_list=
-| +-$align.m#8 AS m [INT64]
-| +-$align.aligned_timestamp#6 AS ts_col [TIMESTAMP]
-+-query=
-  +-ProjectScan
-    +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7, $align.m#8]
-    +-expr_list=
-    | +-m#8 := ColumnRef(type=INT64, column=$estimator.$estimator1#7)
-    +-input_scan=
-      +-AlignScan
-        +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7]
-        +-input_scan=
-        | +-TableScan(column_list=[TimeseriesTable.ts_col#3], table=TimeseriesTable, column_index_list=[2])
-        +-timestamp_column=
-        | +-ColumnRef(type=TIMESTAMP, column=TimeseriesTable.ts_col#3)
-        +-period=
-        | +-FunctionCall(GoogleSQL:$interval(INT64, ENUM<googlesql.functions.DateTimestampPart>) -> INTERVAL)
-        |   +-Literal(type=INT64, value=1)
-        |   +-Literal(type=ENUM<googlesql.functions.DateTimestampPart>, value=MINUTE)
-        +-origin=
-        | +-FunctionCall(GoogleSQL:timestamp(STRING, optional(0) STRING) -> TIMESTAMP)
-        |   +-Literal(type=STRING, value="2000-01-01")
-        +-output_within=
-        | +-WithinBounds
-        |   +-lower_bound=
-        |   | +-WithinBoundExpr(within_bound_kind=UNBOUNDED PRECEDING)
-        |   +-upper_bound=
-        |     +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
-        +-aligned_timestamp_column=$align.aligned_timestamp#6
-        +-estimator_function_list=
-          +-$estimator1#7 :=
-            +-EstimatorFunctionCall(Templated_SQL_Function:uda_valid_templated_return_int64_not_aggregate_arg(INT64) -> INT64)
-              +-Literal(type=INT64, value=1)
-              +-within_bounds=
-                +-WithinBounds
-                  +-lower_bound=
-                  | +-WithinBoundExpr(within_bound_kind=PERIOD PRECEDING)
-                  |   +-Literal(type=INT64, value=1)
-                  +-upper_bound=
-                    +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
---
-ALTERNATION GROUP: uda_valid_templated_return_int64_aggregate_and_not_aggregate_arg(requests, 1)
---
-QueryStmt
-+-output_column_list=
-| +-$align.m#8 AS m [INT64]
-| +-$align.aligned_timestamp#6 AS ts_col [TIMESTAMP]
-+-query=
-  +-ProjectScan
-    +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7, $align.m#8]
-    +-expr_list=
-    | +-m#8 := ColumnRef(type=INT64, column=$estimator.$estimator1#7)
-    +-input_scan=
-      +-AlignScan
-        +-column_list=[$align.aligned_timestamp#6, $estimator.$estimator1#7]
-        +-input_scan=
-        | +-TableScan(column_list=TimeseriesTable.[ts_col#3, requests#5], table=TimeseriesTable, column_index_list=[2, 4])
-        +-timestamp_column=
-        | +-ColumnRef(type=TIMESTAMP, column=TimeseriesTable.ts_col#3)
-        +-period=
-        | +-FunctionCall(GoogleSQL:$interval(INT64, ENUM<googlesql.functions.DateTimestampPart>) -> INTERVAL)
-        |   +-Literal(type=INT64, value=1)
-        |   +-Literal(type=ENUM<googlesql.functions.DateTimestampPart>, value=MINUTE)
-        +-origin=
-        | +-FunctionCall(GoogleSQL:timestamp(STRING, optional(0) STRING) -> TIMESTAMP)
-        |   +-Literal(type=STRING, value="2000-01-01")
-        +-output_within=
-        | +-WithinBounds
-        |   +-lower_bound=
-        |   | +-WithinBoundExpr(within_bound_kind=UNBOUNDED PRECEDING)
-        |   +-upper_bound=
-        |     +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
-        +-aligned_timestamp_column=$align.aligned_timestamp#6
-        +-estimator_function_list=
-          +-$estimator1#7 :=
-            +-EstimatorFunctionCall(Templated_SQL_Function:uda_valid_templated_return_int64_aggregate_and_not_aggregate_arg(INT64, INT64) -> INT64)
-              +-ColumnRef(type=INT64, column=TimeseriesTable.requests#5)
-              +-Literal(type=INT64, value=1)
-              +-within_bounds=
-                +-WithinBounds
-                  +-lower_bound=
-                  | +-WithinBoundExpr(within_bound_kind=PERIOD PRECEDING)
-                  |   +-Literal(type=INT64, value=1)
-                  +-upper_bound=
-                    +-WithinBoundExpr(within_bound_kind=ANCHOR TIMESTAMP)
+ERROR: Aggregate function TEMPLATED_SQL_FUNCTION:UDA_VALID_TEMPLATED_RETURN_SUM_INT64_ARG does not support a WITHIN clause [at 6:11]
+  METRICS uda_valid_templated_return_sum_int64_arg(requests) WITHIN (1 PERIOD...
+          ^
 ==
 
 # table columns are not allowed outside estimator functions

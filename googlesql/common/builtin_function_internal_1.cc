@@ -609,7 +609,7 @@ absl::Status CheckBitwiseOperatorFirstArgumentIsIntegerOrBytes(
 
 absl::Status CheckDateDatetimeTimeTimestampTruncArguments(
     absl::string_view function_name,
-    const std::vector<InputArgumentType>& arguments,
+    absl::Span<const InputArgumentType> arguments,
     const LanguageOptions& language_options) {
   if (arguments.size() < 2) {
     // Let validation happen normally.  It will return an error later.
@@ -1159,7 +1159,7 @@ std::string NoMatchingSignatureForFunctionUsingInterval(
 }
 
 std::string NoMatchingSignatureForDateOrTimeAddOrSubFunction(
-    const std::string& qualified_function_name,
+    absl::string_view qualified_function_name,
     absl::Span<const InputArgumentType> arguments, ProductMode product_mode) {
   return NoMatchingSignatureForFunctionUsingInterval(
       qualified_function_name, arguments, product_mode,
@@ -1558,23 +1558,6 @@ absl::StatusOr<const Type*> ComputeResultTypeForTopStruct(
   const Type* element_type;
   GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
       {{"value", arguments[0].type()}, {field2_name, arguments[1].type()}},
-      &element_type));
-  return type_factory->MakeArrayType(element_type, analyzer_options.language());
-}
-
-// Compute the result type for ST_NEAREST_NEIGHBORS.
-// The output type is
-//   ARRAY<
-//     STRUCT<`neighbor` <arguments[0].type>,
-//            `distance` Double> >
-absl::StatusOr<const Type*> ComputeResultTypeForNearestNeighborsStruct(
-    Catalog* catalog, TypeFactory* type_factory, CycleDetector* cycle_detector,
-    const FunctionSignature& /*signature*/,
-    absl::Span<const InputArgumentType> arguments,
-    const AnalyzerOptions& analyzer_options) {
-  const Type* element_type = nullptr;
-  GOOGLESQL_RETURN_IF_ERROR(type_factory->MakeStructType(
-      {{"neighbor", arguments[0].type()}, {"distance", types::DoubleType()}},
       &element_type));
   return type_factory->MakeArrayType(element_type, analyzer_options.language());
 }

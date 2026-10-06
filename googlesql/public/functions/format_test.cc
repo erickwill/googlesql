@@ -853,6 +853,12 @@ str_value: "bar"
   EXPECT_EQ(kLength, TestFormat("%'d%*s", {values::Int32(1234),
                                            values::Int32(1048575),
                                            values::String("")}));
+  // A conversion that starts with the output already exactly at the limit.
+  // The cases above all enter their last conversion below the limit and
+  // overshoot inside it; this one is rejected before any rendering happens.
+  EXPECT_EQ(kLength,
+            TestFormat("%*s%d", {values::Int32(1048576), values::String(""),
+                                 values::Int32(10)}));
 
   // Because we use printf, we'll lose string value contents after \0 chars.
   const std::string kStringWithZeros = std::string("abc\0def", 7);

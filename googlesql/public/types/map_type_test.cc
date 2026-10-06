@@ -371,7 +371,8 @@ TEST(MapTest, MapTypeWithEnumValid) {
 
 // Note: More rigorous testing is done through GetSQLLiteral() value_test.cc
 TEST(MapTest, FormatValueContentSQLLiteralMode) {
-  Type::FormatValueContentOptions options;
+  auto options = Type::FormatValueContentOptions::DefaultForMode(
+      ProductMode::PRODUCT_EXTERNAL);
   options.mode = Type::FormatValueContentOptions::Mode::kSQLLiteral;
   options.verbose = true;
 
@@ -386,8 +387,8 @@ TEST(MapTest, FormatValueContentSQLLiteralMode) {
 // Note: More rigorous testing is done through GetSQL() value_test.cc
 TEST(MapTest, FormatValueContentSQLExpressionMode) {
   {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_EXTERNAL);
     options.mode = Type::FormatValueContentOptions::Mode::kSQLExpression;
     Value map_value =
         test_values::Map({{Value::String("foo"), Value::Int64(100)}});
@@ -397,8 +398,8 @@ TEST(MapTest, FormatValueContentSQLExpressionMode) {
   }
   // MAP with FLOATs and use_external_float32 = false
   {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_EXTERNAL);
     options.mode = Type::FormatValueContentOptions::Mode::kSQLExpression;
     Value map_value =
         test_values::Map({{Value::Float(1.5), Value::Double(2.5)}});
@@ -409,8 +410,8 @@ TEST(MapTest, FormatValueContentSQLExpressionMode) {
 
   // MAP with FLOATs and use_external_float32 = true
   {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_EXTERNAL);
     options.use_external_float32 = true;
     options.mode = Type::FormatValueContentOptions::Mode::kSQLExpression;
     Value map_value =
@@ -422,8 +423,8 @@ TEST(MapTest, FormatValueContentSQLExpressionMode) {
 
   // MAP with FLOAT in nested container and use_external_float32 = false
   {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_EXTERNAL);
     options.mode = Type::FormatValueContentOptions::Mode::kSQLExpression;
     Value map_value = test_values::Map(
         {{Value::Float(1.5), test_values::Array({Value::Float(2.5)})}});
@@ -434,8 +435,8 @@ TEST(MapTest, FormatValueContentSQLExpressionMode) {
 
   // MAP with FLOAT in nested container and use_external_float32 = true
   {
-    Type::FormatValueContentOptions options;
-    options.set_product_mode(ProductMode::PRODUCT_EXTERNAL);
+    auto options = Type::FormatValueContentOptions::DefaultForMode(
+        ProductMode::PRODUCT_EXTERNAL);
     options.use_external_float32 = true;
     options.mode = Type::FormatValueContentOptions::Mode::kSQLExpression;
     Value map_value = test_values::Map(
@@ -521,7 +522,8 @@ TEST_P(MapTestFormatValueContentDebugMode, FormatValueContentDebugMode) {
   auto& [map_value, expected_format_str, expected_verbose_format_str] =
       GetParam();
 
-  Type::FormatValueContentOptions options;
+  auto options = Type::FormatValueContentOptions::DefaultForMode(
+      ProductMode::PRODUCT_EXTERNAL);
   options.mode = Type::FormatValueContentOptions::Mode::kDebug;
   options.verbose = false;
 
@@ -538,7 +540,8 @@ TEST_P(MapTestFormatValueContentDebugMode, FormatValueContentDebugMode) {
 TEST(MapTest, FormatValueContentDebugModeEmptyMap) {
   TypeFactory factory;
 
-  Type::FormatValueContentOptions options;
+  auto options = Type::FormatValueContentOptions::DefaultForMode(
+      ProductMode::PRODUCT_EXTERNAL);
   options.mode = Type::FormatValueContentOptions::Mode::kDebug;
 
   GOOGLESQL_ASSERT_OK_AND_ASSIGN(

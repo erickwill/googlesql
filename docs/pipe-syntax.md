@@ -2553,12 +2553,35 @@ The `ASSERT` operator has no equivalent operation in standard syntax.
  The [`ASSERT` statement][assert-statement] is
 a related feature that verifies that a single expression is true.
 
-**Example**
+**Semantics**
+
+*   `ASSERT` evaluates the condition for all rows of the input table that reach
+    the operator.
+*   Downstream operations (such as `LIMIT`) can't bypass the assertion for rows
+    that they don't request. All the rows that are logically present at the
+    location of the `ASSERT` will be validated.
+
+**Examples**
 
 ```googlesql
 FROM table
 |> ASSERT count != 0, "Count is zero for user", userId
 |> SELECT total / count AS average
+```
+
+When combined with `LIMIT`, the position of `ASSERT` determines which rows are
+validated:
+
+```googlesql
+-- Validates that all rows in the table pass the assertion, and then returns 10 rows.
+FROM Produce
+|> ASSERT sales > 0
+|> LIMIT 10;
+
+-- Validates the assertion only on the first 10 rows.
+FROM Produce
+|> LIMIT 10
+|> ASSERT sales > 0;
 ```
 
 [assert-statement]: https://github.com/google/googlesql/blob/master/docs/debugging-statements.md#assert
@@ -3313,32 +3336,26 @@ required.
         `|> AGGREGATE COUNT(*)` does, but returns nothing, rather than a count.
 *   If the input query has side effects (for example, `ASSERT` failures),
     those side effects do occur (when the input rows are computed).
-*   Optimizers may skip any execution stages that have no impact on query
-    side-effects.
+*   Optimizers may skip any execution stages that have no impact on query side
+    effects.
 
 **Examples**
 
-This example shows how `FINISH` requires all input rows to be computed,
-whereas `LIMIT` does not.
+The following example uses `FINISH` to run an assertion check across all rows in
+the table without returning a result table:
 
 ```googlesql
--- This query typically succeeds if the first 10 rows pass the assertion.
-FROM Produce
-|> ASSERT sales > 0
-|> LIMIT 10;
-
--- This query only succeeds if all rows in the table pass the assertion.
+-- Validates that all rows in the table pass the assertion, returning no result table.
 FROM Produce
 |> ASSERT sales > 0
 |> FINISH;
 ```
 
-This example uses the [`TEE` operator][tee-pipe-operator] with `FINISH` to
-assert a condition on all rows while returning only a subset of the rows:
+The following example uses the [`TEE` operator][tee-pipe-operator] with `FINISH`
+to assert a condition on all rows while returning only a subset of the rows:
 
 ```googlesql
--- This query asserts that all rows pass the assertion, and then returns the
--- first 10 rows.
+-- Asserts that all rows pass the assertion, and then returns the first 10 rows.
 FROM Produce
 |> TEE (
     |> ASSERT sales > 0

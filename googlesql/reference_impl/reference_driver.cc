@@ -82,6 +82,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
 #include "googlesql/base/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
@@ -513,6 +514,46 @@ absl::StatusOr<AnalyzerOptions> ReferenceDriver::GetAnalyzerOptions(
 }
 
 namespace {
+
+absl::Status ValidateTableDMLOutputStruct(const StructType* dml_struct) {
+  int num_fields = dml_struct->num_fields();
+  GOOGLESQL_RET_CHECK(num_fields == 2 || num_fields == 3)
+      << "DML output struct must have 2 or 3 fields, but got " << num_fields;
+
+  const StructField& field0 = dml_struct->field(0);
+  GOOGLESQL_RET_CHECK_EQ(kDMLOutputNumRowsModifiedColumnName, field0.name);
+  GOOGLESQL_RET_CHECK(field0.type->IsInt64());
+
+  const StructField& field1 = dml_struct->field(1);
+  GOOGLESQL_RET_CHECK_EQ(kDMLOutputAllRowsColumnName, field1.name);
+  GOOGLESQL_RET_CHECK(field1.type->IsArray());
+
+  if (num_fields == 3) {
+    const StructField& field2 = dml_struct->field(2);
+    GOOGLESQL_RET_CHECK_EQ(kDMLOutputReturningColumnName, field2.name);
+    GOOGLESQL_RET_CHECK(field2.type->IsArray());
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status ValidateGraphDMLOutputStruct(const StructType* dml_struct) {
+  int top_struct_num_fields = dml_struct->num_fields();
+  GOOGLESQL_RET_CHECK_GE(top_struct_num_fields, 1);
+  for (int i = 0; i < top_struct_num_fields; ++i) {
+    const StructField& field = dml_struct->field(i);
+    if (field.name == kDMLOutputReturningColumnName) {
+      GOOGLESQL_RET_CHECK(field.type->IsArray());
+    } else {
+      GOOGLESQL_RET_CHECK(field.type->IsStruct());
+      const StructType* inner_struct = field.type->AsStruct();
+      GOOGLESQL_RET_CHECK_EQ(inner_struct->num_fields(), 2);
+      GOOGLESQL_RETURN_IF_ERROR(ValidateTableDMLOutputStruct(inner_struct));
+    }
+  }
+  return absl::OkStatus();
+}
+
 // Creates a catalog that includes all symbols in <catalog>, plus script
 // variables.
 absl::StatusOr<std::unique_ptr<Catalog>> AugmentCatalogForScriptVariables(
@@ -795,6 +836,8 @@ static absl::StatusOr<Value> HandleCreateTableStatement(
 
   std::vector<const AnnotationMap*> column_annotations;
   bool all_empty_annotations = true;
+  std::vector<Value> column_default_values;
+  bool any_default_values = false;
   for (const auto& column_definition : create_table->column_definition_list()) {
     std::unique_ptr<AnnotationMap> new_map =
         AnnotationMap::Create(column_definition->type());
@@ -808,9 +851,28 @@ static absl::StatusOr<Value> HandleCreateTableStatement(
                        type_factory->TakeOwnership(std::move(new_map)));
       column_annotations.push_back(owned);
     }
+
+    // Only literal default values are supported.
+    if (column_definition->default_value() != nullptr &&
+        column_definition->default_value()->expression() != nullptr &&
+        column_definition->default_value()
+            ->expression()
+            ->Is<ResolvedLiteral>()) {
+      column_default_values.push_back(column_definition->default_value()
+                                          ->expression()
+                                          ->GetAs<ResolvedLiteral>()
+                                          ->value());
+      any_default_values = true;
+    } else {
+      column_default_values.push_back(Value());
+    }
   }
   if (!all_empty_annotations) {
     new_table.options.set_column_annotations(std::move(column_annotations));
+  }
+  if (any_default_values) {
+    new_table.options.set_column_default_values(
+        std::move(column_default_values));
   }
 
   for (const auto& option : create_table->option_list()) {
@@ -890,6 +952,8 @@ ReferenceDriver::ExecuteStatementForReferenceDriverInternal(
                                       catalog.get(), analyzer_options));
     analyzed = fresh_analyzer_out.get();
   }
+  GOOGLESQL_VLOG(1) << "Resolved statement in ReferenceDriver:\n"
+          << analyzed->resolved_statement()->DebugString();
   aux_output.analyzer_runtime_info = analyzed->runtime_info();
   if (analyzed->resolved_statement()->node_kind() ==
       RESOLVED_CREATE_PROCEDURE_STMT) {
@@ -1129,6 +1193,8 @@ ReferenceDriver::ExecuteStatementForReferenceDriverInternal(
       continue;
     }
 
+    // For all other statements, we expect a valid result.
+    GOOGLESQL_RET_CHECK(output_value.is_valid());
     const Type* output_type = output_value.type();
     switch (sub_stmt->node_kind()) {
       case RESOLVED_QUERY_STMT: {
@@ -1153,19 +1219,20 @@ ReferenceDriver::ExecuteStatementForReferenceDriverInternal(
           GOOGLESQL_RET_CHECK(expect_num_fields == 2 || expect_num_fields == 3);
         }
 
-        const StructField& field1 = output_struct_type->field(0);
-        GOOGLESQL_RET_CHECK_EQ(kDMLOutputNumRowsModifiedColumnName, field1.name);
-        GOOGLESQL_RET_CHECK(field1.type->IsInt64());
+        GOOGLESQL_RETURN_IF_ERROR(ValidateTableDMLOutputStruct(output_struct_type));
+        break;
+      }
+      case RESOLVED_GENERALIZED_QUERY_STMT: {
+        // A generalized query statement can contain pipe operator or graph
+        // operators.
+        // Only GQL DML operators are supported natively (for example,
+        // INSERT, SET, REMOVE and DELETE).
+        // Pipe operator can yield multiple results when
+        // evaluated, so they will always be rewritten to QueryStmt,
+        // MultiStmt or TerminalQueryStmt. So we do not support other cases.
 
-        const StructField& field2 = output_struct_type->field(1);
-        GOOGLESQL_RET_CHECK_EQ(kDMLOutputAllRowsColumnName, field2.name);
-        GOOGLESQL_RET_CHECK(field2.type->IsArray());
-
-        if (expect_num_fields == 3) {
-          const StructField& field3 = output_struct_type->field(2);
-          GOOGLESQL_RET_CHECK_EQ(kDMLOutputReturningColumnName, field3.name);
-          GOOGLESQL_RET_CHECK(field3.type->IsArray());
-        }
+        GOOGLESQL_RET_CHECK(output_type->IsStruct());
+        GOOGLESQL_RETURN_IF_ERROR(ValidateGraphDMLOutputStruct(output_type->AsStruct()));
         break;
       }
       case RESOLVED_CREATE_TABLE_STMT:

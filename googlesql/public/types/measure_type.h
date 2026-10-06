@@ -42,8 +42,8 @@ class MeasureType : public ContainerType {
 
   const Type* result_type() const { return result_type_; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    return {result_type_};
+  TypeListView ComponentTypes() const override {
+    return absl::MakeConstSpan(&result_type_, 1);
   }
 
   const MeasureType* AsMeasure() const override { return this; }

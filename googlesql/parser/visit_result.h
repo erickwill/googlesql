@@ -27,26 +27,30 @@ class ASTNode;
 class VisitResult {
  public:
   // Indicates that no new visit actions should be performed.
-  static VisitResult Empty() { return VisitResult(nullptr, nullptr, false); }
+  static VisitResult Empty() {
+    return VisitResult(/*node=*/nullptr, nullptr, /*terminate=*/false);
+  }
 
   // Indicates that the children of <node> should be visited next.
   static VisitResult VisitChildren(const ASTNode* node) {
-    return VisitResult(node, nullptr, false);
+    return VisitResult(node, nullptr, /*terminate=*/false);
   }
 
   // Indicates that the children of <node> should be visited next; then,
   // <continuation> should be invoked.
   static VisitResult VisitChildren(const ASTNode* node,
                                    std::function<absl::Status()> continuation) {
-    return VisitResult(node, continuation, false);
+    return VisitResult(node, continuation, /*terminate=*/false);
   }
 
   // Indicates that the traversal should terminate immediately, without invoking
   // any queued visitors.  Unlike returning a failed status, the status of the
   // overall visit operation is still Ok.
-  static VisitResult Terminate() { return VisitResult(nullptr, nullptr, true); }
+  static VisitResult Terminate() {
+    return VisitResult(/*node=*/nullptr, nullptr, /*terminate=*/true);
+  }
 
-  VisitResult() : VisitResult(nullptr, nullptr, false) {}
+  VisitResult() : VisitResult(/*node=*/nullptr, nullptr, /*terminate=*/false) {}
   VisitResult(const VisitResult&) = default;
   VisitResult& operator=(const VisitResult&) = default;
   VisitResult(VisitResult&&) = default;

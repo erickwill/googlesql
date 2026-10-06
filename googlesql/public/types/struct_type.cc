@@ -61,10 +61,25 @@
 
 namespace googlesql {
 
+namespace {
+
+std::vector<const Type*> MakeComponentTypes(
+    absl::Span<const StructField> fields) {
+  std::vector<const Type*> component_types;
+  component_types.reserve(fields.size());
+  for (const StructField& field : fields) {
+    component_types.push_back(field.type);
+  }
+  return component_types;
+}
+
+}  // namespace
+
 StructType::StructType(const TypeFactoryBase& factory,
                        std::vector<StructField> fields, int nesting_depth)
     : ListBackedType(factory, TYPE_STRUCT),
       fields_(std::move(fields)),
+      component_types_(MakeComponentTypes(fields_)),
       nesting_depth_(nesting_depth) {}
 
 bool StructType::IsSupportedType(
@@ -395,7 +410,9 @@ int64_t GetEstimatedStructFieldOwnedMemoryBytesSize(const StructField& field) {
 }
 
 int64_t StructType::GetEstimatedOwnedMemoryBytesSize() const {
-  int64_t result = sizeof(*this);
+  int64_t result =
+      sizeof(*this) +
+      internal::GetExternallyAllocatedMemoryEstimate(component_types_);
 
   for (const StructField& field : fields_) {
     result += GetEstimatedStructFieldOwnedMemoryBytesSize(field);

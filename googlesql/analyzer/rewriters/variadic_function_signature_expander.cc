@@ -235,12 +235,13 @@ IF(
 
 // Struct to handle arguments from both
 // ResolvedFunctionCall::argument_list() or
-// ResolvedFunctionCall::generic_argument_list() (in the case of lambda args) in
-// a unified manner.
+// ResolvedFunctionCall::generic_argument_list() (in the case of lambda args or
+// function references) in a unified manner.
 struct ArgumentInfo {
   std::string name;
   const ResolvedExpr* expr = nullptr;
   const ResolvedInlineLambda* inline_lambda = nullptr;
+  const ResolvedFunctionRef* function_ref = nullptr;
 
   ArgumentInfo(std::string name, const ResolvedExpr* expr)
       : name(std::move(name)), expr(expr) {}
@@ -248,9 +249,12 @@ struct ArgumentInfo {
       : name(std::move(name)) {
     if (arg->expr() != nullptr) {
       expr = arg->expr();
-    } else {
-      ABSL_DCHECK(arg->inline_lambda() != nullptr);
+    } else if (arg->inline_lambda() != nullptr) {
       inline_lambda = arg->inline_lambda();
+    } else if (arg->function_ref() != nullptr) {
+      function_ref = arg->function_ref();
+    } else {
+      ABSL_DCHECK(false) << "Unexpected argument type in ResolvedFunctionArgument";
     }
   }
 };
@@ -442,10 +446,7 @@ absl::StatusOr<std::vector<FunctionArgumentType>> BuildExpandedArgumentTypes(
     if (arg_info.expr != nullptr) {
       new_arg_types.push_back(FunctionArgumentType(
           arg_info.expr->type(), options, /*num_occurrences=*/1));
-    } else {
-      ABSL_DCHECK(arg_info.inline_lambda != nullptr)
-          << "Unsupported argument type in " << node.function()->Name();
-
+    } else if (arg_info.inline_lambda != nullptr) {
       const googlesql::ResolvedInlineLambda* lambda = arg_info.inline_lambda;
 
       googlesql::FunctionArgumentTypeList lambda_arg_types;
@@ -461,6 +462,24 @@ absl::StatusOr<std::vector<FunctionArgumentType>> BuildExpandedArgumentTypes(
 
       new_arg_types.push_back(googlesql::FunctionArgumentType::Lambda(
           std::move(lambda_arg_types), std::move(lambda_body_type), options));
+    } else if (arg_info.function_ref != nullptr) {
+      const googlesql::FunctionSignature& sig =
+          arg_info.function_ref->signature();
+      googlesql::FunctionArgumentTypeList lambda_arg_types;
+      for (const auto& arg : sig.arguments()) {
+        lambda_arg_types.push_back(
+            googlesql::FunctionArgumentType(arg.type(), /*num_occurrences=*/1));
+      }
+
+      const googlesql::Type* body_type = sig.result_type().type();
+      googlesql::FunctionArgumentType lambda_body_type(body_type,
+                                                       /*num_occurrences=*/1);
+
+      new_arg_types.push_back(googlesql::FunctionArgumentType::Lambda(
+          std::move(lambda_arg_types), std::move(lambda_body_type), options));
+    } else {
+      return absl::InternalError(absl::StrCat("Unexpected argument type in ",
+                                              node.function()->Name()));
     }
   }
   return new_arg_types;

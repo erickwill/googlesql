@@ -78,15 +78,98 @@ class GraphDmlResolver {
   ResolveGqlInsert(const ASTGqlInsert& ast_insert, const NameScope* input_scope,
                    ResolvedGraphWithNameList<const ResolvedScan> input);
 
+  // Resolves a Graph SET operator.
+  // Returns a ResolvedGraphUpdateScan that applies property and label
+  // modifications to existing graph elements in the working table, and replaces
+  // the modified element columns with new columns produced by
+  // `ResolvedGraphUpdateElement`.
+  //
+  // A SET operator modifies graph elements by setting individual properties,
+  // replacing all properties, or adding labels:
+  //  * Setting individual properties (`SET a.prop = expr`): Updates or adds a
+  //    property value on target element `a`. Static properties are coerced to
+  //    their declared type. For dynamic properties, only `expr` with JSON
+  //    convertible type is allowed.
+  //  * Replacing all properties (`SET a = {prop: expr, ...}`): Replaces all
+  //    properties (both static and dynamic) on target element `a` according to
+  //    the element property specification. Unlisted updatable static properties
+  //    are replaced with NULL, and unlisted dynamic properties are discarded.
+  //  * Adding labels (`SET a:Label`): Adds a dynamic label to target element
+  //    `a` (does not support static graph elements).
+  //
+  // If a SET operator targets the same variable multiple times (e.g.,
+  // `SET a.prop = 1, a:Label`), all modifications for that variable are grouped
+  // into a single `ResolvedGraphUpdateElement`.
+  //
+  // Rules:
+  //  * Target variable must be in scope and evaluate to a graph node or edge.
+  //  * Static property values are coerced to the property's declared type.
+  //  * Setting dynamic properties or adding dynamic labels requires the
+  //    FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE language feature.
+  //  * Duplicate property names targeting the same element in a SET
+  //    operator are errors; duplicate label names are deduplicated
+  //    idempotently.
+  //  * TODO: Add analysis-time table-level checks (whether
+  //    candidate tables support dynamic properties or dynamic labels, whether
+  //    properties exist on all underlying element tables, or whether backing
+  //    columns are writable) when updatable graph element types are supported.
+  // See (broken link):dml-update for more details.
+  absl::StatusOr<ResolvedGraphWithNameList<const ResolvedScan>> ResolveGqlSet(
+      const ASTGqlSet& ast_set, const NameScope* input_scope,
+      ResolvedGraphWithNameList<const ResolvedScan> input);
+
+  // Resolves a Graph REMOVE operator.
+  // Returns a ResolvedGraphUpdateScan that removes dynamic properties or labels
+  // from existing graph elements in the working table, and replaces the
+  // modified element columns with new columns produced by
+  // `ResolvedGraphUpdateElement`.
+  //
+  // A REMOVE operator modifies graph elements by removing dynamic properties or
+  // labels:
+  //  * Removing dynamic properties (`REMOVE a.prop`): Deletes a dynamic
+  //    property from target element `a`. Static/schematized properties cannot
+  //    be removed.
+  //  * Removing labels (`REMOVE a:Label`): Deletes a dynamic label from target
+  //    element `a`. Static labels cannot be removed.
+  //
+  // If a REMOVE operator targets the same variable multiple times (e.g.,
+  // `REMOVE a.prop1, a.prop2`), all removals for that variable are grouped
+  // into a single `ResolvedGraphUpdateElement`.
+  //
+  // Rules:
+  //  * Target variable must be in scope and evaluate to a graph node or edge.
+  //  * Removing dynamic properties or dynamic labels requires the
+  //    FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE language feature.
+  //  * Static (schematized) properties and static labels cannot be removed
+  //    (use SET a.prop = NULL to clear a static property value).
+  //  * Duplicate property names and label names are deduplicated
+  //    idempotently.
+  //  * TODO: Add analysis-time table-level checks (whether
+  //    candidate tables support dynamic properties or dynamic labels, or
+  //    whether backing columns are writable) when updatable graph element types
+  //    are supported.
+  // See (broken link):dml-update for more details.
+  absl::StatusOr<ResolvedGraphWithNameList<const ResolvedScan>>
+  ResolveGqlRemove(const ASTGqlRemove& ast_remove, const NameScope* input_scope,
+                   ResolvedGraphWithNameList<const ResolvedScan> input);
+
  private:
   // Resolves an AST property specification against the target element table.
-  // Performs assignment based type coercion and returns an error if duplicates
-  // are found.
+  // Performs assignment based type coercion and validates that:
+  //  - Property names are unique in the specification.
+  //  - Properties do not map to edge endpoint referencing key columns.
+  //  - Properties do not map to the dynamic label backing column when dynamic
+  //    labels are specified.
+  //  - Properties do not map to the dynamic properties backing column when
+  //    dynamic properties are specified.
+  //  - Multiple properties do not map to the same target table column.
+  // `has_dynamic_label` indicates whether the INSERT element pattern specifies
+  // at least one dynamic label.
   absl::StatusOr<
       std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>>>
   ResolveInsertProperties(const ASTGraphPropertySpecification* ast_prop_spec,
                           const GraphElementTable* target_table,
-                          const NameScope* input_scope);
+                          bool has_dynamic_label, const NameScope* input_scope);
 
   // Builds the GraphElementType based on the properties of the target table.
   // Supports both static and dynamic graph element types.
@@ -158,6 +241,49 @@ class GraphDmlResolver {
       const GraphNodeTable* actual_node_table,
       const GraphNodeTable& expected_node_table, const ResolvedColumn& node_col,
       bool is_source);
+
+  // Resolves property and label modifications for a single target element
+  // variable in a SET operator.
+  absl::StatusOr<std::unique_ptr<const ResolvedGraphUpdateElement>>
+  ResolveSetGraphUpdateElement(const ResolvedColumn& target_col,
+                               const std::vector<const ASTGqlSetItem*>& items,
+                               const NameScope* input_scope);
+
+  // Resolves a single property assignment (name and value expression) for a SET
+  // operator, performing static property type coercion or checking that
+  // dynamic properties are allowed by the target element type.
+  // TODO: Add table-level physical checks when updatable graph
+  // element types are supported.
+  absl::StatusOr<std::unique_ptr<const ResolvedGraphDMLPropertyItem>>
+  ResolveSetPropertyItemValue(IdString prop_id, const ASTNode* ast_prop_name,
+                              const ASTExpression* ast_prop_val_expr,
+                              const GraphElementType* target_element_type,
+                              const ResolvedColumn& target_col,
+                              const NameScope* input_scope);
+
+  // Resolves label assignments (`SET n:Label`) for a SET operator.
+  absl::StatusOr<std::vector<std::unique_ptr<const ResolvedGraphLabel>>>
+  ResolveSetLabelItems(
+      const std::vector<const ASTGqlSetLabelItem*>& label_items);
+
+  // Resolves property and label removals for a single target element variable
+  // in a REMOVE operator.
+  absl::StatusOr<std::unique_ptr<const ResolvedGraphUpdateElement>>
+  ResolveRemoveGraphUpdateElement(
+      const ResolvedColumn& target_col,
+      const std::vector<const ASTGqlRemoveItem*>& items);
+
+  // Resolves property removals (`REMOVE n.prop`) for a REMOVE operator.
+  absl::StatusOr<
+      std::vector<std::unique_ptr<const ResolvedGraphDMLPropertyItem>>>
+  ResolveRemovePropertyItems(
+      const std::vector<const ASTGqlRemovePropertyItem*>& property_items,
+      const GraphElementType* target_element_type);
+
+  // Resolves label removals (`REMOVE n:Label`) for a REMOVE operator.
+  absl::StatusOr<std::vector<std::unique_ptr<const ResolvedGraphLabel>>>
+  ResolveRemoveLabelItems(
+      const std::vector<const ASTGqlRemoveLabelItem*>& label_items);
 
   Resolver* resolver_ = nullptr;
   const PropertyGraph* graph_ = nullptr;

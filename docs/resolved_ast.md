@@ -94,6 +94,8 @@ Additional non-generated classes that are documented separately:
         <a id="ResolvedComputedColumn-toc" href="#ResolvedComputedColumn">ResolvedComputedColumn</a>
         <a id="ResolvedDeferredComputedColumn-toc" href="#ResolvedDeferredComputedColumn">ResolvedDeferredComputedColumn</a>
     <a id="ResolvedConnection-toc" href="#ResolvedConnection">ResolvedConnection</a>
+    <a id="ResolvedConnectionKeyValuePair-toc" href="#ResolvedConnectionKeyValuePair">ResolvedConnectionKeyValuePair</a>
+    <a id="ResolvedConnectionList-toc" href="#ResolvedConnectionList">ResolvedConnectionList</a>
     <a id="ResolvedConstraint-toc" href="#ResolvedConstraint">ResolvedConstraint</a>
       <a id="ResolvedCheckConstraint-toc" href="#ResolvedCheckConstraint">ResolvedCheckConstraint</a>
       <a id="ResolvedForeignKey-toc" href="#ResolvedForeignKey">ResolvedForeignKey</a>
@@ -130,6 +132,7 @@ Additional non-generated classes that are documented separately:
     <a id="ResolvedGraphPathSearchPrefix-toc" href="#ResolvedGraphPathSearchPrefix">ResolvedGraphPathSearchPrefix</a>
     <a id="ResolvedGraphPropertyDeclaration-toc" href="#ResolvedGraphPropertyDeclaration">ResolvedGraphPropertyDeclaration</a>
     <a id="ResolvedGraphPropertyDefinition-toc" href="#ResolvedGraphPropertyDefinition">ResolvedGraphPropertyDefinition</a>
+    <a id="ResolvedGraphUpdateElement-toc" href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>
     <a id="ResolvedGroupingCall-toc" href="#ResolvedGroupingCall">ResolvedGroupingCall</a>
     <a id="ResolvedGroupingSetBase-toc" href="#ResolvedGroupingSetBase">ResolvedGroupingSetBase</a>
       <a id="ResolvedCube-toc" href="#ResolvedCube">ResolvedCube</a>
@@ -208,11 +211,13 @@ Additional non-generated classes that are documented separately:
     <a id="ResolvedGetProtoOneof-toc" href="#ResolvedGetProtoOneof">ResolvedGetProtoOneof</a>
     <a id="ResolvedGetRowField-toc" href="#ResolvedGetRowField">ResolvedGetRowField</a>
     <a id="ResolvedGetStructField-toc" href="#ResolvedGetStructField">ResolvedGetStructField</a>
+    <a id="ResolvedGetVariantField-toc" href="#ResolvedGetVariantField">ResolvedGetVariantField</a>
     <a id="ResolvedGraphGetElementProperty-toc" href="#ResolvedGraphGetElementProperty">ResolvedGraphGetElementProperty</a>
     <a id="ResolvedGraphInsertElement-toc" href="#ResolvedGraphInsertElement">ResolvedGraphInsertElement</a>
     <a id="ResolvedGraphIsLabeledPredicate-toc" href="#ResolvedGraphIsLabeledPredicate">ResolvedGraphIsLabeledPredicate</a>
     <a id="ResolvedGraphMakeElement-toc" href="#ResolvedGraphMakeElement">ResolvedGraphMakeElement</a>
     <a id="ResolvedLiteral-toc" href="#ResolvedLiteral">ResolvedLiteral</a>
+    <a id="ResolvedMakeColumnListSpec-toc" href="#ResolvedMakeColumnListSpec">ResolvedMakeColumnListSpec</a>
     <a id="ResolvedMakeMap-toc" href="#ResolvedMakeMap">ResolvedMakeMap</a>
     <a id="ResolvedMakeProto-toc" href="#ResolvedMakeProto">ResolvedMakeProto</a>
     <a id="ResolvedMakeStruct-toc" href="#ResolvedMakeStruct">ResolvedMakeStruct</a>
@@ -249,6 +254,7 @@ Additional non-generated classes that are documented separately:
       <a id="ResolvedGraphLinearScan-toc" href="#ResolvedGraphLinearScan">ResolvedGraphLinearScan</a>
       <a id="ResolvedGraphScan-toc" href="#ResolvedGraphScan">ResolvedGraphScan</a>
     <a id="ResolvedGraphTableScan-toc" href="#ResolvedGraphTableScan">ResolvedGraphTableScan</a>
+    <a id="ResolvedGraphUpdateScan-toc" href="#ResolvedGraphUpdateScan">ResolvedGraphUpdateScan</a>
     <a id="ResolvedGroupRowsScan-toc" href="#ResolvedGroupRowsScan">ResolvedGroupRowsScan</a>
     <a id="ResolvedInsertScan-toc" href="#ResolvedInsertScan">ResolvedInsertScan</a>
     <a id="ResolvedJoinScan-toc" href="#ResolvedJoinScan">ResolvedJoinScan</a>
@@ -1324,6 +1330,25 @@ class ResolvedGetJsonField : public <a href="#ResolvedExpr">ResolvedExpr</a> {
 };
 </code></pre></p>
 
+### ResolvedGetVariantField
+<a id="ResolvedGetVariantField"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedExpr">ResolvedExpr</a>  &rsaquo; ResolvedGetVariantField
+ &nbsp;(<a href="#ResolvedGetVariantField-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Get the field &lt;field_name&gt; from &lt;expr&gt;, which has a VARIANT type.
+// &lt;field_name&gt; cannot be &#34;&#34;.
+// The output always has VARIANT type.
+// Returns SQL NULL if &lt;field_name&gt; does not exist.</font>
+class ResolvedGetVariantField : public <a href="#ResolvedExpr">ResolvedExpr</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_GET_VARIANT_FIELD;
+
+  const <a href="#ResolvedExpr">ResolvedExpr</a>* expr() const;
+
+  const std::string&amp; field_name() const;
+};
+</code></pre></p>
+
 ### ResolvedGetRowField
 <a id="ResolvedGetRowField"></a>
 
@@ -1805,6 +1830,44 @@ class ResolvedConnection : public <a href="#ResolvedArgument">ResolvedArgument</
   static const ResolvedNodeKind TYPE = RESOLVED_CONNECTION;
 
   const Connection* connection() const;
+};
+</code></pre></p>
+
+### ResolvedConnectionKeyValuePair
+<a id="ResolvedConnectionKeyValuePair"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedArgument">ResolvedArgument</a>  &rsaquo; ResolvedConnectionKeyValuePair
+ &nbsp;(<a href="#ResolvedConnectionKeyValuePair-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Represents a connection associated with a key (role).</font>
+class ResolvedConnectionKeyValuePair : public <a href="#ResolvedArgument">ResolvedArgument</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_CONNECTION_KEY_VALUE_PAIR;
+
+  const std::string&amp; key() const;
+
+  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+};
+</code></pre></p>
+
+### ResolvedConnectionList
+<a id="ResolvedConnectionList"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedArgument">ResolvedArgument</a>  &rsaquo; ResolvedConnectionList
+ &nbsp;(<a href="#ResolvedConnectionList-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Represents a connection clause (`WITH CONNECTION ...` or
+// `CONNECTION(...)`), which specifies either a single unnamed `connection`
+// or a list of keyed connections (`connection_kv_list`), enabled by
+// `FEATURE_MULTI_CONNECTIONS`. Exactly one of `connection` or a non-empty
+// `connection_kv_list` must be present.</font>
+class ResolvedConnectionList : public <a href="#ResolvedArgument">ResolvedArgument</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_CONNECTION_LIST;
+
+  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedConnectionKeyValuePair">ResolvedConnectionKeyValuePair</a>&gt;&gt;&amp; connection_kv_list() const;
+  int connection_kv_list_size() const;
+  const <a href="#ResolvedConnectionKeyValuePair">ResolvedConnectionKeyValuePair</a>* connection_kv_list(int i) const;
 };
 </code></pre></p>
 
@@ -3421,7 +3484,8 @@ class ResolvedFunctionRef : public <a href="#ResolvedArgument">ResolvedArgument<
 // * `expr` represents a scalar function argument.
 // * `scan` represents a table-typed argument.
 // * `model` represents a ML model function argument.
-// * `connection` represents a connection object function argument.
+// * `connection_list` represents a connection object or list of keyed
+//   connections function argument.
 // * `descriptor_arg` represents a descriptor object function argument.
 // * `inline_lambda` represents a lambda function argument.
 // * `sequence` represents a sequence object function argument.
@@ -3450,7 +3514,7 @@ class ResolvedFunctionArgument : public <a href="#ResolvedArgument">ResolvedArgu
 
   const <a href="#ResolvedModel">ResolvedModel</a>* model() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const <a href="#ResolvedDescriptor">ResolvedDescriptor</a>* descriptor_arg() const;
 
@@ -3491,6 +3555,18 @@ class ResolvedFunctionArgument : public <a href="#ResolvedArgument">ResolvedArgu
   // alias if its type is `expr`, but the support may be extended to
   // other types, e.g. `scan` or `model` in the future.</font>
   const std::string&amp; argument_alias() const;
+
+<font color="brown">  // If this argument is a relation, this stores the partition keys
+  // from the PARTITION BY clause.</font>
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedColumnRef">ResolvedColumnRef</a>&gt;&gt;&amp; partition_by_list() const;
+  int partition_by_list_size() const;
+  const <a href="#ResolvedColumnRef">ResolvedColumnRef</a>* partition_by_list(int i) const;
+
+<font color="brown">  // If this argument is a relation, this stores the order-by items
+  // from the ORDER BY clause.</font>
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedOrderByItem">ResolvedOrderByItem</a>&gt;&gt;&amp; order_by_list() const;
+  int order_by_list_size() const;
+  const <a href="#ResolvedOrderByItem">ResolvedOrderByItem</a>* order_by_list(int i) const;
 };
 </code></pre></p>
 
@@ -4133,10 +4209,10 @@ class ResolvedCreateSchemaStmt : public <a href="#ResolvedCreateSchemaStmtBase">
 
 <p><pre><code class="lang-c++"><font color="brown">// This statement:
 // CREATE [OR REPLACE] [TEMP|TEMPORARY|PUBLIC|PRIVATE] EXTERNAL SCHEMA
-// [IF NOT EXISTS] &lt;name&gt; [WITH CONNECTION] &lt;connection&gt;
+// [IF NOT EXISTS] &lt;name&gt; [WITH CONNECTION] &lt;connection_list&gt;
 // OPTIONS (name=value, ...)
 //
-// &lt;connection&gt; encapsulates engine-specific metadata used to connect
+// &lt;connection_list&gt; encapsulates engine-specific metadata used to connect
 // to an external data source
 //
 // Note: external schemas are pointers to schemas defined in an external
@@ -4144,7 +4220,7 @@ class ResolvedCreateSchemaStmt : public <a href="#ResolvedCreateSchemaStmtBase">
 class ResolvedCreateExternalSchemaStmt : public <a href="#ResolvedCreateSchemaStmtBase">ResolvedCreateSchemaStmtBase</a> {
   static const ResolvedNodeKind TYPE = RESOLVED_CREATE_EXTERNAL_SCHEMA_STMT;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 };
 </code></pre></p>
 
@@ -4223,7 +4299,7 @@ class ResolvedCreateTableStmtBase : public <a href="#ResolvedCreateStatement">Re
 
   const <a href="#ResolvedExpr">ResolvedExpr</a>* collation_name() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 };
 </code></pre></p>
 
@@ -4494,7 +4570,7 @@ class ResolvedCreateModelStmt : public <a href="#ResolvedCreateStatement">Resolv
 
   bool is_remote() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 };
 </code></pre></p>
 
@@ -4667,10 +4743,11 @@ class ResolvedCreateExternalTableStmt : public <a href="#ResolvedCreateTableStmt
  &nbsp;(<a href="#ResolvedExportModelStmt-toc">tree</a>)
 
 <p><pre><code class="lang-c++"><font color="brown">// This statement:
-//   EXPORT MODEL &lt;model_name_path&gt; [WITH CONNECTION &lt;connection&gt;]
+//   EXPORT MODEL &lt;model_name_path&gt; [WITH CONNECTION &lt;connection_list&gt;]
 //   &lt;option_list&gt;
 // which is used to export a model to a specific location.
-// &lt;connection&gt; is the connection that the model is written to.
+// &lt;connection_list&gt; is the connection or list of keyed connections that the
+//   model is written to.
 // &lt;option_list&gt; identifies user specified options to use when exporting the
 //   model.</font>
 class ResolvedExportModelStmt : public <a href="#ResolvedStatement">ResolvedStatement</a> {
@@ -4680,7 +4757,7 @@ class ResolvedExportModelStmt : public <a href="#ResolvedStatement">ResolvedStat
   int model_name_path_size() const;
   std::string model_name_path(int i) const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedOption">ResolvedOption</a>&gt;&gt;&amp; option_list() const;
   int option_list_size() const;
@@ -4695,17 +4772,19 @@ class ResolvedExportModelStmt : public <a href="#ResolvedStatement">ResolvedStat
  &nbsp;(<a href="#ResolvedExportDataStmt-toc">tree</a>)
 
 <p><pre><code class="lang-c++"><font color="brown">// This statement:
-//   EXPORT DATA [WITH CONNECTION] &lt;connection&gt; (&lt;option_list&gt;) AS SELECT ...
+//   EXPORT DATA [WITH CONNECTION] &lt;connection_list&gt; (&lt;option_list&gt;)
+//   AS SELECT ...
 //
 // Also used for the pipe operator
-//   |&gt; EXPORT DATA [WITH CONNECTION] &lt;connection&gt; (&lt;option_list&gt;)
+//   |&gt; EXPORT DATA [WITH CONNECTION] &lt;connection_list&gt; (&lt;option_list&gt;)
 // This occurs inside <a href="#ResolvedPipeExportDataScan">ResolvedPipeExportDataScan</a>, with the pipe
 // input stored in `query`.  All other modifier fields are allowed.
 //
 // This is used to run export a query result somewhere without giving the
 // result a table name.
 //
-// &lt;connection&gt; connection reference for accessing destination source.
+// &lt;connection_list&gt; connection reference or list of keyed connections for
+//                   accessing destination source.
 // &lt;option_list&gt; has engine-specific directives for how and where to
 //               materialize the query result.
 // &lt;output_column_list&gt; has the names and types of the columns produced by
@@ -4720,7 +4799,7 @@ class ResolvedExportModelStmt : public <a href="#ResolvedStatement">ResolvedStat
 class ResolvedExportDataStmt : public <a href="#ResolvedStatement">ResolvedStatement</a> {
   static const ResolvedNodeKind TYPE = RESOLVED_EXPORT_DATA_STMT;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedOption">ResolvedOption</a>&gt;&gt;&amp; option_list() const;
   int option_list_size() const;
@@ -4750,13 +4829,14 @@ class ResolvedExportDataStmt : public <a href="#ResolvedStatement">ResolvedState
 
 <p><pre><code class="lang-c++"><font color="brown">// This statement:
 //   EXPORT &lt;schema_object_kind&gt; METADATA FROM &lt;name_path&gt;
-//   [WITH CONNECTION &lt;connection&gt;] [OPTIONS(&lt;option_list&gt;)]
+//   [WITH CONNECTION &lt;connection_list&gt;] [OPTIONS(&lt;option_list&gt;)]
 //
 // &lt;schema_object_kind&gt; is a string identifier for the object for which the
 // metadata should be exported. Currently, only &#39;TABLE&#39; object is supported.
 // &lt;name_path&gt; is a vector giving the identifier path for the object for
 // which the metadata should be exported.
-// &lt;connection&gt; connection reference for accessing destination source.
+// &lt;connection_list&gt; connection reference or list of keyed connections for
+// accessing destination source.
 // &lt;option_list&gt; identifies user specified options to use when exporting
 // object&#39;s metadata.</font>
 class ResolvedExportMetadataStmt : public <a href="#ResolvedStatement">ResolvedStatement</a> {
@@ -4768,7 +4848,7 @@ class ResolvedExportMetadataStmt : public <a href="#ResolvedStatement">ResolvedS
   int name_path_size() const;
   std::string name_path(int i) const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedOption">ResolvedOption</a>&gt;&gt;&amp; option_list() const;
   int option_list_size() const;
@@ -7915,7 +7995,7 @@ class ResolvedCreateFunctionStmt : public <a href="#ResolvedCreateStatement">Res
 
   bool is_remote() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 };
 </code></pre></p>
 
@@ -8111,7 +8191,7 @@ class ResolvedCreateTableFunctionStmt : public <a href="#ResolvedCreateStatement
 
   <a href="#ResolvedCreateStatement">ResolvedCreateStatement</a>::SqlSecurity sql_security() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 };
 </code></pre></p>
 
@@ -8448,7 +8528,7 @@ class ResolvedCreateApproxViewStmt : public <a href="#ResolvedCreateViewBase">Re
 <p><pre><code class="lang-c++"><font color="brown">// This statement creates a user-defined procedure:
 // CREATE [OR REPLACE] [TEMP] PROCEDURE [IF NOT EXISTS] &lt;name_path&gt;
 // (&lt;arg_list&gt;) [EXTERNAL SECURITY &lt;external_security&gt;]
-// [WITH CONNECTION &lt;connection&gt;] [OPTIONS (&lt;option_list&gt;)]
+// [WITH CONNECTION &lt;connection_list&gt;] [OPTIONS (&lt;option_list&gt;)]
 // [BEGIN &lt;procedure_body&gt; END | LANGUAGE &lt;language&gt; [AS &lt;code&gt;]];
 //
 // &lt;name_path&gt; is the identifier path of the procedure.
@@ -8458,7 +8538,7 @@ class ResolvedCreateApproxViewStmt : public <a href="#ResolvedCreateViewBase">Re
 //        Catalog for future queries.
 // &lt;external_security&gt; is the external security mode for the created
 //        procedure. Values include &#39;INVOKER&#39;, &#39;DEFINER&#39;.
-// &lt;connection&gt; is the identifier path of the connection object.
+// &lt;connection_list&gt; is the connection or list of keyed connections.
 // &lt;option_list&gt; has engine-specific directives for modifying procedures.
 // &lt;procedure_body&gt; is a string literal that contains the SQL procedure
 //        body. It includes everything from the BEGIN keyword to the END
@@ -8494,7 +8574,7 @@ class ResolvedCreateProcedureStmt : public <a href="#ResolvedCreateStatement">Re
 
   const std::string&amp; procedure_body() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const std::string&amp; language() const;
 
@@ -9538,7 +9618,8 @@ class ResolvedAuxLoadDataPartitionFilter : public <a href="#ResolvedArgument">Re
 //     The hive partition columns from the source file do not automatically
 //     partition the destination table. To apply the partition, the
 //     &lt;partition_by_list&gt; must be specified.
-// &lt;connection&gt; optional connection reference for accessing files.
+// &lt;connection_list&gt; optional connection reference or list of keyed
+//     connections for accessing files.
 // &lt;from_files_option_list&gt; the options list describing the source file(s).
 //
 // Special-case column creation logic in this node:
@@ -9599,7 +9680,7 @@ class ResolvedAuxLoadDataStmt : public <a href="#ResolvedStatement">ResolvedStat
 
   const <a href="#ResolvedWithPartitionColumn">ResolvedWithPartitionColumns</a>* with_partition_columns() const;
 
-  const <a href="#ResolvedConnection">ResolvedConnection</a>* connection() const;
+  const <a href="#ResolvedConnectionList">ResolvedConnectionList</a>* connection_list() const;
 
   const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedOption">ResolvedOption</a>&gt;&gt;&amp; from_files_option_list() const;
   int from_files_option_list_size() const;
@@ -11394,11 +11475,7 @@ class ResolvedUpdateConstructor : public <a href="#ResolvedExpr">ResolvedExpr</a
   // reference the original UPDATE input value.
   //
   // In nested UPDATE constructors, this allows <a href="#ResolvedColumnRef">ResolvedColumnRefs</a>
-  // that reference the input value from a specific UPDATE.
-  //
-  // (If the LHS path traverses repeated fields in nested update
-  // constructor, then this column represents an individual element
-  // of the repeated field.)</font>
+  // that reference the input value from a specific UPDATE.</font>
   const <a href="#ResolvedColumn">ResolvedColumn</a>&amp; update_element_column() const;
 };
 </code></pre></p>
@@ -11649,6 +11726,167 @@ class ResolvedUpdateScan : public <a href="#ResolvedScan">ResolvedScan</a> {
 
 <font color="brown">  // COLLISION_ACTION_ERROR (default) or COLLISION_ACTION_PICK_ONE</font>
   <a href="#ResolvedUpdateScan">ResolvedUpdateScan</a>::UpdateCollisionActionType update_collision_action_type() const;
+};
+</code></pre></p>
+
+### ResolvedGraphUpdateElement
+<a id="ResolvedGraphUpdateElement"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedArgument">ResolvedArgument</a>  &rsaquo; ResolvedGraphUpdateElement
+ &nbsp;(<a href="#ResolvedGraphUpdateElement-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Represents GQL SET or REMOVE operations for a single target graph element
+// variable.
+//
+// Modifies `target_element` with property updates (`property_update_mode`,
+// `property_list`) and/or label updates (`label_update_mode`, `label_list`),
+// producing the updated graph element in `output_column`.
+//
+// Mode compatibility rules:
+//  - `property_update_mode` and `label_update_mode` cannot both be
+//    NO_UPDATE.
+//  - Cannot mix SET/REPLACE with REMOVE: one mode cannot be SET or REPLACE
+//    while the other is REMOVE.
+//
+// Property update modes (`property_update_mode`):
+//  - PROPERTY_NO_UPDATE:
+//    - No properties are modified.
+//  - PROPERTY_SET:
+//    - Updates existing properties or adds dynamic properties.
+//    - Updatable static properties can be modified; non-updatable static
+//      properties produce an error.
+//    - Each item in `property_list` must have `property_value` set.
+//  - PROPERTY_REPLACE:
+//    - Replaces all properties on the element.
+//    - Updatable static properties not in `property_list` are set to NULL;
+//      unlisted dynamic properties are discarded.
+//    - Each item in `property_list` (if any) must have `property_value` set.
+//  - PROPERTY_REMOVE:
+//    - Deletes specified dynamic properties.
+//    - Each item in `property_list` must have `property()` == nullptr and
+//      `property_value()` == nullptr (static properties cannot be removed).
+//    - Requires FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE.
+//
+// Label update modes (`label_update_mode`):
+//  - LABEL_NO_UPDATE:
+//    - No labels are modified.
+//    - `label_list` must be empty.
+//  - LABEL_SET:
+//    - Adds specified labels (idempotent if label already exists).
+//    - `label_list` must not be empty.
+//  - LABEL_REMOVE:
+//    - Deletes specified dynamic labels.
+//    - `label_list` must not be empty.
+//    - For each label item in `label_list`, `label()` must be nullptr and
+//      `label_name()` must be a STRING literal (static labels cannot be
+//      removed).
+//    - Requires FEATURE_SQL_GRAPH_DYNAMIC_ELEMENT_TYPE.</font>
+class ResolvedGraphUpdateElement : public <a href="#ResolvedArgument">ResolvedArgument</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_GRAPH_UPDATE_ELEMENT;
+
+  typedef <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PropertyUpdateMode PropertyUpdateMode;
+  typedef <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::LabelUpdateMode LabelUpdateMode;
+  static const PropertyUpdateMode PROPERTY_UPDATE_MODE_UNSPECIFIED = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PROPERTY_UPDATE_MODE_UNSPECIFIED;
+  static const PropertyUpdateMode PROPERTY_NO_UPDATE = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PROPERTY_NO_UPDATE;
+  static const PropertyUpdateMode PROPERTY_SET = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PROPERTY_SET;
+  static const PropertyUpdateMode PROPERTY_REPLACE = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PROPERTY_REPLACE;
+  static const PropertyUpdateMode PROPERTY_REMOVE = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::PROPERTY_REMOVE;
+  static const LabelUpdateMode LABEL_UPDATE_MODE_UNSPECIFIED = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::LABEL_UPDATE_MODE_UNSPECIFIED;
+  static const LabelUpdateMode LABEL_NO_UPDATE = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::LABEL_NO_UPDATE;
+  static const LabelUpdateMode LABEL_SET = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::LABEL_SET;
+  static const LabelUpdateMode LABEL_REMOVE = <a href="#ResolvedGraphUpdateElementEnum">ResolvedGraphUpdateElementEnums</a>::LABEL_REMOVE;
+
+<font color="brown">  // The graph element (node or edge) being updated. If the column
+  // value is NULL at runtime, the update is treated as a no-op.</font>
+  const <a href="#ResolvedColumnRef">ResolvedColumnRef</a>* target_element() const;
+
+<font color="brown">  // Represents the updated graph element after applying the
+  // modifications in this element.
+  // Must have the same type as `target_element`.</font>
+  const <a href="#ResolvedColumn">ResolvedColumn</a>&amp; output_column() const;
+
+  <a href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>::PropertyUpdateMode property_update_mode() const;
+
+<font color="brown">  // Properties being modified. Interpreted according to
+  // `property_update_mode`:
+  // - Must be empty for PROPERTY_NO_UPDATE.
+  // - May be empty for PROPERTY_REPLACE (e.g. `SET n = {}`).
+  // - Must not be empty for PROPERTY_SET and PROPERTY_REMOVE.</font>
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedGraphDMLPropertyItem">ResolvedGraphDMLPropertyItem</a>&gt;&gt;&amp; property_list() const;
+  int property_list_size() const;
+  const <a href="#ResolvedGraphDMLPropertyItem">ResolvedGraphDMLPropertyItem</a>* property_list(int i) const;
+
+  <a href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>::LabelUpdateMode label_update_mode() const;
+
+<font color="brown">  // Labels being added or deleted. Interpreted according to
+  // `label_update_mode`:
+  // - Must be empty for LABEL_NO_UPDATE.
+  // - Must not be empty for LABEL_SET and LABEL_REMOVE.</font>
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedGraphLabel">ResolvedGraphLabel</a>&gt;&gt;&amp; label_list() const;
+  int label_list_size() const;
+  const <a href="#ResolvedGraphLabel">ResolvedGraphLabel</a>* label_list(int i) const;
+};
+</code></pre></p>
+
+### ResolvedGraphUpdateScan
+<a id="ResolvedGraphUpdateScan"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedScan">ResolvedScan</a>  &rsaquo; ResolvedGraphUpdateScan
+ &nbsp;(<a href="#ResolvedGraphUpdateScan-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Represents a GQL SET statement or REMOVE statement. Used only when
+// FEATURE_SQL_GRAPH_TERMINAL_NON_RETURNING_UPDATE is enabled. See
+// (broken link):dml-update for more details.
+//
+// For each input row from `input_scan`, evaluates the modifications in
+// `update_element_list` to apply property/label updates to graph elements.
+//
+// Output of this scan:
+// - Rows: Flows through all input rows from `input_scan`.
+// - Columns (`column_list`): The column list can include a subset of columns
+//   from the input_scan&#39;s `column_list` and the `output_column`s from
+//   `update_element_list`.
+//
+// When executed, all update expressions are evaluated against the
+// pre-update state of the incoming working table. `<a href="#ResolvedGraphUpdateScan">ResolvedGraphUpdateScan</a>`
+// applies the side effects of updating these nodes or edges into the
+// current property graph.</font>
+class ResolvedGraphUpdateScan : public <a href="#ResolvedScan">ResolvedScan</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_GRAPH_UPDATE_SCAN;
+
+  const <a href="#ResolvedScan">ResolvedScan</a>* input_scan() const;
+
+<font color="brown">  // The list of modifications to graph elements.
+  //
+  // Contract:
+  // - Target element columns in `update_element_list` must be unique
+  //   (each target graph element column appears at most once, enforced
+  //   by the validator).
+  // - All property and label modifications for a given target element
+  //   column must be combined into a single
+  //   `<a href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>`.</font>
+  const std::vector&lt;std::unique_ptr&lt;const <a href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>&gt;&gt;&amp; update_element_list() const;
+  int update_element_list_size() const;
+  const <a href="#ResolvedGraphUpdateElement">ResolvedGraphUpdateElement</a>* update_element_list(int i) const;
+};
+</code></pre></p>
+
+### ResolvedMakeColumnListSpec
+<a id="ResolvedMakeColumnListSpec"></a>
+
+<a href="#ResolvedNode">ResolvedNode</a> &rsaquo; <a href="#ResolvedExpr">ResolvedExpr</a>  &rsaquo; ResolvedMakeColumnListSpec
+ &nbsp;(<a href="#ResolvedMakeColumnListSpec-toc">tree</a>)
+
+<p><pre><code class="lang-c++"><font color="brown">// Constructs a column_list_spec object.
+// A column_list_spec is a list of unresolved column names, allowed as an
+// argument in TVFs and UNPACK expressions. The enclosed expression must
+// resolve to an array of non-empty non-null strings.
+//
+// It has type COLUMN_LIST_SPEC.</font>
+class ResolvedMakeColumnListSpec : public <a href="#ResolvedExpr">ResolvedExpr</a> {
+  static const ResolvedNodeKind TYPE = RESOLVED_MAKE_COLUMN_LIST_SPEC;
+
+  const <a href="#ResolvedExpr">ResolvedExpr</a>* column_name_list() const;
 };
 </code></pre></p>
 

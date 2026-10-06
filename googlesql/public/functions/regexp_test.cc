@@ -323,6 +323,46 @@ TEST(RegexpExtractGroupsResultStructTest, ExplicitTests) {
   }
 }
 
+// b/559749533: an engine may represent an empty STRING as a string_view whose
+// data() is nullptr. RE2 uses a nullptr submatch pointer to signal "group did
+// not participate", so a nullptr input must not make an empty match look
+// non-participating.
+TEST(RegexpExtractGroupsTest, EmptyInputWithNullDataPointer) {
+  TypeFactory type_factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto re, MakeRegExpUtf8("(.*)"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* result_type,
+                       re->ExtractGroupsResultStruct(&type_factory));
+
+  const absl::string_view non_null_empty("");
+  ASSERT_NE(non_null_empty.data(), nullptr);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value from_non_null,
+                       re->ExtractGroups(non_null_empty, result_type));
+
+  const absl::string_view null_empty;
+  ASSERT_EQ(null_empty.data(), nullptr);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value from_null,
+                       re->ExtractGroups(null_empty, result_type));
+
+  EXPECT_EQ(from_non_null.field(0), Value::String(""));
+  EXPECT_EQ(from_null.field(0), Value::String(""));
+}
+
+// A null-data input must not collapse the distinction between a group that did
+// not participate (NULL) and one that matched the empty string ("").
+TEST(RegexpExtractGroupsTest, NullDataInputPreservesNonParticipatingGroup) {
+  TypeFactory type_factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto re, MakeRegExpUtf8("(x)?(.*)"));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* result_type,
+                       re->ExtractGroupsResultStruct(&type_factory));
+
+  const absl::string_view null_empty;
+  ASSERT_EQ(null_empty.data(), nullptr);
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value out, re->ExtractGroups(null_empty, result_type));
+
+  EXPECT_EQ(out.field(0), Value::NullString());  // (x)? did not participate
+  EXPECT_EQ(out.field(1), Value::String(""));    // (.*) matched empty
+}
+
 class RegexpExtractGroupsTest
     : public testing::TestWithParam<FunctionTestCall> {
  public:

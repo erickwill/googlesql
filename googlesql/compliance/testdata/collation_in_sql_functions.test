@@ -359,7 +359,6 @@ TypeKind:TYPE_ARRAY
 TypeKind:TYPE_BOOL
 TypeKind:TYPE_INT64
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function
 ==
 
 # Like the above, but also uses the output columns in contexts, e.g. GROUP BY
@@ -419,7 +418,6 @@ TypeKind:TYPE_ARRAY
 TypeKind:TYPE_BOOL
 TypeKind:TYPE_INT64
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function
 ==
 
 [name=collation_in_templated_tvf_implicit_return]
@@ -649,7 +647,6 @@ ResolvedNodeKind:Statement:RESOLVED_QUERY_STMT
 TimeResolution:Any
 TypeKind:TYPE_INT64
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function
 ==
 
 # Like the above, but also uses the output columns in contexts, e.g. GROUP BY
@@ -692,7 +689,6 @@ TimeResolution:Any
 TypeCast:TYPE_STRING:TYPE_STRING
 TypeKind:TYPE_INT64
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function
 ==
 
 [required_features=ANNOTATION_FRAMEWORK,COLLATION_SUPPORT,TYPE_MODIFIERS_IN_EXPLICIT_CONSTRUCTORS_AND_UDF]
@@ -751,7 +747,6 @@ ResolvedNodeKind:Statement:RESOLVED_QUERY_STMT
 TimeResolution:Any
 TypeKind:TYPE_BOOL
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function
 ==
 
 [required_features=TYPE_ANNOTATIONS_ON_SQL_FUNCTION_ARGUMENTS,ANNOTATION_FRAMEWORK,COLLATION_SUPPORT]
@@ -811,4 +806,3 @@ ResolvedNodeKind:Statement:RESOLVED_QUERY_STMT
 TimeResolution:Any
 TypeKind:TYPE_BOOL
 TypeKind:TYPE_STRING
-collation_propagated_to_sql_function

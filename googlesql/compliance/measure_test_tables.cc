@@ -459,6 +459,19 @@ TestDatabase GetMeasureTablesTestDatabase(bool add_measures_with_udas,
   test_db.tables.insert(
       {"MeasureTable_SingleKey_WithAnnotations", annotated_measure_table});
 
+  Value measure_table_regressions = test_values::StructArray(
+      {"key"}, {{0ll}, {1ll}, {2ll}}, InternalValue::kIgnoresOrder);
+  std::vector<MeasureColumnDef> measure_table_regressions_column_defs = {
+      {"measure_sum_one_over_key", "SUM(1 / key)"},
+  };
+  TestTable measure_table_regressions_test = {
+      .table_as_value = std::move(measure_table_regressions),
+      .measure_column_defs = std::move(measure_table_regressions_column_defs),
+      .row_identity_columns = std::vector<int>{0},
+  };
+  test_db.tables.insert(
+      {"MeasureTable_Regressions", measure_table_regressions_test});
+
   return test_db;
 }
 }  // namespace googlesql

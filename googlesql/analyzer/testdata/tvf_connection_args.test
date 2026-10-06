@@ -39,8 +39,10 @@ QueryStmt
         +-signature=(ANY CONNECTION) -> TABLE<string STRING>
         +-argument_list=
         | +-FunctionArgument
-        |   +-connection=
-        |     +-Connection(connection=connection1)
+        |   +-connection_list=
+        |     +-ConnectionList
+        |       +-connection=
+        |         +-Connection(connection=connection1)
         +-column_index_list=[0]
         +-function_call_signature=(ANY CONNECTION) -> TABLE<string STRING>
 ==
@@ -62,8 +64,10 @@ QueryStmt
         +-signature=(ANY CONNECTION) -> TABLE<string STRING>
         +-argument_list=
         | +-FunctionArgument
-        |   +-connection=
-        |     +-Connection(connection=NestedConnection)
+        |   +-connection_list=
+        |     +-ConnectionList
+        |       +-connection=
+        |         +-Connection(connection=NestedConnection)
         +-column_index_list=[0]
         +-function_call_signature=(ANY CONNECTION) -> TABLE<string STRING>
 
@@ -85,8 +89,10 @@ QueryStmt
         +-signature=(ANY CONNECTION) -> TABLE<string STRING>
         +-argument_list=
         | +-FunctionArgument
-        |   +-connection=
-        |     +-Connection(connection=connection2)
+        |   +-connection_list=
+        |     +-ConnectionList
+        |       +-connection=
+        |         +-Connection(connection=connection2)
         +-column_index_list=[0]
         +-function_call_signature=(ANY CONNECTION) -> TABLE<string STRING>
 
@@ -109,8 +115,10 @@ QueryStmt
         +-signature=(ANY CONNECTION, literal STRING) -> TABLE<int64 INT64, string STRING>
         +-argument_list=
         | +-FunctionArgument
-        | | +-connection=
-        | |   +-Connection(connection=connection1)
+        | | +-connection_list=
+        | |   +-ConnectionList
+        | |     +-connection=
+        | |       +-Connection(connection=connection1)
         | +-FunctionArgument
         |   +-expr=
         |     +-Literal(type=STRING, value="SELECT 1")
@@ -135,11 +143,15 @@ QueryStmt
         +-signature=(ANY CONNECTION, ANY CONNECTION) -> TABLE<double DOUBLE, string STRING>
         +-argument_list=
         | +-FunctionArgument
-        | | +-connection=
-        | |   +-Connection(connection=connection1)
+        | | +-connection_list=
+        | |   +-ConnectionList
+        | |     +-connection=
+        | |       +-Connection(connection=connection1)
         | +-FunctionArgument
-        |   +-connection=
-        |     +-Connection(connection=connection2)
+        |   +-connection_list=
+        |     +-ConnectionList
+        |       +-connection=
+        |         +-Connection(connection=connection2)
         +-column_index_list=[0, 1]
         +-function_call_signature=(ANY CONNECTION, ANY CONNECTION) -> TABLE<double DOUBLE, string STRING>
 ==
@@ -190,4 +202,82 @@ ERROR: No matching signature for tvf_one_relation_arg_with_fixed_output
     Argument 1: expected TABLE, found CONNECTION [at 1:15]
 select * from tvf_one_relation_arg_with_fixed_output(connection connection1)
               ^
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,+MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection (key1="connection1", key2=connection2))
+--
+QueryStmt
++-output_column_list=
+| +-tvf_one_connection_arg_with_fixed_output.string#1 AS string [STRING]
++-query=
+  +-ProjectScan
+    +-column_list=[tvf_one_connection_arg_with_fixed_output.string#1]
+    +-input_scan=
+      +-TVFScan
+        +-column_list=[tvf_one_connection_arg_with_fixed_output.string#1]
+        +-tvf=tvf_one_connection_arg_with_fixed_output
+        +-signature=(ANY CONNECTION) -> TABLE<string STRING>
+        +-argument_list=
+        | +-FunctionArgument
+        |   +-connection_list=
+        |     +-ConnectionList
+        |       +-connection_kv_list=
+        |         +-ConnectionKeyValuePair
+        |         | +-key="key1"
+        |         | +-connection=
+        |         |   +-Connection(connection=connection1)
+        |         +-ConnectionKeyValuePair
+        |           +-key="key2"
+        |           +-connection=
+        |             +-Connection(connection=connection2)
+        +-column_index_list=[0]
+        +-function_call_signature=(ANY CONNECTION) -> TABLE<string STRING>
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,-MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection (key1="connection1", key2=connection2))
+--
+ERROR: Multiple connections in CONNECTION clause is not supported [at 2:5]
+    connection (key1="connection1", key2=connection2))
+    ^
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,+MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection ())
+--
+ERROR: Syntax error: Unexpected ")" [at 2:17]
+    connection ())
+                ^
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,+MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection (key1="connection1", KEY1=connection2))
+--
+ERROR: Duplicate connection key KEY1 [at 2:37]
+    connection (key1="connection1", KEY1=connection2))
+                                    ^
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,+MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection (key1=123))
+--
+ERROR: Connection name must be a path expression or string literal [at 2:22]
+    connection (key1=123))
+                     ^
+==
+
+[language_features=MAXIMUM,+TABLE_VALUED_FUNCTIONS,+MULTI_CONNECTIONS]
+SELECT * FROM tvf_one_connection_arg_with_fixed_output(
+    connection (key1=1+1))
+--
+ERROR: Connection name must be a path expression or string literal [at 2:22]
+    connection (key1=1+1))
+                     ^
+
 

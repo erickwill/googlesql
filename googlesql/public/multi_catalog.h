@@ -123,6 +123,10 @@ class MultiCatalog : public Catalog {
   absl::Status FindType(const absl::Span<const std::string>& path,
                         const Type** type, const FindOptions& options) override;
 
+  using Catalog::GetMacro;
+  absl::Status GetMacro(const std::string& name, const Macro** macro,
+                        const FindOptions& options) override;
+
   // Finds the longest prefix of <path> that references a Constant in any of the
   // contained catalogs, in the order in which they were given at construction
   // time. Invokes FindConstantWithPathPrefix() on each catalog. If a catalog

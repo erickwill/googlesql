@@ -30,6 +30,7 @@
 #include "googlesql/base/arena.h"
 #include "googlesql/base/atomic_sequence_num.h"
 #include "googlesql/parser/parser.h"
+#include "googlesql/parser/parser_mode.h"
 #include "googlesql/proto/options.pb.h"
 #include "googlesql/public/catalog.h"
 #include "googlesql/public/constant_evaluator.h"
@@ -816,6 +817,12 @@ class AnalyzerOptions {
   // Returns the ParserOptions to use for these AnalyzerOptions, including the
   // same id_string_pool() and arena() values.
   ParserOptions GetParserOptions() const;
+
+  // Returns the ParserOptions to use for these AnalyzerOptions, including the
+  // same id_string_pool() and arena() values, and the given macro expansion
+  // mode and catalog.
+  ParserOptions GetParserOptions(
+      parser::MacroExpansionMode macro_expansion_mode, Catalog* catalog) const;
 
   const SystemVariablesMap& system_variables() const {
     return data_->system_variables;

@@ -99,3 +99,26 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
     ],
 )
+
+cc_library(
+    name = "vector_encoding",
+    srcs = ["vector_encoding.cc"],
+    hdrs = ["vector_encoding.h"],
+    deps = [
+        ":default_annotation",
+        "//googlesql/base:ret_check",
+        "//googlesql/base:status",
+        "//googlesql/common:errors",
+        "//googlesql/public:builtin_function_cc_proto",
+        "//googlesql/public:constant",
+        "//googlesql/public:function",
+        "//googlesql/public:parse_location",
+        "//googlesql/public:value",
+        "//googlesql/public/proto:vector_encoding_id_cc_proto",
+        "//googlesql/public/types:type",
+        "//googlesql/resolved_ast",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)

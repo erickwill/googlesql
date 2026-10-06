@@ -1653,6 +1653,23 @@ QueryStmt
                             +-Literal(type=ENUM<googlesql.functions.DateTimestampPart>, value=MINUTE)
 ==
 
+# Using the identifier `timestamp` in an estimator expression to refer to the
+# timestamp expr is not allowed outside estimator function calls.
+SELECT * FROM TimeseriesTable ALIGN (
+  TIMESTAMP ts_col
+  PERIOD INTERVAL 1 MINUTE
+  ORIGIN TIMESTAMP('2000-01-01')
+  PARTITION BY borg_job
+  METRICS
+    MAX(timestamp) WITHIN (1 PERIOD PRECEDING) AS m1,
+    timestamp + MAX(requests) WITHIN (1 PERIOD PRECEDING) AS m2
+)
+--
+ERROR: Unrecognized name: timestamp [at 8:5]
+    timestamp + MAX(requests) WITHIN (1 PERIOD PRECEDING) AS m2
+    ^
+==
+
 # table columns are not allowed outside estimator functions
 SELECT * FROM TimeseriesTable ALIGN (
   TIMESTAMP ts_col

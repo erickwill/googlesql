@@ -163,6 +163,12 @@ class ColumnRefParentPointerCollector : public ResolvedASTVisitor {
     return DefaultVisit(node);
   }
 
+  absl::Status VisitResolvedGetVariantField(
+      const ResolvedGetVariantField* node) override {
+    node_to_parent_.emplace(node, parent());
+    return DefaultVisit(node);
+  }
+
  private:
   std::vector<const ResolvedNode*> parent_stack_;
   ParentPointerMap node_to_parent_;

@@ -605,11 +605,17 @@ class HopRewriteVisitor : public ResolvedASTRewriteVisitor {
     // This preserves the input row even if array generation yields a NULL
     // array (if the timestamp is NULL), in which case window columns will
     // be NULL.
+    std::vector<std::unique_ptr<const ResolvedExpr>> array_expr_list;
+    array_expr_list.push_back(std::move(generate_array_expr));
+    std::vector<ResolvedColumn> element_column_list;
+    element_column_list.push_back(window_start_col);
     auto array_scan = MakeResolvedArrayScan(
         array_scan_output_cols, std::move(cross_join_scan),
-        std::move(generate_array_expr), window_start_col,
-        /*array_offset_column=*/nullptr, /*join_expr=*/nullptr,
-        /*is_outer=*/true);
+        std::move(array_expr_list), std::move(element_column_list),
+        /*array_offset_column=*/nullptr,
+        /*join_expr=*/nullptr,
+        /*is_outer=*/true,
+        /*array_zip_mode=*/nullptr);
 
     const ResolvedColumnList& output_column_list = args.tvf_column_list;
     std::vector<std::unique_ptr<const ResolvedComputedColumn>> output_expr_list;

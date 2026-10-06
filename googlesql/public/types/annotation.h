@@ -43,6 +43,7 @@
 #include "absl/base/macros.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
+#include "googlesql/base/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -55,6 +56,11 @@ class StructAnnotationMap;
 class ArrayType;
 class StructType;
 class TypeRewriter;
+
+namespace internal {
+// Forward declaration of the abstract interface for Variant references.
+class VariantRef;
+}  // namespace internal
 
 ABSL_DEPRECATED("Inline me!")
 typedef StructAnnotationMap ArrayAnnotationMap;
@@ -72,6 +78,8 @@ enum class AnnotationKind {
   kIsVersioned = 4,
   // Annotation ID for googlesql::VectorLengthAnnotation.
   kVectorLength = 5,
+  // Annotation ID for googlesql::VectorEncodingAnnotation.
+  kVectorEncoding = 6,
   // Annotation ID up to kMaxBuiltinAnnotationKind are reserved for googlesql
   // built-in annotations.
   kMaxBuiltinAnnotationKind = 10000,
@@ -271,6 +279,10 @@ class AnnotationMap {
   friend class StructAnnotationMap;
   friend class TypeFactory;
   friend class TypeRewriter;
+  // Needed for custom byte sizing of Variants in C++ to access
+  // GetEstimatedOwnedMemoryBytesSize().
+  friend class internal::VariantRef;
+  friend class internal::VariantRefImpl;
 
   // Returns estimated size of memory owned by this AnnotationMap. The estimated
   // size includes size of the fields if this instance is a StructAnnotationMap.
@@ -422,6 +434,7 @@ class ResolvedGetStructField;
 class ResolvedGetRowField;
 class ResolvedMakeStruct;
 class ResolvedMakeMap;
+class ResolvedParameter;
 class ResolvedSubqueryExpr;
 class ResolvedSetOperationScan;
 class ResolvedRecursiveScan;
@@ -458,6 +471,13 @@ class AnnotationSpec {
   virtual absl::Status CheckAndPropagateForColumnRef(
       const ResolvedColumnRef& column_ref,
       AnnotationMap* result_annotation_map) = 0;
+
+  // Propagates annotation from `parameter` to `result_annotation_map`.
+  virtual absl::Status CheckAndPropagateForParameter(
+      const ResolvedParameter& parameter,
+      AnnotationMap* result_annotation_map) {
+    return absl::OkStatus();
+  }
 
   // Propagates annotation from the referenced struct field to
   // <result_annotation_map>.

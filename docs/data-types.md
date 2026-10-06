@@ -1299,7 +1299,7 @@ a [single datetime part][single-datetime-part-interval] or a
 <a id="single_datetime_part_interval"></a>
 
 ```googlesql
-INTERVAL int64_expression datetime_part
+INTERVAL step_size step_unit
 ```
 
 You can construct an `INTERVAL` object with an `INT64` expression and one

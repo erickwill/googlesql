@@ -55,6 +55,9 @@ struct ModuleFactoryOptions {
   // An engine callback for creating remote TVFs in modules. If this is null,
   // remote TVFs are disabled.
   RemoteTvfFactory* const remote_tvf_factory = nullptr;
+
+  // If true, enable macros in modules.
+  bool allow_macros_in_module = false;
 };
 
 // A ModuleFactory is used to create all ModuleCatalogs

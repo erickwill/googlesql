@@ -174,6 +174,42 @@ class JsonExtractArrayFunction : public SimpleBuiltinScalarFunction {
                              EvaluationContext* context) const override;
 };
 
+// Implementation of:
+// JSON_EXISTS(json, string) -> bool
+class JsonExistsFunction : public SimpleBuiltinScalarFunction {
+ public:
+  explicit JsonExistsFunction()
+      : SimpleBuiltinScalarFunction(FunctionKind::kJsonExists,
+                                    types::BoolType()) {}
+  absl::StatusOr<Value> Eval(absl::Span<const TupleData* const> params,
+                             absl::Span<const Value> args,
+                             EvaluationContext* context) const override;
+};
+
+// Implementation of:
+// JSON_EXISTS_ANY(json, array<string>) -> bool
+class JsonExistsAnyFunction : public SimpleBuiltinScalarFunction {
+ public:
+  explicit JsonExistsAnyFunction()
+      : SimpleBuiltinScalarFunction(FunctionKind::kJsonExistsAny,
+                                    types::BoolType()) {}
+  absl::StatusOr<Value> Eval(absl::Span<const TupleData* const> params,
+                             absl::Span<const Value> args,
+                             EvaluationContext* context) const override;
+};
+
+// Implementation of:
+// JSON_EXISTS_ALL(json, array<string>) -> bool
+class JsonExistsAllFunction : public SimpleBuiltinScalarFunction {
+ public:
+  explicit JsonExistsAllFunction()
+      : SimpleBuiltinScalarFunction(FunctionKind::kJsonExistsAll,
+                                    types::BoolType()) {}
+  absl::StatusOr<Value> Eval(absl::Span<const TupleData* const> params,
+                             absl::Span<const Value> args,
+                             EvaluationContext* context) const override;
+};
+
 class JsonSubscriptFunction : public SimpleBuiltinScalarFunction {
  public:
   explicit JsonSubscriptFunction()
@@ -515,6 +551,133 @@ absl::StatusOr<Value> JsonExtractFunction::Eval(
     return JsonExtractJson(*evaluator, args[0], output_type(), scalar,
                            GetJSONParsingOptions(language_options));
   }
+}
+
+absl::StatusOr<Value> JsonExistsFunction::Eval(
+    absl::Span<const TupleData* const> params, absl::Span<const Value> args,
+    EvaluationContext* context) const {
+  GOOGLESQL_RET_CHECK_EQ(args.size(), 2);
+  GOOGLESQL_RET_CHECK(args[0].type()->IsJson());
+  GOOGLESQL_RET_CHECK(args[1].type()->IsString());
+  if (args[0].is_null() || args[1].is_null()) {
+    return Value::NullBool();
+  }
+
+  JSONValue json_storage;
+  const auto& language_options = context->GetLanguageOptions();
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      JSONValueConstRef json_value_const_ref,
+      GetJSONValueConstRef(args[0], GetJSONParsingOptions(language_options),
+                           json_storage));
+
+  GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<functions::JsonPathEvaluator> evaluator,
+                   functions::JsonPathEvaluator::Create(
+                       args[1].string_value(), /*sql_standard_mode=*/true,
+                       /*enable_special_character_escaping_in_values=*/true,
+                       /*enable_special_character_escaping_in_keys=*/true));
+
+  GOOGLESQL_ASSIGN_OR_RETURN(bool exists,
+                   functions::JsonExists(json_value_const_ref, *evaluator));
+  return Value::Bool(exists);
+}
+
+// Builds `JsonPathEvaluator` instances for all non-null paths in `path_array`
+// and sets `*has_null` to true if any element in `path_array` is SQL NULL.
+absl::Status CreateJsonPathEvaluators(
+    const Value& path_array,
+    std::vector<std::unique_ptr<functions::JsonPathEvaluator>>&
+        evaluators_holder,
+    std::vector<const functions::JsonPathEvaluator*>& evaluators,
+    bool* has_null) {
+  *has_null = false;
+  evaluators_holder.reserve(path_array.elements().size());
+  evaluators.reserve(path_array.elements().size());
+  for (const Value& path_val : path_array.elements()) {
+    if (path_val.is_null()) {
+      *has_null = true;
+      continue;
+    }
+    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<functions::JsonPathEvaluator> evaluator,
+                     functions::JsonPathEvaluator::Create(
+                         path_val.string_value(), /*sql_standard_mode=*/true,
+                         /*enable_special_character_escaping_in_values=*/true,
+                         /*enable_special_character_escaping_in_keys=*/true));
+    evaluators.push_back(evaluator.get());
+    evaluators_holder.push_back(std::move(evaluator));
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<Value> JsonExistsAnyFunction::Eval(
+    absl::Span<const TupleData* const> params, absl::Span<const Value> args,
+    EvaluationContext* context) const {
+  GOOGLESQL_RET_CHECK_EQ(args.size(), 2);
+  GOOGLESQL_RET_CHECK(args[0].type()->IsJson());
+  GOOGLESQL_RET_CHECK(args[1].type()->Equals(types::StringArrayType()));
+  if (args[0].is_null() || args[1].is_null()) {
+    return Value::NullBool();
+  }
+
+  JSONValue json_storage;
+  const auto& language_options = context->GetLanguageOptions();
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      JSONValueConstRef json_value_const_ref,
+      GetJSONValueConstRef(args[0], GetJSONParsingOptions(language_options),
+                           json_storage));
+
+  bool has_null = false;
+  std::vector<std::unique_ptr<functions::JsonPathEvaluator>> evaluators_holder;
+  std::vector<const functions::JsonPathEvaluator*> evaluators;
+  GOOGLESQL_RETURN_IF_ERROR(CreateJsonPathEvaluators(args[1], evaluators_holder,
+                                           evaluators, &has_null));
+
+  // The NULL handling follows from the rewrite-based definition in the spec:
+  //   JSON_EXISTS_ANY(j, [a, b]) -> JSON_EXISTS(j, a) OR JSON_EXISTS(j, b)
+  GOOGLESQL_ASSIGN_OR_RETURN(bool exists,
+                   functions::JsonExistsAny(json_value_const_ref, evaluators));
+  if (exists) {
+    return Value::Bool(true);
+  }
+  if (has_null) {
+    return Value::NullBool();
+  }
+  return Value::Bool(false);
+}
+
+absl::StatusOr<Value> JsonExistsAllFunction::Eval(
+    absl::Span<const TupleData* const> params, absl::Span<const Value> args,
+    EvaluationContext* context) const {
+  GOOGLESQL_RET_CHECK_EQ(args.size(), 2);
+  GOOGLESQL_RET_CHECK(args[0].type()->IsJson());
+  GOOGLESQL_RET_CHECK(args[1].type()->Equals(types::StringArrayType()));
+  if (args[0].is_null() || args[1].is_null()) {
+    return Value::NullBool();
+  }
+
+  JSONValue json_storage;
+  const auto& language_options = context->GetLanguageOptions();
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      JSONValueConstRef json_value_const_ref,
+      GetJSONValueConstRef(args[0], GetJSONParsingOptions(language_options),
+                           json_storage));
+
+  bool has_null = false;
+  std::vector<std::unique_ptr<functions::JsonPathEvaluator>> evaluators_holder;
+  std::vector<const functions::JsonPathEvaluator*> evaluators;
+  GOOGLESQL_RETURN_IF_ERROR(CreateJsonPathEvaluators(args[1], evaluators_holder,
+                                           evaluators, &has_null));
+
+  // The NULL handling follows from the rewrite-based definition in the spec:
+  //   JSON_EXISTS_ALL(j, [a, b]) -> JSON_EXISTS(j, a) AND JSON_EXISTS(j, b)
+  GOOGLESQL_ASSIGN_OR_RETURN(bool exists,
+                   functions::JsonExistsAll(json_value_const_ref, evaluators));
+  if (!exists) {
+    return Value::Bool(false);
+  }
+  if (has_null) {
+    return Value::NullBool();
+  }
+  return Value::Bool(true);
 }
 
 // Helper function for the string version of JSON_VALUE_ARRAY and
@@ -1542,6 +1705,21 @@ void RegisterBuiltinJsonFunctions() {
        FunctionKind::kJsonQueryArray, FunctionKind::kJsonValueArray},
       [](FunctionKind kind, const Type* output_type) {
         return new JsonExtractArrayFunction(kind, output_type);
+      });
+  BuiltinFunctionRegistry::RegisterScalarFunction(
+      {FunctionKind::kJsonExists},
+      [](FunctionKind kind, const Type* output_type) {
+        return new JsonExistsFunction();
+      });
+  BuiltinFunctionRegistry::RegisterScalarFunction(
+      {FunctionKind::kJsonExistsAny},
+      [](FunctionKind kind, const Type* output_type) {
+        return new JsonExistsAnyFunction();
+      });
+  BuiltinFunctionRegistry::RegisterScalarFunction(
+      {FunctionKind::kJsonExistsAll},
+      [](FunctionKind kind, const Type* output_type) {
+        return new JsonExistsAllFunction();
       });
   BuiltinFunctionRegistry::RegisterScalarFunction(
       {FunctionKind::kJsonSubscript},

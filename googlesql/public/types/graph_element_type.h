@@ -132,14 +132,7 @@ class GraphElementType : public ListBackedType {
 
   const GraphElementType* AsGraphElement() const override { return this; }
 
-  std::vector<const Type*> ComponentTypes() const override {
-    std::vector<const Type*> component_types;
-    component_types.reserve(property_types_.size());
-    for (const PropertyType& property_type : property_types_) {
-      component_types.push_back(property_type.value_type);
-    }
-    return component_types;
-  }
+  TypeListView ComponentTypes() const override { return component_types_; }
 
   // Check if the graph element has some fields (property types).
   bool HasAnyFields() const override;
@@ -260,6 +253,8 @@ class GraphElementType : public ListBackedType {
 
   // A set of static property types sorted by property type name.
   const std::vector<PropertyType> property_types_;
+
+  const std::vector<const Type*> component_types_;
 
   // The deepest nesting depth in the type tree rooted at this GraphElementType,
   // i.e., the maximum nesting_depth of the property value types, plus 1 for the

@@ -284,6 +284,10 @@ behavior:
         
         <a href="#json_contains"><code>JSON_CONTAINS</code></a><br>
         
+        <a href="#json_exists"><code>JSON_EXISTS</code></a><br>
+        <a href="#json_exists_all"><code>JSON_EXISTS_ALL</code></a><br>
+        <a href="#json_exists_any"><code>JSON_EXISTS_ANY</code></a><br>
+        
       </td>
       <td>
         Functions that return <code>BOOL</code> when checking JSON documents for
@@ -437,6 +441,33 @@ behavior:
 </td>
   <td>
     Checks if a JSON document contains another JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="https://github.com/google/googlesql/blob/master/docs/json_functions.md#json_exists"><code>JSON_EXISTS</code></a>
+</td>
+  <td>
+    Checks if a JSONPath exists in a JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="https://github.com/google/googlesql/blob/master/docs/json_functions.md#json_exists_all"><code>JSON_EXISTS_ALL</code></a>
+</td>
+  <td>
+    Checks if all JSONPaths in an array exist in a JSON document.
+    
+  </td>
+</tr>
+
+<tr>
+  <td><a href="https://github.com/google/googlesql/blob/master/docs/json_functions.md#json_exists_any"><code>JSON_EXISTS_ANY</code></a>
+</td>
+  <td>
+    Checks if any JSONPaths in an array exist in a JSON document.
     
   </td>
 </tr>
@@ -2174,6 +2205,253 @@ SELECT
  |   true   |   false  |   false  |
  +----------*----------*----------*/
 ```
+
+## `JSON_EXISTS`
+
+```googlesql
+JSON_EXISTS(json_expr, json_path)
+```
+
+**Description**
+
+Checks if a [JSONPath][JSONPath-format] exists in a JSON document. Returns
+`TRUE` if the specified JSONPath matches any value (including a JSON `null`) in
+the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path`: A `STRING` literal or query-time constant
+    [JSONPath][JSONPath-format] that identifies the path to check in
+    `json_expr`.
+
+Details:
+
++   If `json_path` matches a JSON `null` value in `json_expr`, the function
+    returns `TRUE`.
++   If `json_path` is `'$'`, the function returns `TRUE` for any non-`NULL`
+    `JSON` value, including `JSON 'null'`, `JSON '[]'`, `JSON '{}'`, and JSON
+    scalar values.
++   If `json_expr` or `json_path` is SQL `NULL`, the function returns `NULL`.
++   If `json_path` isn't a valid [JSONPath][JSONPath-format], the function
+    returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether various JSONPaths exist in a JSON object,
+including a key whose value is JSON `null` (`$.b`):
+
+```googlesql
+SELECT
+  JSON_EXISTS(data, '$.a') AS has_a,
+  JSON_EXISTS(data, '$.b') AS has_b,
+  JSON_EXISTS(data, '$.c') AS has_c
+FROM UNNEST([JSON '{"a": 10, "b": null}']) AS data;
+
+/*-------+-------+-------+
+ | has_a | has_b | has_c |
+ +-------+-------+-------+
+ | true  | true  | false |
+ +-------+-------+-------*/
+```
+
+The following example checks whether array elements and nested fields exist in
+a JSON document:
+
+```googlesql
+SELECT
+  JSON_EXISTS(data, '$.class.students[0].name') AS first_student_name,
+  JSON_EXISTS(data, '$.class.students[1].age') AS second_student_age,
+  JSON_EXISTS(data, '$.class.students[2].name') AS third_student_name
+FROM
+  UNNEST(
+    [
+      JSON '{"class": {"students": [{"name": "Jane"}, {"name": "John"}]}}'
+    ]
+  ) AS data;
+
+/*--------------------+--------------------+--------------------+
+ | first_student_name | second_student_age | third_student_name |
+ +--------------------+--------------------+--------------------+
+ | true               | false              | false              |
+ +--------------------+--------------------+--------------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+## `JSON_EXISTS_ALL`
+
+```googlesql
+JSON_EXISTS_ALL(json_expr, json_path_array)
+```
+
+**Description**
+
+Checks if all [JSONPaths][JSONPath-format] in an array exist in a JSON document.
+Returns `TRUE` if every JSONPath in the array matches at least one value
+(including a JSON `null`) in the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path_array`: A literal or query-time constant `ARRAY<STRING>` of
+    [JSONPaths][JSONPath-format] that identify the paths to check in
+    `json_expr`.
+
+Details:
+
++   For a non-empty `json_path_array` (`[path1, path2, ...]`),
+    `JSON_EXISTS_ALL(json_expr, [path1, path2, ...])` is semantically equivalent
+    to `JSON_EXISTS(json_expr, path1) AND JSON_EXISTS(json_expr, path2) AND ...`
+    (see [`JSON_EXISTS`][json-exists]), following standard three-valued logic:
+    +   If any path doesn't exist in `json_expr`, the function returns `FALSE`
+        (even if another element in `json_path_array` is `NULL`).
+    +   If all non-`NULL` paths exist in `json_expr` and at least one element in
+        `json_path_array` is `NULL`, the function returns `NULL`.
++   If `json_path_array` is an empty array (`[]`) and `json_expr` isn't SQL
+    `NULL`, the function returns `TRUE`.
++   If `json_expr` or `json_path_array` is SQL `NULL`, the function returns
+    `NULL`.
++   If any non-`NULL` element in `json_path_array` isn't a valid
+    [JSONPath][JSONPath-format], the function returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether all specified JSONPaths exist in a JSON
+object:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ALL(data, ['$.a', '$.b.c']) AS all_exist,
+  JSON_EXISTS_ALL(data, ['$.a', '$.b.d']) AS missing_one
+FROM UNNEST([JSON '{"a": 10, "b": {"c": null}}']) AS data;
+
+/*-----------+-------------+
+ | all_exist | missing_one |
+ +-----------+-------------+
+ | true      | false       |
+ +-----------+-------------*/
+```
+
+The following example demonstrates three-valued logic when `json_path_array`
+contains `NULL` elements or is empty:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ALL(data, ['$.a', NULL]) AS match_and_null,
+  JSON_EXISTS_ALL(data, ['$.b', NULL]) AS no_match_and_null,
+  JSON_EXISTS_ALL(data, []) AS empty_paths
+FROM UNNEST([JSON '{"a": 10}']) AS data;
+
+/*----------------+-------------------+-------------+
+ | match_and_null | no_match_and_null | empty_paths |
+ +----------------+-------------------+-------------+
+ | NULL           | false             | true        |
+ +----------------+-------------------+-------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+[json-exists]: #json_exists
+
+## `JSON_EXISTS_ANY`
+
+```googlesql
+JSON_EXISTS_ANY(json_expr, json_path_array)
+```
+
+**Description**
+
+Checks if any [JSONPaths][JSONPath-format] in an array exist in a JSON document.
+Returns `TRUE` if at least one JSONPath in the array matches a value (including
+a JSON `null`) in the JSON document; otherwise, returns `FALSE`.
+
+Arguments:
+
++   `json_expr`: A `JSON` value to search. For example:
+
+    ```googlesql
+    JSON '{"class": {"students": [{"name": "Jane"}]}}'
+    ```
++   `json_path_array`: A literal or query-time constant `ARRAY<STRING>` of
+    [JSONPaths][JSONPath-format] that identify the paths to check in
+    `json_expr`.
+
+Details:
+
++   For a non-empty `json_path_array` (`[path1, path2, ...]`),
+    `JSON_EXISTS_ANY(json_expr, [path1, path2, ...])` is semantically equivalent
+    to `JSON_EXISTS(json_expr, path1) OR JSON_EXISTS(json_expr, path2) OR ...`
+    (see [`JSON_EXISTS`][json-exists]), following standard three-valued logic:
+    +   If at least one path exists in `json_expr`, the function returns `TRUE`
+        (even if another element in `json_path_array` is `NULL`).
+    +   If no non-`NULL` path exists in `json_expr` and at least one element in
+        `json_path_array` is `NULL`, the function returns `NULL`.
++   If `json_path_array` is an empty array (`[]`) and `json_expr` isn't SQL
+    `NULL`, the function returns `FALSE`.
++   If `json_expr` or `json_path_array` is SQL `NULL`, the function returns
+    `NULL`.
++   If any non-`NULL` element in `json_path_array` isn't a valid
+    [JSONPath][JSONPath-format], the function returns an error.
+
+**Return type**
+
+`BOOL`
+
+**Examples**
+
+The following example checks whether any of the specified JSONPaths exist in a
+JSON object:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ANY(data, ['$.x', '$.b.c']) AS any_exist,
+  JSON_EXISTS_ANY(data, ['$.x', '$.y']) AS none_exist
+FROM UNNEST([JSON '{"a": 10, "b": {"c": null}}']) AS data;
+
+/*-----------+------------+
+ | any_exist | none_exist |
+ +-----------+------------+
+ | true      | false      |
+ +-----------+------------*/
+```
+
+The following example demonstrates three-valued logic when `json_path_array`
+contains `NULL` elements or is empty:
+
+```googlesql
+SELECT
+  JSON_EXISTS_ANY(data, ['$.a', NULL]) AS match_or_null,
+  JSON_EXISTS_ANY(data, ['$.b', NULL]) AS no_match_or_null,
+  JSON_EXISTS_ANY(data, []) AS empty_paths
+FROM UNNEST([JSON '{"a": 10}']) AS data;
+
+/*---------------+------------------+-------------+
+ | match_or_null | no_match_or_null | empty_paths |
+ +---------------+------------------+-------------+
+ | true          | NULL             | false       |
+ +---------------+------------------+-------------*/
+```
+
+[JSONPath-format]: #JSONPath_format
+
+[json-exists]: #json_exists
 
 ## `JSON_EXTRACT`
 

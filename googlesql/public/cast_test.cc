@@ -33,11 +33,15 @@
 #include "googlesql/public/language_options.h"
 #include "googlesql/public/numeric_value.h"
 #include "googlesql/public/options.pb.h"
+#include "googlesql/public/simple_catalog.h"
 #include "googlesql/public/type.h"
+#include "googlesql/public/types/extended_type.h"
 #include "googlesql/public/types/type.h"
 #include "googlesql/public/types/type_factory.h"
+#include "googlesql/public/types/value_equality_check_options.h"
 #include "googlesql/public/uuid_value.h"
 #include "googlesql/public/value.h"
+#include "googlesql/public/variant_value.h"
 #include "googlesql/testdata/test_schema.pb.h"
 #include "googlesql/testing/test_function.h"
 #include "googlesql/testing/test_value.h"
@@ -45,6 +49,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/base/casts.h"
+#include "absl/hash/hash.h"
 #include "absl/status/status.h"
 #include "googlesql/base/status_macros.h"
 #include "absl/status/statusor.h"
@@ -1182,6 +1187,188 @@ GetProtoAndBytesCastsWithoutValidation() {
   };
 }
 
+TEST(VariantCastTest, CastAllTypesToVariant) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_VARIANT_TYPE);
+  language_options.EnableLanguageFeature(FEATURE_MAP_TYPE);
+
+  auto test_cast_to_variant = [&](const Value& v) {
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant,
+                         CastValue(v, absl::UTCTimeZone(), language_options,
+                                   types::VariantType()));
+    EXPECT_TRUE(variant.type()->IsVariant());
+    EXPECT_FALSE(variant.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto variant_view, variant.variant_value());
+    EXPECT_TRUE(variant_view.is_valid());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected_variant, Value::Variant(v));
+    EXPECT_TRUE(variant.Equals(expected_variant));
+  };
+
+  // Simple types
+  test_cast_to_variant(Value::Int32(1));
+  test_cast_to_variant(Value::Int64(2));
+  test_cast_to_variant(Value::Uint32(3));
+  test_cast_to_variant(Value::Uint64(4));
+  test_cast_to_variant(Value::Bool(true));
+  test_cast_to_variant(Value::Float(5.0f));
+  test_cast_to_variant(Value::Double(6.0));
+  test_cast_to_variant(Value::String("hello"));
+  test_cast_to_variant(Value::Bytes("world"));
+  test_cast_to_variant(Value::Date(1000));
+  test_cast_to_variant(Value::Timestamp(absl::FromUnixSeconds(1000)));
+  test_cast_to_variant(Value::Time(TimeValue::FromHMSAndMicros(1, 2, 3, 4)));
+  test_cast_to_variant(Value::Datetime(
+      DatetimeValue::FromYMDHMSAndMicros(2025, 1, 2, 3, 4, 5, 6)));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto interval_val,
+                       IntervalValue::FromMonthsDaysMicros(1, 2, 3));
+  test_cast_to_variant(Value::Interval(interval_val));
+  test_cast_to_variant(Value::Numeric(NumericValue(123)));
+  test_cast_to_variant(Value::BigNumeric(BigNumericValue(456)));
+
+  // JSON
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_obj,
+                       JSONValue::ParseJSONString("{\"a\":1}"));
+  test_cast_to_variant(Value::Json(std::move(json_obj)));
+
+  // JSON array
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_arr,
+                       JSONValue::ParseJSONString("[1, \"two\", false]"));
+  test_cast_to_variant(Value::Json(std::move(json_arr)));
+
+  // JSON primitives (number, string, boolean)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_num,
+                       JSONValue::ParseJSONString("123.45"));
+  test_cast_to_variant(Value::Json(std::move(json_num)));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_str,
+                       JSONValue::ParseJSONString("\"sample\""));
+  test_cast_to_variant(Value::Json(std::move(json_str)));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(JSONValue json_bool, JSONValue::ParseJSONString("true"));
+  test_cast_to_variant(Value::Json(std::move(json_bool)));
+
+  // JSON null primitive wrapped in Variant should act as a Variant Null
+  // primitive (IsVariantNull() == true)
+  Value json_null = Value::Json(JSONValue());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant_json_null,
+                       CastValue(json_null, absl::UTCTimeZone(),
+                                 language_options, types::VariantType()));
+  EXPECT_TRUE(variant_json_null.type()->IsVariant());
+  EXPECT_FALSE(variant_json_null.is_null());  // Not a SQL null
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto variant_json_null_view,
+                       variant_json_null.variant_value());
+  EXPECT_TRUE(variant_json_null_view.IsVariantNull());
+
+  // UUID
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      auto uuid_val, UuidValue::FromString("9d3da3234c20360fbd9bec54feec54f0"));
+  test_cast_to_variant(Value::Uuid(uuid_val));
+
+  // Map
+  test_cast_to_variant(Map({{Value::String("a"), Value::Int64(1)}}));
+
+  // Array
+  const ArrayType* array_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeArrayType(types::Int64Type(), &array_type));
+  test_cast_to_variant(
+      Value::Array(array_type, {Value::Int64(1), Value::Int64(2)}));
+
+  // Struct
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(
+      type_factory->MakeStructType({{"a", types::Int64Type()}}, &struct_type));
+  test_cast_to_variant(Value::Struct(struct_type, {Value::Int64(1)}));
+
+  // Proto
+  const ProtoType* proto_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeProtoType(
+      googlesql_test::KitchenSinkPB::descriptor(), &proto_type));
+  test_cast_to_variant(Value::Proto(proto_type, absl::Cord("")));
+
+  // Enum
+  const EnumType* enum_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeEnumType(googlesql_test::TestEnum_descriptor(),
+                                       &enum_type));
+  test_cast_to_variant(Value::Enum(enum_type, 1));
+}
+
+TEST(VariantCastTest, CastNULLs) {
+  LanguageOptions language_options;
+  language_options.EnableLanguageFeature(FEATURE_VARIANT_TYPE);
+  language_options.EnableLanguageFeature(FEATURE_MAP_TYPE);
+
+  // Identity cast for SQL NULL Variant (Untyped SQL NULL in Variant context)
+  Value null_variant = Value::NullVariant();
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value result_null_variant,
+                       CastValue(null_variant, absl::UTCTimeZone(),
+                                 language_options, types::VariantType()));
+  EXPECT_TRUE(result_null_variant.is_null());
+  EXPECT_EQ(result_null_variant.type(), types::VariantType());
+
+  auto test_cast_null_to_variant = [&](const Value& null_val) {
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value variant,
+                         CastValue(null_val, absl::UTCTimeZone(),
+                                   language_options, types::VariantType()));
+    EXPECT_TRUE(variant.type()->IsVariant());
+    EXPECT_FALSE(variant.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(auto view, variant.variant_value());
+    EXPECT_TRUE(view.is_null());
+    GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected, Value::Variant(null_val));
+    EXPECT_TRUE(variant.Equals(expected));
+  };
+
+  // Simple types
+  test_cast_null_to_variant(Value::NullInt32());
+  test_cast_null_to_variant(Value::NullInt64());
+  test_cast_null_to_variant(Value::NullUint32());
+  test_cast_null_to_variant(Value::NullUint64());
+  test_cast_null_to_variant(Value::NullBool());
+  test_cast_null_to_variant(Value::NullFloat());
+  test_cast_null_to_variant(Value::NullDouble());
+  test_cast_null_to_variant(Value::NullString());
+  test_cast_null_to_variant(Value::NullBytes());
+  test_cast_null_to_variant(Value::NullDate());
+  test_cast_null_to_variant(Value::NullTimestamp());
+  test_cast_null_to_variant(Value::NullTime());
+  test_cast_null_to_variant(Value::NullDatetime());
+  test_cast_null_to_variant(Value::NullInterval());
+  test_cast_null_to_variant(Value::NullNumeric());
+  test_cast_null_to_variant(Value::NullBigNumeric());
+  test_cast_null_to_variant(Value::NullJson());
+  test_cast_null_to_variant(Value::NullUuid());
+
+  // Complex types NULLs
+  // Array
+  const ArrayType* array_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeArrayType(types::Int64Type(), &array_type));
+  test_cast_null_to_variant(Value::Null(array_type));
+
+  // Struct
+  const StructType* struct_type;
+  GOOGLESQL_ASSERT_OK(
+      type_factory->MakeStructType({{"a", types::Int64Type()}}, &struct_type));
+  test_cast_null_to_variant(Value::Null(struct_type));
+
+  // Map
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      const Type* map_type,
+      type_factory->MakeMapType(types::StringType(), types::Int64Type(),
+                                language_options));
+  test_cast_null_to_variant(Value::Null(map_type));
+
+  // Proto
+  const ProtoType* proto_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeProtoType(
+      googlesql_test::KitchenSinkPB::descriptor(), &proto_type));
+  test_cast_null_to_variant(Value::Null(proto_type));
+
+  // Enum
+  const EnumType* enum_type;
+  GOOGLESQL_ASSERT_OK(type_factory->MakeEnumType(googlesql_test::TestEnum_descriptor(),
+                                       &enum_type));
+  test_cast_null_to_variant(Value::Null(enum_type));
+}
+
 typedef testing::TestWithParam<QueryParamsWithResult> CastTemplateTest;
 
 TEST_P(CastTemplateTest, Testlib) {
@@ -1258,6 +1445,195 @@ TEST(IsTypeCastableToJsonTest, TypeCastableToJson) {
 
   // Cast array of unsupported type
   EXPECT_FALSE(IsTypeCastableToJson(array_geography_type, options_enabled));
+}
+
+TEST(IsTypeCastableToVariantTest, TypeCastableToVariant) {
+  LanguageOptions options_enabled;
+  options_enabled.EnableLanguageFeature(FEATURE_VARIANT_TYPE);
+
+  LanguageOptions options_disabled;
+
+  TypeFactory factory;
+  const Type* int64_type = types::Int64Type();
+  const Type* variant_type = types::VariantType();
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const ArrayType* array_int64_type,
+                       factory.MakeArrayType(int64_type));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* map_type,
+                       factory.MakeMapType(types::StringType(), int64_type));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const Type* measure_type,
+                       factory.MakeMeasureType(int64_type));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const ArrayType* array_measure_type,
+                       factory.MakeArrayType(measure_type));
+
+  // Feature disabled
+  EXPECT_FALSE(IsTypeCastableToVariant(int64_type, options_disabled));
+  EXPECT_TRUE(IsTypeCastableToVariant(variant_type, options_disabled));
+
+  // Feature enabled
+  EXPECT_TRUE(IsTypeCastableToVariant(int64_type, options_enabled));
+  EXPECT_TRUE(IsTypeCastableToVariant(variant_type, options_enabled));
+  EXPECT_TRUE(IsTypeCastableToVariant(map_type, options_enabled));
+  EXPECT_TRUE(IsTypeCastableToVariant(array_int64_type, options_enabled));
+
+  // ROW type
+  SimpleTable table("TableName");
+  const RowType* row_type;
+  GOOGLESQL_ASSERT_OK(factory.MakeRowType(&table, table.FullName(), &row_type));
+  EXPECT_FALSE(IsTypeCastableToVariant(row_type, options_enabled));
+
+  // Unsupported types
+  EXPECT_FALSE(IsTypeCastableToVariant(measure_type, options_enabled));
+  EXPECT_FALSE(IsTypeCastableToVariant(array_measure_type, options_enabled));
+  const StructType* struct_measure_type;
+  GOOGLESQL_ASSERT_OK(
+      factory.MakeStructType({{"m", measure_type}}, &struct_measure_type));
+  EXPECT_FALSE(IsTypeCastableToVariant(struct_measure_type, options_enabled));
+  const Type* map_measure_type;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(map_measure_type,
+                       factory.MakeMapType(types::StringType(), measure_type));
+  EXPECT_FALSE(IsTypeCastableToVariant(map_measure_type, options_enabled));
+}
+
+namespace {
+
+class TestExtendedType : public ExtendedType {
+ public:
+  explicit TestExtendedType(const TypeFactory* factory)
+      : ExtendedType(factory) {}
+
+  Value MakeValue(int64_t v) const {
+    return Value::Extended(this, ValueContent::Create(v));
+  }
+
+  bool ValueContentEquals(
+      const ValueContent& x, const ValueContent& y,
+      const ValueEqualityCheckOptions& options) const override {
+    return x.GetAs<int64_t>() == y.GetAs<int64_t>();
+  }
+
+  bool ValueContentLess(const ValueContent& x, const ValueContent& y,
+                        const Type* other_type) const override {
+    return x.GetAs<int64_t>() < y.GetAs<int64_t>();
+  }
+
+  absl::HashState HashValueContent(const ValueContent& value,
+                                   absl::HashState state) const override {
+    return absl::HashState::combine(std::move(state), value.GetAs<int64_t>());
+  }
+
+  std::string TypeName(ProductMode mode) const override {
+    return "TestExtendedType";
+  }
+
+  absl::HashState HashTypeParameter(absl::HashState state) const override {
+    return absl::HashState::combine(std::move(state),
+                                    reinterpret_cast<uintptr_t>(this));
+  }
+
+  absl::Status SerializeToProtoAndDistinctFileDescriptorsImpl(
+      const BuildFileDescriptorSetMapOptions& options, TypeProto* type_proto,
+      FileDescriptorSetMap* file_descriptor_set_map) const override {
+    type_proto->set_type_kind(TYPE_EXTENDED);
+    type_proto->set_extended_type_name(TypeName(ProductMode::PRODUCT_EXTERNAL));
+    return absl::OkStatus();
+  }
+
+  absl::Status SerializeValueContent(const ValueContent& value,
+                                     ValueProto* value_proto) const override {
+    return absl::UnimplementedError("Unimplemented");
+  }
+
+  absl::Status DeserializeValueContent(const ValueProto& value_proto,
+                                       ValueContent* value) const override {
+    return absl::UnimplementedError("Unimplemented");
+  }
+
+  int64_t GetEstimatedOwnedMemoryBytesSize() const override {
+    return sizeof(*this);
+  }
+
+  bool EqualsForSameKind(const Type* that, bool equivalent) const override {
+    return this == that;
+  }
+
+  void DebugStringImpl(bool details, TypeOrStringVector* stack,
+                       std::string* debug_string) const override {
+    *debug_string = TypeName(ProductMode::PRODUCT_EXTERNAL);
+  }
+
+  std::string FormatValueContent(
+      const ValueContent& value,
+      const FormatValueContentOptions& options) const override {
+    return absl::StrCat("TestExtended(", value.GetAs<int64_t>(), ")");
+  }
+};
+
+}  // namespace
+
+TEST(IsTypeCastableToVariantTest, ExtendedTypeCastToVariant) {
+  LanguageOptions options_enabled;
+  options_enabled.EnableLanguageFeature(FEATURE_VARIANT_TYPE);
+
+  TypeFactory factory;
+  TestExtendedType extended_type(&factory);
+  EXPECT_TRUE(IsTypeCastableToVariant(&extended_type, options_enabled));
+
+  Value extended_val = extended_type.MakeValue(42);
+  // CastValue without catalog/evaluator should succeed when casting
+  // ExtendedType -> VARIANT.
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value variant_val,
+      CastValue(extended_val, absl::UTCTimeZone(), options_enabled,
+                types::VariantType(), /*catalog=*/nullptr));
+  EXPECT_TRUE(variant_val.type()->IsVariant());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected_variant, Value::Variant(extended_val));
+  EXPECT_TRUE(variant_val.Equals(expected_variant));
+
+  // Casting VARIANT -> ExtendedType should fail with InvalidArgumentError, not
+  // FailedPrecondition due to missing catalog/evaluator.
+  EXPECT_THAT(CastValue(variant_val, absl::UTCTimeZone(), options_enabled,
+                        &extended_type, /*catalog=*/nullptr),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(IsTypeCastableToVariantTest, ArrayWithNullElementCastToVariantArray) {
+  LanguageOptions options_enabled;
+  options_enabled.EnableLanguageFeature(FEATURE_VARIANT_TYPE);
+  options_enabled.EnableLanguageFeature(FEATURE_CAST_DIFFERENT_ARRAY_TYPES);
+
+  TypeFactory factory;
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const ArrayType* array_int64_type,
+                       factory.MakeArrayType(types::Int64Type()));
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(const ArrayType* array_variant_type,
+                       factory.MakeArrayType(types::VariantType()));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value array_val,
+      Value::MakeArray(array_int64_type,
+                       {Value::Int64(1), Value::NullInt64(), Value::Int64(3)}));
+
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
+      Value result_val,
+      CastValue(array_val, absl::UTCTimeZone(), options_enabled,
+                array_variant_type, /*catalog=*/nullptr));
+  ASSERT_EQ(result_val.num_elements(), 3);
+
+  // Element 0: Variant(1)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected_elem0, Value::Variant(Value::Int64(1)));
+  EXPECT_TRUE(result_val.element(0).Equals(expected_elem0));
+
+  // Element 1: Variant(NullInt64()), NOT SQL NULL Variant!
+  EXPECT_FALSE(result_val.element(1).is_null());
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected_elem1,
+                       Value::Variant(Value::NullInt64()));
+  EXPECT_TRUE(result_val.element(1).Equals(expected_elem1));
+
+  // Element 2: Variant(3)
+  GOOGLESQL_ASSERT_OK_AND_ASSIGN(Value expected_elem2, Value::Variant(Value::Int64(3)));
+  EXPECT_TRUE(result_val.element(2).Equals(expected_elem2));
 }
 
 }  // namespace googlesql

@@ -68,6 +68,76 @@ FROM
    )
 ==
 
+# LOG with hints.
+FROM t
+|> LOG @{hint=1} {{|()|(\|> WHERE true)}}
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-23] [FROM t |> LOG @{hint=1}]
+  Query [0-23] [FROM t |> LOG @{hint=1}]
+    FromQuery [0-6] [FROM t]
+      FromClause [0-6] [FROM t]
+        TablePathExpression [5-6] [t]
+          PathExpression [5-6] [t]
+            Identifier(t) [5-6] [t]
+    PipeLog [7-23] [|> LOG @{hint=1}]
+      Hint [14-23] [@{hint=1}]
+        HintEntry [16-22] [hint=1]
+          Identifier(hint) [16-20] [hint]
+          IntLiteral(1) [21-22] [1]
+--
+FROM
+  t
+|> LOG @{ hint = 1 }
+--
+ALTERNATION GROUP: ()
+--
+QueryStatement [0-26] [FROM t |> LOG @{hint=1} ()]
+  Query [0-26] [FROM t |> LOG @{hint=1} ()]
+    FromQuery [0-6] [FROM t]
+      FromClause [0-6] [FROM t]
+        TablePathExpression [5-6] [t]
+          PathExpression [5-6] [t]
+            Identifier(t) [5-6] [t]
+    PipeLog [7-26] [|> LOG @{hint=1} ()]
+      Hint [14-23] [@{hint=1}]
+        HintEntry [16-22] [hint=1]
+          Identifier(hint) [16-20] [hint]
+          IntLiteral(1) [21-22] [1]
+      Subpipeline [24-26] [()]
+--
+FROM
+  t
+|> LOG @{ hint = 1 }  ()
+--
+ALTERNATION GROUP: (|> WHERE true)
+--
+QueryStatement [0-39] [FROM t |>...WHERE true)]
+  Query [0-39] [FROM t |>...WHERE true)]
+    FromQuery [0-6] [FROM t]
+      FromClause [0-6] [FROM t]
+        TablePathExpression [5-6] [t]
+          PathExpression [5-6] [t]
+            Identifier(t) [5-6] [t]
+    PipeLog [7-39] [|> LOG @{hint...WHERE true)]
+      Hint [14-23] [@{hint=1}]
+        HintEntry [16-22] [hint=1]
+          Identifier(hint) [16-20] [hint]
+          IntLiteral(1) [21-22] [1]
+      Subpipeline [24-39] [(|> WHERE true)]
+        PipeWhere [25-38] [|> WHERE true]
+          WhereClause [28-38] [WHERE true]
+            BooleanLiteral(true) [34-38] [true]
+--
+FROM
+  t
+|> LOG @{ hint = 1 }  (
+     |> WHERE
+          true
+   )
+==
+
 from t
 |> LOG (select 1)
 --

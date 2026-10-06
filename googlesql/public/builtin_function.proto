@@ -61,7 +61,7 @@ enum FunctionSignatureId {
   // 3100-3199 Measure functions              (NextId: 3101)
   // 3200-3299 MATCH_RECOGNIZE functions      (NextId: 3207)
   // 3300-3399 Aggregate functions III        (NextId: 3303)
-  // 3400-3499 Misc functions II              (NextId: 3431)
+  // 3400-3499 Misc functions II              (NextId: 3439)
   // 3500-3599 Vector functions               (NextId: 3502)
   // 4000-4099 Table valued functions         (NextId: 4006)
   // 5000-5023 AI functions                   (Fully used)
@@ -964,6 +964,10 @@ enum FunctionSignatureId {
       3427;  // bit_cast_to_int64(bytes [, endianness]) -> int64
   FN_BIT_CAST_BYTES_TO_UINT64 =
       3428;  // bit_cast_to_uint64(bytes [, endianness]) -> uint64
+
+  // VARIANT functions
+  FN_VARIANT_SUBSCRIPT_INT64 = 3431;   // $subscript(variant, int64) -> variant
+  FN_VARIANT_SUBSCRIPT_STRING = 3432;  // $subscript(variant, string) -> variant
 
   // These TO_JSON signatures are no longer supported
   reserved "FN_TO_JSON_UNSUPPORTED_FIELDS";

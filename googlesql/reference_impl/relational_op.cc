@@ -42,11 +42,13 @@
 #include "googlesql/public/functions/array_zip_mode.pb.h"
 #include "googlesql/public/numeric_value.h"
 #include "googlesql/public/options.pb.h"
+#include "googlesql/public/property_graph.h"
 #include "googlesql/public/sql_tvf.h"
 #include "googlesql/public/table_valued_function.h"
 #include "googlesql/public/templated_sql_tvf.h"
 #include "googlesql/public/type.h"
 #include "googlesql/public/type.pb.h"
+#include "googlesql/public/types/graph_element_type.h"
 #include "googlesql/public/value.h"
 #include "googlesql/reference_impl/evaluation.h"
 #include "googlesql/reference_impl/function.h"
@@ -61,6 +63,7 @@
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "absl/flags/flag.h"
 #include "googlesql/base/check.h"
 #include "absl/memory/memory.h"
@@ -7509,6 +7512,964 @@ const RelationalOp* FinishOp::input() const {
 }
 
 RelationalOp* FinishOp::mutable_input() {
+  return GetMutableArg(kInput)->mutable_node()->AsMutableRelationalOp();
+}
+
+namespace {
+
+// Returns the default value for the given catalog column.
+Value GetColumnDefaultValue(const Column* col) {
+  if (col->HasDefaultExpression() &&
+      col->GetExpression()->HasResolvedExpression()) {
+    const ResolvedExpr* resolved_expr =
+        col->GetExpression()->GetResolvedExpression();
+    if (resolved_expr->Is<ResolvedLiteral>()) {
+      return resolved_expr->GetAs<ResolvedLiteral>()->value();
+    }
+  }
+  return Value::Null(col->GetType());
+}
+
+// Execute side-effect insertions for Graph DML INSERT statement.
+//
+// For each tuple produced by `input_iterator_`, this iterator evaluates and
+// applies node and edge insertions into their respective underlying graph
+// element tables and accumulates the mutations locally. When the input
+// iterator is exhausted, it commits the accumulated mutations to `context_`.
+class GraphInsertApplyTupleIterator : public TupleIterator {
+ public:
+  GraphInsertApplyTupleIterator(const GraphInsertApplyOp* op,
+                                absl::Span<const TupleData* const> params,
+                                int input_num_variables,
+                                std::unique_ptr<TupleIterator> input_iterator,
+                                EvaluationContext* context)
+      : op_(op),
+        params_(params.begin(), params.end()),
+        input_num_variables_(input_num_variables),
+        input_iterator_(std::move(input_iterator)),
+        output_schema_(op->CreateOutputSchema()),
+        context_(context) {}
+
+  const TupleSchema& Schema() const override { return *output_schema_; }
+
+  // Advances the iterator and executes graph node/edge insertion side effects
+  // for the current row.
+  TupleData* Next() override {
+    if (!initialized_) {
+      absl::Status init_status = InitializeTableStates();
+      if (!init_status.ok()) {
+        status_ = init_status;
+        return nullptr;
+      }
+    }
+
+    TupleData* current = input_iterator_->Next();
+
+    // End of the input stream. Commit mutations to the graph element tables.
+    if (current == nullptr) {
+      status_ = input_iterator_->Status();
+      if (status_.ok()) {
+        status_ = CommitInsertions();
+      }
+      return nullptr;
+    }
+
+    if (current->num_slots() < Schema().num_variables()) {
+      status_ = googlesql_base::InternalErrorBuilder()
+                << "GraphInsertApplyTupleIterator::Next() found "
+                << current->num_slots() << " slots but expected at least "
+                << Schema().num_variables();
+      return nullptr;
+    }
+
+    // Apply side-effect insertions for the current row and populate inserted
+    // row struct values into output slots.
+    absl::Status status = ApplyInsertions(current);
+    if (!status.ok()) {
+      status_ = status;
+      return nullptr;
+    }
+    return current;
+  }
+
+  absl::Status Status() const override { return status_; }
+
+  std::string DebugString() const override {
+    return absl::StrCat("GraphInsertApplyTupleIterator(",
+                        input_iterator_->DebugString(), ")");
+  }
+
+ private:
+  struct RowNumberAndValues {
+    // 0-indexed row number in the graph element table.
+    int64_t row_number = -1;
+    // The row value of a graph element table.
+    Value row_value;
+  };
+
+  // Map from graph element key values to the row number and values.
+  using GraphElementKeyRowMap =
+      absl::flat_hash_map<std::vector<Value>, RowNumberAndValues>;
+
+  struct BaseTableState {
+    const Table* base_table = nullptr;
+    std::string table_name;
+    const ArrayType* table_array_type = nullptr;
+
+    // Limitation: For the same base table, we only support a single unique
+    // constraint.
+    // REQUIRES: Graph element tables sharing a base table share the same key
+    // columns.
+    GraphElementKeyRowMap row_map;
+    int64_t initial_row_count = 0;
+    int64_t num_new_rows = 0;
+  };
+
+  // Returns the graph element key values for the given row in the given graph
+  // element table.
+  static absl::StatusOr<std::vector<Value>> ExtractGraphElementKey(
+      const GraphElementTable* table, const Value& row) {
+    const std::vector<int>& key_cols = table->GetKeyColumns();
+    GOOGLESQL_RET_CHECK(!key_cols.empty())
+        << "GraphElementTable must have non-empty key columns: "
+        << table->GetTable()->Name();
+
+    std::vector<Value> key_values;
+    key_values.reserve(key_cols.size());
+    for (int col_idx : key_cols) {
+      GOOGLESQL_RET_CHECK_LT(col_idx, row.num_fields());
+      key_values.push_back(row.field(col_idx));
+    }
+    return key_values;
+  }
+
+  // Reads the current snapshot of the target graph element tables of the Graph
+  // INSERT operator from the context (database) and initializes the table
+  // states locally.
+  absl::Status InitializeTableStates() {
+    if (initialized_) {
+      // If all table states have already been initialized, do nothing.
+      return absl::OkStatus();
+    }
+    initialized_ = true;
+
+    auto initialize_table =
+        [&](const GraphElementTable* table) -> absl::Status {
+      const Table* base_table = table->GetTable();
+      if (base_table_states_.contains(base_table)) {
+        // If the requested base table state is already initialized, do nothing.
+        return absl::OkStatus();
+      }
+
+      std::string table_name = base_table->Name();
+      Value current_table = context_->GetTableAsArray(table_name);
+      GOOGLESQL_RET_CHECK(current_table.is_valid())
+          << "Table not found in context: " << table_name;
+
+      BaseTableState state;
+      state.base_table = base_table;
+      state.table_name = table_name;
+      state.table_array_type = current_table.type()->AsArray();
+
+      GOOGLESQL_ASSIGN_OR_RETURN(Value::ListView elements_view,
+                       current_table.elements_view());
+      int64_t row_number = 0;
+      for (const Value& existing_row : elements_view) {
+        // Extract the key values for the existing row and insert into the
+        // row map. Graph element tables sharing a base table must share the
+        // same key columns.
+        GOOGLESQL_ASSIGN_OR_RETURN(std::vector<Value> key_val,
+                         ExtractGraphElementKey(table, existing_row));
+        auto [it, inserted] = state.row_map.insert(
+            {key_val, RowNumberAndValues{row_number, existing_row}});
+        if (!inserted) {
+          return absl::OutOfRangeError(absl::StrCat(
+              "Found duplicate key in existing graph element table '",
+              table_name, "'"));
+        }
+        ++row_number;
+      }
+      state.initial_row_count = state.row_map.size();
+      base_table_states_[base_table] = std::move(state);
+      return absl::OkStatus();
+    };
+
+    for (const auto& node : op_->nodes_to_insert()) {
+      GOOGLESQL_RETURN_IF_ERROR(initialize_table(node.table));
+    }
+    for (const auto& edge : op_->edges_to_insert()) {
+      GOOGLESQL_RETURN_IF_ERROR(initialize_table(edge.table));
+    }
+    return absl::OkStatus();
+  }
+
+  // Commits the local insertion mutations to the target graph element tables in
+  // the context (database).
+  absl::Status CommitInsertions() {
+    if (committed_) {
+      // If the mutations have already been committed, do nothing.
+      return absl::OkStatus();
+    }
+    committed_ = true;
+
+    for (auto& [base_table, state] : base_table_states_) {
+      if (state.num_new_rows == 0) {
+        // The input stream evaluates to 0 rows, so no insertions.
+        continue;
+      }
+      std::vector<Value> final_rows(state.row_map.size());
+      for (const auto& [key, row_num_value] : state.row_map) {
+        final_rows[row_num_value.row_number] = row_num_value.row_value;
+      }
+
+      GOOGLESQL_ASSIGN_OR_RETURN(Value new_table,
+                       Value::MakeArray(state.table_array_type, final_rows));
+      GOOGLESQL_RETURN_IF_ERROR(
+          context_->UpdateTableAsArray(state.table_name, new_table));
+      context_->IncrementNumRowsModified(state.table_name, state.num_new_rows);
+    }
+    return absl::OkStatus();
+  }
+
+  // Evaluates and applies side-effect insertions for nodes and edges
+  // defined in `nodes_to_insert_` and `edges_to_insert_` for a single input
+  // tuple.
+  absl::Status ApplyInsertions(TupleData* current) {
+    absl::InlinedVector<const TupleData*, 2> eval_params(params_.begin(),
+                                                         params_.end());
+    eval_params.push_back(current);
+
+    std::vector<Value> inserted_node_rows;
+    inserted_node_rows.reserve(op_->nodes_to_insert().size());
+
+    // Step 1: Evaluate and insert nodes.
+    for (int i = 0; i < op_->nodes_to_insert().size(); ++i) {
+      const auto& node = op_->nodes_to_insert()[i];
+      const Table* base_table = node.table->GetTable();
+      auto it = base_table_states_.find(base_table);
+      GOOGLESQL_RET_CHECK(it != base_table_states_.end());
+      BaseTableState& state = it->second;
+
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          Value node_row,
+          ConstructElementTableRow(
+              node.table, state, node.static_properties,
+              node.dynamic_label_expr.get(), node.dynamic_label_col_idx,
+              node.dynamic_properties_expr.get(),
+              node.dynamic_properties_col_idx, node.generated_columns,
+              /*src_keys=*/{}, /*dest_keys=*/{}, eval_params));
+      GOOGLESQL_RETURN_IF_ERROR(InsertRow(node.table, state, node_row));
+      current->mutable_slot(input_num_variables_ + i)->SetValue(node_row);
+      inserted_node_rows.push_back(std::move(node_row));
+    }
+
+    // Helper to extract keys from an endpoint (inserted node or input
+    // variable) based on the edge table's endpoint reference definition.
+    auto extract_endpoint_keys =
+        [&inserted_node_rows, &current](
+            const GraphInsertApplyOp::NodeEndpoint& endpoint,
+            const GraphNodeTableReference* node_reference,
+            absl::string_view endpoint_description)
+        -> absl::StatusOr<std::vector<Value>> {
+      GOOGLESQL_RET_CHECK(node_reference != nullptr);
+      // The inserted node produces a STRUCT typed value representing the base
+      // table row. Must be non-NULL.
+      if (endpoint.source ==
+          GraphInsertApplyOp::NodeEndpoint::Source::kInsertedNode) {
+        GOOGLESQL_RET_CHECK_GE(endpoint.inserted_node_index, 0);
+        GOOGLESQL_RET_CHECK_LT(endpoint.inserted_node_index, inserted_node_rows.size());
+        const Value& node_row =
+            inserted_node_rows[endpoint.inserted_node_index];
+        const std::vector<int>& node_cols =
+            node_reference->GetNodeTableColumns();
+        std::vector<Value> key_values;
+        key_values.reserve(node_cols.size());
+        for (int col_idx : node_cols) {
+          GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+          GOOGLESQL_RET_CHECK_LT(col_idx, node_row.num_fields());
+          key_values.push_back(node_row.field(col_idx));
+        }
+        return key_values;
+      }
+
+      // The input variable node produces a nullable GRAPH_ELEMENT typed value.
+      GOOGLESQL_RET_CHECK(endpoint.source ==
+                GraphInsertApplyOp::NodeEndpoint::Source::kInputVariable);
+      GOOGLESQL_RET_CHECK_GE(endpoint.input_slot_idx, 0);
+      const Value& node_val = current->slot(endpoint.input_slot_idx).value();
+      if (node_val.is_null()) {
+        return absl::OutOfRangeError(
+            absl::StrCat("Cannot insert an edge ", endpoint_description));
+      }
+      std::vector<Value> key_values;
+      key_values.reserve(endpoint.property_names.size());
+      for (const std::string& prop_name : endpoint.property_names) {
+        GOOGLESQL_ASSIGN_OR_RETURN(Value prop_val,
+                         node_val.FindStaticPropertyByName(prop_name));
+        key_values.push_back(std::move(prop_val));
+      }
+      return key_values;
+    };
+
+    // Step 2: Evaluate and insert edges.
+    for (int j = 0; j < op_->edges_to_insert().size(); ++j) {
+      const auto& edge = op_->edges_to_insert()[j];
+      const Table* base_table = edge.table->GetTable();
+      auto it = base_table_states_.find(base_table);
+      GOOGLESQL_RET_CHECK(it != base_table_states_.end());
+      BaseTableState& state = it->second;
+
+      GOOGLESQL_RET_CHECK(edge.source_node.has_value());
+      GOOGLESQL_RET_CHECK(edge.dest_node.has_value());
+      const GraphEdgeTable* edge_table = edge.table->AsEdgeTable();
+      GOOGLESQL_RET_CHECK(edge_table != nullptr);
+
+      GOOGLESQL_ASSIGN_OR_RETURN(std::vector<Value> src_keys,
+                       extract_endpoint_keys(*edge.source_node,
+                                             edge_table->GetSourceNodeTable(),
+                                             "from a NULL source node"));
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          std::vector<Value> dest_keys,
+          extract_endpoint_keys(*edge.dest_node, edge_table->GetDestNodeTable(),
+                                "to a NULL destination node"));
+
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          Value edge_row,
+          ConstructElementTableRow(
+              edge.table, state, edge.static_properties,
+              edge.dynamic_label_expr.get(), edge.dynamic_label_col_idx,
+              edge.dynamic_properties_expr.get(),
+              edge.dynamic_properties_col_idx, edge.generated_columns, src_keys,
+              dest_keys, eval_params));
+      GOOGLESQL_RETURN_IF_ERROR(InsertRow(edge.table, state, edge_row));
+      current
+          ->mutable_slot(input_num_variables_ +
+                         static_cast<int>(op_->nodes_to_insert().size()) + j)
+          ->SetValue(edge_row);
+    }
+    return absl::OkStatus();
+  }
+
+  // Returns a runtime error for inserting duplicate key into the graph element
+  // table.
+  static absl::Status MakeDuplicateKeyError(
+      absl::string_view element_table_name, const RowNumberAndValues& old_row,
+      int64_t initial_row_count) {
+    return absl::OutOfRangeError(absl::StrCat(
+        "Duplicate key inserted into graph element table '", element_table_name,
+        "' due to ",
+        old_row.row_number < initial_row_count ? "previously existing"
+                                               : "inserted",
+        " row"));
+  }
+
+  // Inserts a new row into the target graph element table state.
+  absl::Status InsertRow(const GraphElementTable* table, BaseTableState& state,
+                         const Value& new_row) {
+    GOOGLESQL_ASSIGN_OR_RETURN(std::vector<Value> key_val,
+                     ExtractGraphElementKey(table, new_row));
+
+    int64_t next_row_number = state.row_map.size();
+    auto [row_map_it, inserted] = state.row_map.insert(
+        {key_val, RowNumberAndValues{next_row_number, new_row}});
+    if (!inserted) {
+      const RowNumberAndValues& old_row = row_map_it->second;
+      return MakeDuplicateKeyError(table->Name(), old_row,
+                                   state.initial_row_count);
+    }
+    state.num_new_rows++;
+    return absl::OkStatus();
+  }
+
+  // Constructs the to-be-inserted target table row based on properties, dynamic
+  // labels, dynamic properties, source/destination keys (for edges), default
+  // values, and generated columns.
+  absl::StatusOr<Value> ConstructElementTableRow(
+      const GraphElementTable* table, const BaseTableState& state,
+      absl::Span<const GraphInsertApplyOp::PropertyToInsert> static_properties,
+      const ValueExpr* dynamic_label_expr, int dynamic_label_col_idx,
+      const ValueExpr* dynamic_properties_expr, int dynamic_properties_col_idx,
+      absl::Span<const GraphInsertApplyOp::GeneratedColumnInfo>
+          generated_columns,
+      absl::Span<const Value> src_keys, absl::Span<const Value> dest_keys,
+      absl::Span<const TupleData* const> eval_params) {
+    const Table* base_table = state.base_table;
+    int num_cols = base_table->NumColumns();
+    std::vector<Value> row_fields(num_cols);
+
+    auto eval_expr = [&](const ValueExpr* expr,
+                         absl::Span<const TupleData* const> eval_params)
+        -> absl::StatusOr<Value> {
+      TupleSlot slot;
+      absl::Status status;
+      if (!expr->EvalSimple(eval_params, context_, &slot, &status)) {
+        return status;
+      }
+      return slot.value();
+    };
+
+    // 1. Populate explicit static properties.
+    for (const auto& prop : static_properties) {
+      GOOGLESQL_RET_CHECK_GE(prop.target_col_idx, 0);
+      GOOGLESQL_RET_CHECK_LT(prop.target_col_idx, num_cols);
+      GOOGLESQL_RET_CHECK(!row_fields[prop.target_col_idx].is_valid());
+      GOOGLESQL_ASSIGN_OR_RETURN(Value val, eval_expr(prop.expr.get(), eval_params));
+      row_fields[prop.target_col_idx] = std::move(val);
+    }
+
+    // 2. Populate dynamic label.
+    if (dynamic_label_expr != nullptr) {
+      GOOGLESQL_RET_CHECK_GE(dynamic_label_col_idx, 0);
+      GOOGLESQL_RET_CHECK_LT(dynamic_label_col_idx, num_cols);
+      GOOGLESQL_RET_CHECK(!row_fields[dynamic_label_col_idx].is_valid());
+      GOOGLESQL_ASSIGN_OR_RETURN(Value val, eval_expr(dynamic_label_expr, eval_params));
+      row_fields[dynamic_label_col_idx] = std::move(val);
+    }
+
+    // 3. Populate dynamic properties.
+    if (dynamic_properties_expr != nullptr) {
+      GOOGLESQL_RET_CHECK_GE(dynamic_properties_col_idx, 0);
+      GOOGLESQL_RET_CHECK_LT(dynamic_properties_col_idx, num_cols);
+      GOOGLESQL_RET_CHECK(!row_fields[dynamic_properties_col_idx].is_valid());
+      GOOGLESQL_ASSIGN_OR_RETURN(Value val,
+                       eval_expr(dynamic_properties_expr, eval_params));
+      row_fields[dynamic_properties_col_idx] = std::move(val);
+    }
+
+    // 4. If this is an edge table, populate source and destination key columns.
+    if (table->kind() == GraphElementTable::Kind::kEdge) {
+      GOOGLESQL_RET_CHECK(!src_keys.empty() && !dest_keys.empty());
+      const GraphEdgeTable* edge_table = table->AsEdgeTable();
+      GOOGLESQL_RET_CHECK(edge_table != nullptr);
+      const GraphNodeTableReference* src_node_ref =
+          edge_table->GetSourceNodeTable();
+      GOOGLESQL_RET_CHECK_EQ(src_node_ref->GetEdgeTableColumns().size(), src_keys.size());
+      for (int k = 0; k < src_keys.size(); ++k) {
+        int col_idx = src_node_ref->GetEdgeTableColumns()[k];
+        GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+        GOOGLESQL_RET_CHECK_LT(col_idx, num_cols);
+        GOOGLESQL_RET_CHECK(!row_fields[col_idx].is_valid());
+        row_fields[col_idx] = src_keys[k];
+      }
+
+      const GraphNodeTableReference* dest_node_ref =
+          edge_table->GetDestNodeTable();
+      GOOGLESQL_RET_CHECK_EQ(dest_node_ref->GetEdgeTableColumns().size(),
+                   dest_keys.size());
+      for (int k = 0; k < dest_keys.size(); ++k) {
+        int col_idx = dest_node_ref->GetEdgeTableColumns()[k];
+        GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+        GOOGLESQL_RET_CHECK_LT(col_idx, num_cols);
+        GOOGLESQL_RET_CHECK(!row_fields[col_idx].is_valid());
+        row_fields[col_idx] = dest_keys[k];
+      }
+    } else {
+      GOOGLESQL_RET_CHECK(src_keys.empty() && dest_keys.empty());
+    }
+
+    absl::flat_hash_set<int> gen_col_indices;
+    gen_col_indices.reserve(generated_columns.size());
+    for (const auto& gen_col : generated_columns) {
+      gen_col_indices.insert(gen_col.target_col_idx);
+    }
+
+    // 5. Populate defaults for unpopulated non-generated columns:
+    //    - Columns with DEFAULT definitions that are literal will be populated
+    //      with the literal value.
+    //    - Otherwise, columns will be populated with NULL.
+    for (int c = 0; c < num_cols; ++c) {
+      if (!row_fields[c].is_valid() && !gen_col_indices.contains(c)) {
+        const Column* col = base_table->GetColumn(c);
+        if (!col->HasGeneratedExpression()) {
+          row_fields[c] = GetColumnDefaultValue(col);
+        }
+      }
+    }
+
+    // 6. Evaluate generated columns in topological order.
+    for (const auto& gen_col : generated_columns) {
+      GOOGLESQL_RET_CHECK_GE(gen_col.target_col_idx, 0);
+      GOOGLESQL_RET_CHECK_LT(gen_col.target_col_idx, num_cols);
+      GOOGLESQL_RET_CHECK(!row_fields[gen_col.target_col_idx].is_valid());
+      TupleData row_tuple = CreateTupleDataFromValues(row_fields);
+      GOOGLESQL_ASSIGN_OR_RETURN(Value gen_val,
+                       eval_expr(gen_col.expr.get(), {&row_tuple}));
+      row_fields[gen_col.target_col_idx] = std::move(gen_val);
+    }
+
+    // 7. Lastly, check that all fields are valid.
+    for (const auto& field : row_fields) {
+      GOOGLESQL_RET_CHECK(field.is_valid());
+    }
+
+    const StructType* row_type =
+        state.table_array_type->element_type()->AsStruct();
+    return Value::MakeStruct(row_type, std::move(row_fields));
+  }
+
+  const GraphInsertApplyOp* op_;
+  std::vector<const TupleData*> params_;
+  int input_num_variables_;
+  std::unique_ptr<TupleIterator> input_iterator_;
+  std::unique_ptr<const TupleSchema> output_schema_;
+  absl::Status status_;
+  EvaluationContext* context_;
+
+  absl::flat_hash_map<const Table*, BaseTableState> base_table_states_;
+  bool initialized_ = false;
+  bool committed_ = false;
+};
+
+// Validates an element to insert (node or edge).
+absl::Status ValidateElementToInsert(
+    const GraphInsertApplyOp::ElementToInsert& elem,
+    GraphElementTable::Kind expected_kind) {
+  GOOGLESQL_RET_CHECK(elem.row_variable.is_valid());
+  GOOGLESQL_RET_CHECK(elem.table != nullptr);
+  GOOGLESQL_RET_CHECK(elem.table->kind() == expected_kind);
+  const Table* base_table = elem.table->GetTable();
+  GOOGLESQL_RET_CHECK(base_table != nullptr);
+  const int num_cols = base_table->NumColumns();
+  GOOGLESQL_RET_CHECK_GT(num_cols, 0);
+
+  // Validate static properties.
+  for (const auto& prop : elem.static_properties) {
+    GOOGLESQL_RET_CHECK(!prop.name.empty());
+    GOOGLESQL_RET_CHECK(prop.target_column != nullptr);
+    GOOGLESQL_RET_CHECK(prop.expr != nullptr);
+    GOOGLESQL_RET_CHECK_GE(prop.target_col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(prop.target_col_idx, num_cols);
+    GOOGLESQL_RET_CHECK_EQ(base_table->GetColumn(prop.target_col_idx),
+                 prop.target_column);
+  }
+
+  // Validate dynamic label.
+  if (elem.dynamic_label_expr != nullptr) {
+    GOOGLESQL_RET_CHECK_GE(elem.dynamic_label_col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(elem.dynamic_label_col_idx, num_cols);
+  } else {
+    GOOGLESQL_RET_CHECK_EQ(elem.dynamic_label_col_idx, -1);
+  }
+
+  // Validate dynamic properties.
+  if (elem.dynamic_properties_expr != nullptr) {
+    GOOGLESQL_RET_CHECK_GE(elem.dynamic_properties_col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(elem.dynamic_properties_col_idx, num_cols);
+  } else {
+    GOOGLESQL_RET_CHECK_EQ(elem.dynamic_properties_col_idx, -1);
+  }
+
+  // Validate generated columns and table variables.
+  for (const auto& gen_col : elem.generated_columns) {
+    GOOGLESQL_RET_CHECK(gen_col.target_column != nullptr);
+    GOOGLESQL_RET_CHECK(gen_col.expr != nullptr);
+    GOOGLESQL_RET_CHECK_GE(gen_col.target_col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(gen_col.target_col_idx, num_cols);
+    GOOGLESQL_RET_CHECK_EQ(base_table->GetColumn(gen_col.target_col_idx),
+                 gen_col.target_column);
+  }
+  if (!elem.generated_columns.empty()) {
+    GOOGLESQL_RET_CHECK_EQ(elem.table_variables.size(), num_cols);
+    for (const auto& var : elem.table_variables) {
+      GOOGLESQL_RET_CHECK(var.is_valid());
+    }
+  }
+
+  return absl::OkStatus();
+}
+
+// Validates a referenced node endpoint for an edge to insert.
+absl::Status ValidateNodeEndpoint(
+    const GraphInsertApplyOp::NodeEndpoint& endpoint,
+    const GraphNodeTableReference* node_ref, int edge_num_cols,
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> nodes_to_insert,
+    const TupleSchema* input_schema) {
+  GOOGLESQL_RET_CHECK(node_ref != nullptr);
+  const auto& edge_cols = node_ref->GetEdgeTableColumns();
+  GOOGLESQL_RET_CHECK(!edge_cols.empty());
+  for (int col_idx : edge_cols) {
+    GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(col_idx, edge_num_cols);
+  }
+
+  const GraphNodeTable* ref_node_table = node_ref->GetReferencedNodeTable();
+  GOOGLESQL_RET_CHECK(ref_node_table != nullptr);
+  const Table* ref_base_table = ref_node_table->GetTable();
+  GOOGLESQL_RET_CHECK(ref_base_table != nullptr);
+  const auto& node_cols = node_ref->GetNodeTableColumns();
+  GOOGLESQL_RET_CHECK_EQ(node_cols.size(), edge_cols.size());
+  for (int col_idx : node_cols) {
+    GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(col_idx, ref_base_table->NumColumns());
+  }
+
+  if (endpoint.source ==
+      GraphInsertApplyOp::NodeEndpoint::Source::kInsertedNode) {
+    GOOGLESQL_RET_CHECK_GE(endpoint.inserted_node_index, 0);
+    GOOGLESQL_RET_CHECK_LT(endpoint.inserted_node_index, nodes_to_insert.size());
+    GOOGLESQL_RET_CHECK_EQ(nodes_to_insert[endpoint.inserted_node_index].table,
+                 ref_node_table);
+    GOOGLESQL_RET_CHECK_EQ(endpoint.property_names.size(), 0);
+  } else {
+    GOOGLESQL_RET_CHECK(endpoint.source ==
+              GraphInsertApplyOp::NodeEndpoint::Source::kInputVariable);
+    GOOGLESQL_RET_CHECK_GE(endpoint.input_slot_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(endpoint.input_slot_idx, input_schema->num_variables());
+    GOOGLESQL_RET_CHECK_EQ(endpoint.property_names.size(), node_cols.size());
+    for (const auto& prop_name : endpoint.property_names) {
+      GOOGLESQL_RET_CHECK(!prop_name.empty());
+    }
+  }
+  return absl::OkStatus();
+}
+
+}  // namespace
+
+// -------------------------------------------------------
+// GraphInsertApplyOp
+// -------------------------------------------------------
+
+std::string GraphInsertApplyOp::GetIteratorDebugString(
+    absl::string_view input_iter_debug_string) {
+  return absl::StrCat("GraphInsertApplyTupleIterator(", input_iter_debug_string,
+                      ")");
+}
+
+absl::StatusOr<std::unique_ptr<GraphInsertApplyOp>> GraphInsertApplyOp::Create(
+    std::vector<ElementToInsert> nodes_to_insert,
+    std::vector<ElementToInsert> edges_to_insert,
+    std::unique_ptr<RelationalOp> input) {
+  GOOGLESQL_RET_CHECK(!nodes_to_insert.empty() || !edges_to_insert.empty())
+      << "nodes_to_insert and edges_to_insert cannot both be empty";
+  GOOGLESQL_RET_CHECK(input != nullptr);
+  const std::unique_ptr<const TupleSchema> input_schema =
+      input->CreateOutputSchema();
+  GOOGLESQL_RET_CHECK(input_schema != nullptr);
+
+  absl::flat_hash_set<VariableId> output_vars(input_schema->variables().begin(),
+                                              input_schema->variables().end());
+
+  for (const auto& node : nodes_to_insert) {
+    GOOGLESQL_RETURN_IF_ERROR(
+        ValidateElementToInsert(node, GraphElementTable::Kind::kNode));
+    GOOGLESQL_RET_CHECK(!node.source_node.has_value());
+    GOOGLESQL_RET_CHECK(!node.dest_node.has_value());
+    GOOGLESQL_RET_CHECK(output_vars.insert(node.row_variable).second)
+        << "Duplicate row variable: " << node.row_variable.ToString();
+  }
+
+  for (const auto& edge : edges_to_insert) {
+    GOOGLESQL_RETURN_IF_ERROR(
+        ValidateElementToInsert(edge, GraphElementTable::Kind::kEdge));
+    GOOGLESQL_RET_CHECK(output_vars.insert(edge.row_variable).second)
+        << "Duplicate row variable: " << edge.row_variable.ToString();
+
+    const GraphEdgeTable* edge_table = edge.table->AsEdgeTable();
+    GOOGLESQL_RET_CHECK(edge_table != nullptr);
+    const int edge_num_cols = edge.table->GetTable()->NumColumns();
+
+    GOOGLESQL_RET_CHECK(edge.source_node.has_value());
+    GOOGLESQL_RETURN_IF_ERROR(ValidateNodeEndpoint(
+        *edge.source_node, edge_table->GetSourceNodeTable(), edge_num_cols,
+        nodes_to_insert, input_schema.get()));
+
+    GOOGLESQL_RET_CHECK(edge.dest_node.has_value());
+    GOOGLESQL_RETURN_IF_ERROR(ValidateNodeEndpoint(
+        *edge.dest_node, edge_table->GetDestNodeTable(), edge_num_cols,
+        nodes_to_insert, input_schema.get()));
+  }
+
+  return absl::WrapUnique(new GraphInsertApplyOp(std::move(nodes_to_insert),
+                                                 std::move(edges_to_insert),
+                                                 std::move(input)));
+}
+
+GraphInsertApplyOp::GraphInsertApplyOp(
+    std::vector<ElementToInsert> nodes_to_insert,
+    std::vector<ElementToInsert> edges_to_insert,
+    std::unique_ptr<RelationalOp> input)
+    : nodes_to_insert_(std::move(nodes_to_insert)),
+      edges_to_insert_(std::move(edges_to_insert)) {
+  SetArg(kInput, std::make_unique<RelationalArg>(std::move(input)));
+}
+
+namespace {
+
+absl::Status SetElementSchemasForEvaluation(
+    GraphInsertApplyOp::ElementToInsert& element,
+    const TupleSchema* input_schema,
+    absl::Span<const TupleSchema* const> params_schemas) {
+  for (auto& prop : element.static_properties) {
+    GOOGLESQL_RETURN_IF_ERROR(prop.expr->SetSchemasForEvaluation(
+        ConcatSpans(params_schemas, {input_schema})));
+  }
+  if (element.dynamic_label_expr != nullptr) {
+    GOOGLESQL_RETURN_IF_ERROR(element.dynamic_label_expr->SetSchemasForEvaluation(
+        ConcatSpans(params_schemas, {input_schema})));
+  }
+  if (element.dynamic_properties_expr != nullptr) {
+    GOOGLESQL_RETURN_IF_ERROR(element.dynamic_properties_expr->SetSchemasForEvaluation(
+        ConcatSpans(params_schemas, {input_schema})));
+  }
+  if (!element.generated_columns.empty()) {
+    TupleSchema row_schema(element.table_variables);
+    for (auto& gen_col : element.generated_columns) {
+      // Generated column in base table DDL can only depend on columns from
+      // the same table. Since they cannot reference query parameters, we do
+      // not need to provide `params_schemas` here.
+      GOOGLESQL_RETURN_IF_ERROR(gen_col.expr->SetSchemasForEvaluation({&row_schema}));
+    }
+  }
+  return absl::OkStatus();
+}
+
+std::string FormatNodeEndpointVar(
+    const GraphInsertApplyOp::NodeEndpoint& endpoint,
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> nodes_to_insert,
+    const TupleSchema* input_schema) {
+  if (endpoint.source ==
+      GraphInsertApplyOp::NodeEndpoint::Source::kInsertedNode) {
+    return absl::StrCat(
+        "$",
+        nodes_to_insert[endpoint.inserted_node_index].row_variable.ToString());
+  }
+  return absl::StrCat(
+      "$", input_schema->variable(endpoint.input_slot_idx).ToString());
+}
+
+std::string FormatNodeEndpoint(
+    const GraphInsertApplyOp::NodeEndpoint& endpoint,
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> nodes_to_insert,
+    const TupleSchema* input_schema) {
+  std::string var_str =
+      FormatNodeEndpointVar(endpoint, nodes_to_insert, input_schema);
+  if (!endpoint.property_names.empty()) {
+    absl::StrAppend(&var_str, " (keys: [",
+                    absl::StrJoin(endpoint.property_names, ", "), "])");
+  }
+  return var_str;
+}
+
+std::vector<std::string> FormatInsertedColumns(
+    const GraphInsertApplyOp::ElementToInsert& elem,
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> nodes_to_insert,
+    const TupleSchema* input_schema, absl::string_view indent_col,
+    bool verbose) {
+  const Table* base_table = elem.table->GetTable();
+  int num_cols = base_table->NumColumns();
+
+  // Bindings of {column_name: value_expr} for all columns in the base table.
+  struct ColumnBinding {
+    std::string lhs;
+    std::string rhs;
+  };
+  std::vector<ColumnBinding> bindings(num_cols);
+  for (int c = 0; c < num_cols; ++c) {
+    const Column* col = base_table->GetColumn(c);
+    bindings[c] = {absl::StrCat("$", col->Name()),
+                   absl::StrCat("DEFAULT(",
+                                GetColumnDefaultValue(col).DebugString(), ")")};
+  }
+
+  // Populate edge key columns from source and destination endpoints.
+  if (elem.table->kind() == GraphElementTable::Kind::kEdge) {
+    const GraphEdgeTable* edge_table = elem.table->AsEdgeTable();
+    auto populate_endpoint_keys =
+        [&](const GraphInsertApplyOp::NodeEndpoint& endpoint,
+            const GraphNodeTableReference* node_ref) {
+          std::string var =
+              FormatNodeEndpointVar(endpoint, nodes_to_insert, input_schema);
+          const auto& edge_cols = node_ref->GetEdgeTableColumns();
+          for (int k = 0; k < edge_cols.size(); ++k) {
+            int col_idx = edge_cols[k];
+            std::string prop =
+                (endpoint.source ==
+                 GraphInsertApplyOp::NodeEndpoint::Source::kInsertedNode)
+                    ? node_ref->GetReferencedNodeTable()
+                          ->GetTable()
+                          ->GetColumn(node_ref->GetNodeTableColumns()[k])
+                          ->Name()
+                    : endpoint.property_names[k];
+            bindings[col_idx].rhs = absl::StrCat(var, ".", prop);
+          }
+        };
+    populate_endpoint_keys(*elem.source_node, edge_table->GetSourceNodeTable());
+    populate_endpoint_keys(*elem.dest_node, edge_table->GetDestNodeTable());
+  }
+
+  // Populate dynamic property expression.
+  if (elem.dynamic_properties_expr != nullptr) {
+    bindings[elem.dynamic_properties_col_idx].rhs =
+        elem.dynamic_properties_expr->DebugInternal(std::string(indent_col),
+                                                    verbose);
+  }
+
+  // Populate dynamic label expression.
+  if (elem.dynamic_label_expr != nullptr) {
+    bindings[elem.dynamic_label_col_idx].rhs =
+        elem.dynamic_label_expr->DebugInternal(std::string(indent_col),
+                                               verbose);
+  }
+
+  // Explicit static properties take precedence over default and edge keys.
+  for (const auto& prop : elem.static_properties) {
+    if (prop.name != base_table->GetColumn(prop.target_col_idx)->Name()) {
+      bindings[prop.target_col_idx].lhs =
+          absl::StrCat("$", base_table->GetColumn(prop.target_col_idx)->Name(),
+                       " (as ", prop.name, ")");
+    }
+    bindings[prop.target_col_idx].rhs =
+        prop.expr->DebugInternal(std::string(indent_col), verbose);
+  }
+
+  // Identify generated columns so they are formatted last.
+  absl::flat_hash_set<int> gen_col_indices;
+  gen_col_indices.reserve(elem.generated_columns.size());
+  for (const auto& gen_col : elem.generated_columns) {
+    gen_col_indices.insert(gen_col.target_col_idx);
+  }
+
+  // Assemble formatted column lines: non-generated first, then generated.
+  std::vector<std::string> col_strs;
+  col_strs.reserve(num_cols + elem.generated_columns.size());
+  for (int c = 0; c < num_cols; ++c) {
+    if (gen_col_indices.contains(c) ||
+        base_table->GetColumn(c)->HasGeneratedExpression()) {
+      continue;
+    }
+    col_strs.push_back(absl::StrCat(indent_col, AlgebraNode::kIndentFork,
+                                    bindings[c].lhs, " := ", bindings[c].rhs));
+  }
+  for (const auto& gen_col : elem.generated_columns) {
+    col_strs.push_back(absl::StrCat(
+        indent_col, AlgebraNode::kIndentFork, "$",
+        gen_col.target_column->Name(),
+        " := ", gen_col.expr->DebugInternal(std::string(indent_col), verbose)));
+  }
+  return col_strs;
+}
+
+void AppendGraphElementsToDebugString(
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> elements,
+    absl::Span<const GraphInsertApplyOp::ElementToInsert> nodes_to_insert,
+    const TupleSchema* input_schema, absl::string_view label,
+    absl::string_view indent, absl::string_view indent_bar, bool verbose,
+    std::string* separator, std::string* result) {
+  if (elements.empty()) return;
+  std::string indent_elem = absl::StrCat(indent_bar, AlgebraNode::kIndentBar);
+  std::string indent_child = absl::StrCat(indent_elem, AlgebraNode::kIndentBar);
+  std::string indent_col = absl::StrCat(indent_child, AlgebraNode::kIndentBar);
+
+  std::vector<std::string> elem_strs;
+  elem_strs.reserve(elements.size());
+  for (const auto& elem : elements) {
+    std::vector<std::string> parts;
+    if (elem.source_node.has_value()) {
+      parts.push_back(
+          absl::StrCat(indent_child, AlgebraNode::kIndentFork, "source_node: ",
+                       FormatNodeEndpoint(*elem.source_node, nodes_to_insert,
+                                          input_schema)));
+    }
+    if (elem.dest_node.has_value()) {
+      parts.push_back(absl::StrCat(
+          indent_child, AlgebraNode::kIndentFork, "dest_node: ",
+          FormatNodeEndpoint(*elem.dest_node, nodes_to_insert, input_schema)));
+    }
+    std::vector<std::string> col_strs = FormatInsertedColumns(
+        elem, nodes_to_insert, input_schema, indent_col, verbose);
+    parts.push_back(absl::StrCat(indent_child, AlgebraNode::kIndentFork,
+                                 "inserted_columns: {",
+                                 absl::StrJoin(col_strs, ","), "}"));
+
+    elem_strs.push_back(absl::StrCat(indent_elem, AlgebraNode::kIndentFork, "$",
+                                     elem.row_variable.ToString(), ":",
+                                     elem.table->Name(), "(",
+                                     absl::StrJoin(parts, ","), ")"));
+  }
+  absl::StrAppend(result, *separator, indent, AlgebraNode::kIndentFork, label,
+                  ": {", absl::StrJoin(elem_strs, ","), "}");
+  *separator = ",";
+}
+}  // namespace
+
+absl::Status GraphInsertApplyOp::SetSchemasForEvaluation(
+    absl::Span<const TupleSchema* const> params_schemas) {
+  GOOGLESQL_RETURN_IF_ERROR(mutable_input()->SetSchemasForEvaluation(params_schemas));
+  const std::unique_ptr<const TupleSchema> input_schema =
+      input()->CreateOutputSchema();
+
+  for (auto& node : nodes_to_insert_) {
+    GOOGLESQL_RETURN_IF_ERROR(SetElementSchemasForEvaluation(node, input_schema.get(),
+                                                   params_schemas));
+  }
+
+  for (auto& edge : edges_to_insert_) {
+    GOOGLESQL_RETURN_IF_ERROR(SetElementSchemasForEvaluation(edge, input_schema.get(),
+                                                   params_schemas));
+  }
+
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::unique_ptr<TupleIterator>>
+GraphInsertApplyOp::CreateIterator(absl::Span<const TupleData* const> params,
+                                   int num_extra_slots,
+                                   EvaluationContext* context) const {
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      std::unique_ptr<TupleIterator> iter,
+      input()->CreateIterator(params,
+                              num_extra_slots +
+                                  static_cast<int>(nodes_to_insert_.size()) +
+                                  static_cast<int>(edges_to_insert_.size()),
+                              context));
+  return std::make_unique<GraphInsertApplyTupleIterator>(
+      this, params, input()->CreateOutputSchema()->num_variables(),
+      std::move(iter), context);
+}
+
+std::unique_ptr<TupleSchema> GraphInsertApplyOp::CreateOutputSchema() const {
+  std::vector<VariableId> vars = input()->CreateOutputSchema()->variables();
+  vars.reserve(vars.size() + nodes_to_insert_.size() + edges_to_insert_.size());
+  for (const auto& node : nodes_to_insert_) {
+    vars.push_back(node.row_variable);
+  }
+  for (const auto& edge : edges_to_insert_) {
+    vars.push_back(edge.row_variable);
+  }
+  return std::make_unique<TupleSchema>(std::move(vars));
+}
+
+std::string GraphInsertApplyOp::IteratorDebugString() const {
+  return GetIteratorDebugString(input()->IteratorDebugString());
+}
+
+std::string GraphInsertApplyOp::DebugInternal(const std::string& indent,
+                                              bool verbose) const {
+  std::string result = "GraphInsertApplyOp(";
+  std::string separator;
+  std::string indent_bar = absl::StrCat(indent, kIndentBar);
+  std::string indent_space = absl::StrCat(indent, kIndentSpace);
+  const std::unique_ptr<const TupleSchema> input_schema =
+      input()->CreateOutputSchema();
+
+  AppendGraphElementsToDebugString(nodes_to_insert_, {}, input_schema.get(),
+                                   "nodes_to_insert", indent, indent_bar,
+                                   verbose, &separator, &result);
+  AppendGraphElementsToDebugString(
+      edges_to_insert_, nodes_to_insert_, input_schema.get(), "edges_to_insert",
+      indent, indent_bar, verbose, &separator, &result);
+
+  absl::StrAppend(&result, separator, indent, kIndentFork,
+                  "input: ", input()->DebugInternal(indent_space, verbose),
+                  ")");
+  return result;
+}
+
+const RelationalOp* GraphInsertApplyOp::input() const {
+  return GetArg(kInput)->node()->AsRelationalOp();
+}
+
+RelationalOp* GraphInsertApplyOp::mutable_input() {
   return GetMutableArg(kInput)->mutable_node()->AsMutableRelationalOp();
 }
 

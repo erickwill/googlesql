@@ -330,7 +330,6 @@ cc_library(
     ],
     deps = [
         "//googlesql/base:compact_reference_counted",
-        "//googlesql/base:logging",
         "//googlesql/base:strings",
         "//googlesql/public:interval_value",
         "//googlesql/public:json_value",
@@ -340,11 +339,10 @@ cc_library(
         "//googlesql/public:uuid_value",
         "//googlesql/public:value_content",
         "@com_google_absl//absl/container:btree",
+        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
-        "@com_google_absl//absl/types:variant",
     ],
 )
 
@@ -388,6 +386,7 @@ cc_test(
         "//googlesql/public:options_cc_proto",
         "//googlesql/public:type_cc_proto",
         "//googlesql/public:type_parameters_cc_proto",
+        "//googlesql/public:value",  # buildcleaner: keep
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:protobuf",
@@ -406,6 +405,7 @@ cc_test(
         "//googlesql/public:options_cc_proto",
         "//googlesql/public:type_cc_proto",
         "//googlesql/public:type_parameters_cc_proto",
+        "//googlesql/public:value",  # buildcleaner: keep
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:protobuf",
@@ -422,7 +422,7 @@ cc_test(
         "//googlesql/public:language_options",
         "//googlesql/public:options_cc_proto",
         "//googlesql/public:type_parameters_cc_proto",
-        "//googlesql/public:value",
+        "//googlesql/public:value",  # buildcleaner: keep
         "//googlesql/testdata:test_schema_cc_proto",
         "//googlesql/testing:test_value",
         "@com_google_absl//absl/status",
@@ -438,6 +438,7 @@ cc_test(
         "//googlesql/base/testing:googlesql_gtest_main",
         "//googlesql/base/testing:status_matchers",
         "//googlesql/public:options_cc_proto",
+        "//googlesql/public:value",  # buildcleaner: keep
         "//googlesql/testdata:test_schema_cc_proto",
         "@com_google_absl//absl/status",
     ],

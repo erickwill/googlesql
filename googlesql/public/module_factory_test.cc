@@ -475,18 +475,18 @@ TEST_F(FetchAllModuleAndProtoContentsTest, FetchTrivialModule) {
 TEST_F(FetchAllModuleAndProtoContentsTest, FetchSimpleModule) {
   const std::vector<std::string> module_name_path(
       TestDataModuleNamePath({"simple"}));
-  // Module 'simple.sqlm' has errors, so FetchAllModuleAndProtoContents
-  // returns an error.
-  EXPECT_FALSE(FetchAllModuleAndProtoContents(
-                   {module_name_path}, module_fetcher_.get(), &module_info_map_,
-                   &proto_info_map_, &errors_)
-                   .ok());
+  // Module 'simple.sqlm' has syntax errors but no missing imports, so
+  // FetchAllModuleAndProtoContents returns OK.
+  EXPECT_TRUE(FetchAllModuleAndProtoContents(
+                  {module_name_path}, module_fetcher_.get(), &module_info_map_,
+                  &proto_info_map_, &errors_)
+                  .ok());
   // This module does not import other modules.
   EXPECT_EQ(module_info_map_.size(), 1);
   // This module does not import any protos.
   EXPECT_EQ(proto_info_map_.size(), 0);
-  // This module has a parse error.
-  EXPECT_EQ(errors_.size(), 1);
+  // Syntax errors are skipped during fetching.
+  EXPECT_EQ(errors_.size(), 0);
 }
 
 // Demonstrate fix for crash in b/141155550.
@@ -719,11 +719,7 @@ TEST_F(FetchAllModuleContentsTest, FetchModuleContentsWithPipes) {
 TEST_F(FetchAllModuleContentsTest, FetchModuleContentsWithSyntaxError) {
   // Fetching contents tolerates syntax errors.
   std::vector<std::string> module_name_path(TestDataModuleNamePath({"simple"}));
-  FetchContentsAndAssertErrorCount(module_name_path, 1);
-  // We hit one syntax error.
-  EXPECT_THAT(
-      module_fetch_errors_[0],
-      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("Syntax error")));
+  FetchContentsAndAssertErrorCount(module_name_path, 0);
   // We still found contents for this module file.
   ASSERT_EQ(module_contents_info_map_.size(), 1);
   EXPECT_TRUE(googlesql_base::ContainsKey(module_contents_info_map_, module_name_path));
@@ -734,18 +730,7 @@ TEST_F(FetchAllModuleContentsTest, FetchNestedModuleContentsWithSyntaxError) {
   // and nested modules.  Fetching contents progresses as much as it can.
   std::vector<std::string> module_name_path(
       TestDataModuleNamePath({"module_test_errors_main_2"}));
-  FetchContentsAndAssertErrorCount(module_name_path, 2);
-  // We hit two syntax errors.
-  EXPECT_THAT(module_fetch_errors_[0],
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("FUNCTINO is not a supported object type")));
-  EXPECT_THAT(FormatError(module_fetch_errors_[0]),
-              HasSubstr("module_test_errors_main_2.sqlm"));
-  EXPECT_THAT(module_fetch_errors_[1],
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("FUNCTINO is not a supported object type")));
-  EXPECT_THAT(FormatError(module_fetch_errors_[1]),
-              HasSubstr("module_test_errors_imported_b.sqlm"));
+  FetchContentsAndAssertErrorCount(module_name_path, 0);
   // We still found contents for 6 modules.
   ASSERT_EQ(module_contents_info_map_.size(), 6);
   EXPECT_TRUE(googlesql_base::ContainsKey(module_contents_info_map_, module_name_path));
@@ -756,22 +741,16 @@ TEST_F(FetchAllModuleContentsTest, FetchModuleContentsWithNestedLookupError) {
   // still get module contents back for the modules we actually found.
   std::vector<std::string> module_name_path(
       TestDataModuleNamePath({"module_test_errors_main"}));
-  FetchContentsAndAssertErrorCount(module_name_path, 4);
+  FetchContentsAndAssertErrorCount(module_name_path, 2);
   // Note that this test is currently sensitive to the order in which the
   // errors are populated.  The order isn't guaranteed by the function
   // contract, so if this test becomes a maintenance problem then we need
   // to update the test to more accurately reflect the contract.
   EXPECT_THAT(module_fetch_errors_[0],
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("FUNCTINO is not a supported object type")));
-  EXPECT_THAT(module_fetch_errors_[1],
               StatusIs(absl::StatusCode::kNotFound,
                        HasSubstr("Module googlesql.foo not found")));
-  EXPECT_THAT(module_fetch_errors_[2],
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("FUNCTINO is not a supported object type")));
   EXPECT_THAT(
-      module_fetch_errors_[3],
+      module_fetch_errors_[1],
       StatusIs(absl::StatusCode::kNotFound,
                HasSubstr("Module googlesql.foo not found")));
 
@@ -919,6 +898,77 @@ TEST(FileModuleContentsFetcherTest, ReplacesDescriptorPool) {
                                                       &proto_file_descriptor_2),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("'test.proto' failed")));
+}
+
+TEST(FileModuleContentsFetcherTest,
+     FetchModuleContentsSkipsNonImportSyntaxError) {
+  FileModuleContentsFetcher module_fetcher(
+      std::vector<std::string>{googlesql::internal::TestTmpDir()});
+  const std::string filename = "test_non_import_syntax_error.sqlm";
+  WriteTestFile(filename,
+                "MODULE test_non_import_syntax_error;\nSELECT 1 + ;\n");
+
+  ModuleContentsInfoMap module_contents_info_map;
+  std::vector<absl::Status> errors;
+  const absl::Status fetch_status =
+      FetchAllModuleContents({"test_non_import_syntax_error"}, &module_fetcher,
+                             &module_contents_info_map, &errors);
+
+  GOOGLESQL_EXPECT_OK(fetch_status);
+}
+
+TEST(FileModuleContentsFetcherTest,
+     FetchModuleContentsFailsOnNonImportLexicalError) {
+  FileModuleContentsFetcher module_fetcher(
+      std::vector<std::string>{googlesql::internal::TestTmpDir()});
+  const std::string filename = "test_non_import_lexical_error.sqlm";
+  // Lexical errors (such as unclosed string literals) prevent finding
+  // statement boundaries and are returned as errors.
+  WriteTestFile(filename,
+                "MODULE test_non_import_lexical_error;\n"
+                "SELECT \"unclosed string\n");
+
+  ModuleContentsInfoMap module_contents_info_map;
+  std::vector<absl::Status> errors;
+  const absl::Status fetch_status =
+      FetchAllModuleContents({"test_non_import_lexical_error"}, &module_fetcher,
+                             &module_contents_info_map, &errors);
+
+  EXPECT_THAT(fetch_status, StatusIs(absl::StatusCode::kInvalidArgument,
+                                     HasSubstr("Unclosed string literal")));
+  EXPECT_THAT(FormatError(fetch_status),
+              HasSubstr("test_non_import_lexical_error.sqlm:2:8]"));
+  EXPECT_EQ(errors.size(), 1);
+}
+
+TEST(FileModuleContentsFetcherTest,
+     FetchModuleContentsSkipsCreateProcedureBlock) {
+  FileModuleContentsFetcher module_fetcher(
+      std::vector<std::string>{googlesql::internal::TestTmpDir()});
+  WriteTestFile("test_imported_after_proc.sqlm",
+                "MODULE test_imported_after_proc;\n"
+                "CREATE PUBLIC FUNCTION f() AS (1);\n");
+  WriteTestFile("test_proc_with_imports.sqlm",
+                "MODULE test_proc_with_imports;\n"
+                "CREATE PUBLIC PROCEDURE p()\n"
+                "  OPTIONS(allowed_references='GLOBAL')\n"
+                "BEGIN\n"
+                "  DECLARE x INT64 DEFAULT 1;\n"
+                "  SELECT x;\n"
+                "END;\n"
+                "IMPORT MODULE test_imported_after_proc;\n");
+
+  ModuleContentsInfoMap module_contents_info_map;
+  std::vector<absl::Status> errors;
+  const absl::Status fetch_status =
+      FetchAllModuleContents({"test_proc_with_imports"}, &module_fetcher,
+                             &module_contents_info_map, &errors);
+
+  GOOGLESQL_EXPECT_OK(fetch_status);
+  EXPECT_TRUE(errors.empty());
+  EXPECT_EQ(module_contents_info_map.size(), 2);
+  EXPECT_TRUE(module_contents_info_map.contains({"test_proc_with_imports"}));
+  EXPECT_TRUE(module_contents_info_map.contains({"test_imported_after_proc"}));
 }
 
 }  // namespace googlesql

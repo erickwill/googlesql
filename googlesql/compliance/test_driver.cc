@@ -112,6 +112,12 @@ absl::Status SerializeTestDatabase(const TestDatabase& database,
     for (bool is_pseudo : options.pseudo_columns()) {
       options_proto->add_pseudo_columns(is_pseudo);
     }
+    for (const Value& default_val : options.column_default_values()) {
+      auto* default_proto = options_proto->add_column_default_values();
+      if (default_val.is_valid()) {
+        GOOGLESQL_RETURN_IF_ERROR(default_val.Serialize(default_proto->mutable_value()));
+      }
+    }
   }
 
   for (const auto& [name, create_stmt] : database.tvfs) {
@@ -312,7 +318,8 @@ absl::StatusOr<TestDatabase> DeserializeTestDatabase(
       GOOGLESQL_RET_CHECK(contents_type->IsArray());
       const Type* element_type = contents_type->AsArray()->element_type();
       GOOGLESQL_RET_CHECK(element_type->IsStruct());
-      int num_fields = element_type->AsStruct()->num_fields();
+      const StructType* row_struct = element_type->AsStruct();
+      int num_fields = row_struct->num_fields();
       if (!table.options.column_annotations().empty()) {
         GOOGLESQL_RET_CHECK_EQ(table.options.column_annotations().size(), num_fields)
             << "column_annotations size mismatch for table "
@@ -321,6 +328,28 @@ absl::StatusOr<TestDatabase> DeserializeTestDatabase(
       if (!table.options.pseudo_columns().empty()) {
         GOOGLESQL_RET_CHECK_EQ(table.options.pseudo_columns().size(), num_fields)
             << "pseudo_columns size mismatch for table " << table_proto.name();
+      }
+      if (table_proto.options().column_default_values_size() > 0) {
+        GOOGLESQL_RET_CHECK_EQ(table_proto.options().column_default_values_size(),
+                     num_fields)
+            << "column_default_values size mismatch for table "
+            << table_proto.name();
+        std::vector<Value> column_default_values;
+        column_default_values.reserve(num_fields);
+        for (int i = 0; i < num_fields; ++i) {
+          const auto& default_proto =
+              table_proto.options().column_default_values(i);
+          if (default_proto.has_value()) {
+            GOOGLESQL_ASSIGN_OR_RETURN(Value val,
+                             Value::Deserialize(default_proto.value(),
+                                                row_struct->field(i).type));
+            column_default_values.push_back(std::move(val));
+          } else {
+            column_default_values.push_back(Value());
+          }
+        }
+        table.options.set_column_default_values(
+            std::move(column_default_values));
       }
     }
   }

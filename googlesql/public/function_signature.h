@@ -181,6 +181,7 @@ class FunctionArgumentTypeOptions {
   bool extra_relation_input_columns_allowed() const {
     return data_->extra_relation_input_columns_allowed;
   }
+  bool supports_order_by() const { return data_->supports_order_by; }
   bool has_argument_name() const { return !data_->argument_name.empty(); }
   const std::string& argument_name() const {
     ABSL_DCHECK(has_argument_name());
@@ -297,6 +298,10 @@ class FunctionArgumentTypeOptions {
   FunctionArgumentTypeOptions& set_extra_relation_input_columns_allowed(
       bool v = true) {
     data_->extra_relation_input_columns_allowed = v;
+    return *this;
+  }
+  FunctionArgumentTypeOptions& set_supports_order_by(bool v = true) {
+    data_->supports_order_by = v;
     return *this;
   }
   FunctionArgumentTypeOptions& set_argument_name(absl::string_view name,
@@ -448,16 +453,6 @@ class FunctionArgumentTypeOptions {
   // always allocated on the heap to increase the complexity of SQL that may be
   // compiled on small stacks.
   struct Data {
-    ArgumentCardinality cardinality = FunctionEnums::REQUIRED;
-
-    // Function argument always has value NOT_SET.
-    // Procedure argument is in one of the 3 modes:
-    // IN: argument is used only for input to the procedure. It is also the
-    //     default mode for procedure argument if no mode is specified.
-    // OUT: argument is used as output of the procedure.
-    // INOUT: argument is used both for input to and output from the procedure.
-    ProcedureArgumentMode procedure_argument_mode = FunctionEnums::NOT_SET;
-
     // These are min or max values (inclusive) for this argument.
     // If the argument has a literal value that is outside this range, the
     // analyzer will give an error.
@@ -493,15 +488,25 @@ class FunctionArgumentTypeOptions {
     // must also be set to true in the GoogleSQL analyzer options.
     std::optional<ParseLocationRange> argument_type_parse_location;
 
+    // Optional value that holds the default value of the argument, if
+    // applicable.
+    std::optional<Value> default_value;
+
     // Optional argument offset for descriptor argument types, which is only
     // populated for descriptor arguments whose columns should be resolved
     // from the table argument in the same tvf call at the specified argument
     // offset. The value must be the offset of an argument with table type.
     std::optional<int> descriptor_resolution_table_offset;
 
-    // Optional value that holds the default value of the argument, if
-    // applicable.
-    std::optional<Value> default_value;
+    ArgumentCardinality cardinality : 8 = FunctionEnums::REQUIRED;
+
+    // Function argument always has value NOT_SET.
+    // Procedure argument is in one of the 3 modes:
+    // IN: argument is used only for input to the procedure. It is also the
+    //     default mode for procedure argument if no mode is specified.
+    // OUT: argument is used as output of the procedure.
+    // INOUT: argument is used both for input to and output from the procedure.
+    ProcedureArgumentMode procedure_argument_mode : 8 = FunctionEnums::NOT_SET;
 
     // Defines how a function argument's collation should affect the function.
     // Can be used as a bit mask to check whether AFFECTS_OPERATION or
@@ -509,21 +514,22 @@ class FunctionArgumentTypeOptions {
     // See FunctionEnums::ArgumentCollationMode for mode definitions.
     // See also FunctionSignatureOptions::propagates_collation_ and
     // uses_operation_collation_.
-    ArgumentCollationMode argument_collation_mode =
+    ArgumentCollationMode argument_collation_mode : 8 =
         FunctionEnums::AFFECTS_OPERATION_AND_PROPAGATION;
 
     // Determines whether the argument name must or must not be specified when
     // the associated function is called.
-    NamedArgumentKind named_argument_kind = FunctionEnums::POSITIONAL_ONLY;
+    NamedArgumentKind named_argument_kind : 8 = FunctionEnums::POSITIONAL_ONLY;
 
     // Determines whether aliases are supported for a function argument.
     // An argument alias is an identifier associated with a function argument in
     // the form of F(<arg> AS <alias>).
-    ArgumentAliasKind argument_alias_kind = FunctionEnums::ARGUMENT_NON_ALIASED;
+    ArgumentAliasKind argument_alias_kind : 8 =
+        FunctionEnums::ARGUMENT_NON_ALIASED;
 
     // Constness level required by the argument, stored internally, and set by
     // must be constant options.
-    ConstnessLevelProto::Level constness_level =
+    ConstnessLevelProto::Level constness_level : 16 =
         ConstnessLevelProto::CONSTNESS_UNSPECIFIED;
 
     // If true on function input argument, uses the array element's collation
@@ -532,55 +538,72 @@ class FunctionArgumentTypeOptions {
     // on the array element.
     // The option should only be turned on when the type of the
     // FunctionArgumentType is array.
-    bool uses_array_element_for_collation = false;
+    bool uses_array_element_for_collation : 1 = false;
 
     // If true, this argument cannot be NULL.
     // An error will be returned if this overload is chosen and the argument
     // is a literal NULL.
-    bool must_be_non_null = false;
+    bool must_be_non_null : 1 = false;
 
     // If true, this argument is a NOT AGGREGATE argument to an aggregate
     // function.  This means that the argument must have a constant value over
     // all rows passed to the same aggregate function call.
     // Currently, this is enforced the same as `must_be_constant`.
     // This is ignored for non-aggregate functions.
-    bool is_not_aggregate = false;
+    bool is_not_aggregate : 1 = false;
 
     // If true, this argument must have a type with SupportsEquality().
     // This is checked after choosing a concrete signature.
-    bool must_support_equality = false;
+    bool must_support_equality : 1 = false;
 
     // If true, this argument must have a type with SupportsOrdering().
     // This is checked after choosing a concrete signature.
-    bool must_support_ordering = false;
+    bool must_support_ordering : 1 = false;
 
     // If true, this argument must have a type with SupportsGrouping().
-    bool must_support_grouping = false;
+    bool must_support_grouping : 1 = false;
 
     // If true, this argument must be an array type and have an element type
     // with SupportsEquality(). This is checked after choosing a concrete
     // signature.
-    bool array_element_must_support_equality = false;
+    bool array_element_must_support_equality : 1 = false;
 
     // If true, this argument must be an array type and have an element type
     // with SupportsOrdering(). This is checked after choosing a concrete
     // signature.
-    bool array_element_must_support_ordering = false;
+    bool array_element_must_support_ordering : 1 = false;
 
     // If true, this argument must be an array type and have an element type
     // with SupportsGrouping().
-    bool array_element_must_support_grouping = false;
+    bool array_element_must_support_grouping : 1 = false;
 
-    bool has_min_value = false;
-    bool has_max_value = false;
+    bool has_min_value : 1 = false;
+    bool has_max_value : 1 = false;
 
     // If true, the provided input relation may contain extra column names
     // besides those required in `relation_input_schema`. Otherwise, GoogleSQL
     // rejects the query if the provided relation contains such extra columns.
-    bool extra_relation_input_columns_allowed = true;
+    bool extra_relation_input_columns_allowed : 1 = true;
+
+    // If true, callers are permitted to specify an ORDER BY clause on this
+    // relation argument in a table-valued function call.
+    //
+    // Note: While PARTITION BY is universally supported on all single-table TVF
+    // arguments whenever FEATURE_TABLE_ARGUMENT_PARTITION_AND_ORDER is enabled
+    // (because partitioning is handled externally by the query engine shuffling
+    // rows into independent partitions), ORDER BY requires explicit signature
+    // opt-in via this option. Sorting distributed input data incurs significant
+    // shuffle and CPU overhead, so requiring TVF signatures to declare
+    // `supports_order_by` prevents queries from silently wasting cluster
+    // resources sorting rows for order-agnostic TVFs (e.g. pure SQL TVFs).
+    bool supports_order_by : 1 = false;
   };
   std::unique_ptr<Data> data_;
 };
+
+namespace internal {
+class ConcreteArgumentBuilder;  // Defined in function_signature_matcher.cc
+}  // namespace internal
 
 // A type for an argument or result value in a function signature.  Types
 // can be fixed or templated.  Arguments can be marked as repeated (denoting
@@ -635,8 +658,9 @@ class FunctionArgumentType {
 
   // Construct a relation argument type for a table-valued function. This
   // argument will accept any input relation of any schema.
-  static FunctionArgumentType AnyRelation() {
-    return FunctionArgumentType(ARG_KIND_RELATION);
+  static FunctionArgumentType AnyRelation(
+      FunctionArgumentTypeOptions options = FunctionArgumentTypeOptions()) {
+    return FunctionArgumentType(ARG_KIND_RELATION, options);
   }
 
   // Construct a model argument type for a table-valued function. This argument
@@ -709,12 +733,8 @@ class FunctionArgumentType {
   // type puts this schema into options.
   static FunctionArgumentType RelationWithSchema(
       const TVFRelation& relation_input_schema,
-      bool extra_relation_input_columns_allowed) {
-    return FunctionArgumentType(
-        ARG_KIND_RELATION,
-        FunctionArgumentTypeOptions(relation_input_schema,
-                                    extra_relation_input_columns_allowed));
-  }
+      bool extra_relation_input_columns_allowed = false,
+      FunctionArgumentTypeOptions options = FunctionArgumentTypeOptions());
 
   FunctionArgumentType(const FunctionArgumentType& other) = default;
   FunctionArgumentType& operator=(const FunctionArgumentType& other) = default;
@@ -810,6 +830,7 @@ class FunctionArgumentType {
   bool IsFixedRelation() const {
     return kind_ == ARG_KIND_RELATION && options_->has_relation_input_schema();
   }
+  bool SupportsOrderBy() const { return options_->supports_order_by(); }
   bool IsVoid() const { return kind_ == ARG_KIND_VOID; }
 
   bool IsDescriptor() const { return kind_ == ARG_KIND_DESCRIPTOR; }
@@ -894,10 +915,16 @@ class FunctionArgumentType {
   static std::string SignatureArgumentKindToString(SignatureArgumentKind kind);
 
  private:
+  friend class internal::ConcreteArgumentBuilder;
   FunctionArgumentType(
-      SignatureArgumentKind kind, const Type* type,
+      const Type* type,
       std::shared_ptr<const FunctionArgumentTypeOptions> options,
-      int num_occurrences, std::optional<TypeModifiers> type_modifiers);
+      std::optional<TypeModifiers> type_modifiers, int num_occurrences,
+      SignatureArgumentKind kind);
+  static FunctionArgumentType Lambda(
+      FunctionArgumentTypeList lambda_argument_types,
+      FunctionArgumentType lambda_body_type,
+      std::shared_ptr<const FunctionArgumentTypeOptions> options);
 
   // Checks that 'arg_type' could be used as lambda argument type and body type.
   static absl::Status CheckLambdaArgType(const FunctionArgumentType& arg_type);
@@ -906,25 +933,15 @@ class FunctionArgumentType {
   static std::shared_ptr<const FunctionArgumentTypeOptions> SimpleOptions(
       ArgumentCardinality cardinality = FunctionEnums::REQUIRED);
 
-  SignatureArgumentKind kind_;
-
-  // Used during resolution for annotations propagation to find correlated
-  // templated arguments. This must be set for concrete signatures, and never
-  // appears in the final tree.
-  // This is also why it's never serialized in the proto.
-  SignatureArgumentKind original_kind_ = SignatureArgumentKind::
-      __SignatureArgumentKind__switch_must_have_a_default__;
-
-  // Indicates how many times a concrete argument occurred in a concrete
-  // function signature.  REQUIRED concrete arguments must occur exactly 1
-  // time, OPTIONALs can occur 0 or 1 times, and REPEATEDs can occur 0 or
-  // more times.  For non-concrete arguments it is -1.
-  int num_occurrences_;
-
   const Type* type_;
 
-  // This holds the argument type options. It is a shared pointer to reduce
-  // stack frame sizes when the function signatures are kept on the stack.
+  // This holds the argument type options. It is a shared_ptr so that:
+  //   * SimpleOptions() singletons and catalog options can be shared across
+  //     FunctionArgumentTypes (including concrete signatures) without copying
+  //     the underlying FunctionArgumentTypeOptions::Data.
+  //   * FunctionArgumentType can use a defaulted copy constructor.
+  //   * the large options object stays off the stack, keeping stack frames
+  //     small when function signatures are kept on the stack.
   std::shared_ptr<const FunctionArgumentTypeOptions> options_;
 
   // The type modifiers of the argument as declared in the function
@@ -937,12 +954,29 @@ class FunctionArgumentType {
   std::optional<TypeModifiers> type_modifiers_;
 
   // This holds lambda type specifications.
-  // It is a shared pointer to
-  //   * reduce stack frame sizes when the function signatures are on the stack
-  //   * avoid having a manual copy constructor required by unique_ptr.
-  //   * avoid compiler error of ArgumentTypeLambda recursively uses
-  //   FunctionArgumentType.
-  std::shared_ptr<ArgumentTypeLambda> lambda_;
+  // It is a shared_ptr so that:
+  //   * copying a FunctionArgumentType does not deep-copy the lambda argument
+  //     and body types, and FunctionArgumentType can use a defaulted copy
+  //     constructor.
+  //   * ArgumentTypeLambda can recursively contain FunctionArgumentType.
+  //   * the lambda types stay off the stack, keeping stack frames small when
+  //     function signatures are kept on the stack.
+  std::shared_ptr<const ArgumentTypeLambda> lambda_;
+
+  // Indicates how many times a concrete argument occurred in a concrete
+  // function signature.  REQUIRED concrete arguments must occur exactly 1
+  // time, OPTIONALs can occur 0 or 1 times, and REPEATEDs can occur 0 or
+  // more times.  For non-concrete arguments it is -1.
+  int num_occurrences_;
+
+  SignatureArgumentKind kind_ : 16;
+
+  // Used during resolution for annotations propagation to find correlated
+  // templated arguments. This must be set for concrete signatures, and never
+  // appears in the final tree.
+  // This is also why it's never serialized in the proto.
+  SignatureArgumentKind original_kind_ : 16 = SignatureArgumentKind::
+      __SignatureArgumentKind__switch_must_have_a_default__;
 
   friend class FunctionSerializationTests;
   // Copyable.
@@ -1117,19 +1151,19 @@ class FunctionSignatureRewriteOptions {
   void Serialize(FunctionSignatureRewriteOptionsProto* proto) const;
 
  private:
-  bool enabled_ = true;
-  ResolvedASTRewrite rewriter_ = ResolvedASTRewrite::REWRITE_INVALID_DO_NOT_USE;
   std::string sql_;
-  // Whether or not the rewrite SQL is allowed to reference tables. This
-  // restriction applies to `REWRITE_BUILTIN_FUNCTION_INLINER`, but might not be
-  // enforced by other rewriters.
-  bool allow_table_references_ = false;
   // A (case-sensitive) list of function groups that are allowed to be
   // referenced in the rewrite SQL. By default, only GoogleSQL-builtin functions
   // are allowed, but engines can set this to allow additional function groups.
   // This restriction applies to `REWRITE_BUILTIN_FUNCTION_INLINER`, but might
   // not be enforced by other rewriters.
   std::vector<std::string> allowed_function_groups_ = {};
+  ResolvedASTRewrite rewriter_ = ResolvedASTRewrite::REWRITE_INVALID_DO_NOT_USE;
+  bool enabled_ = true;
+  // Whether or not the rewrite SQL is allowed to reference tables. This
+  // restriction applies to `REWRITE_BUILTIN_FUNCTION_INLINER`, but might not be
+  // enforced by other rewriters.
+  bool allow_table_references_ = false;
 };
 
 // Returns the reason why the concrete argument list is NOT valid for a matched
@@ -1353,6 +1387,14 @@ class FunctionSignatureOptions {
   // loaded in GetBuiltinFunctionsAndTypes.
   std::set<LanguageFeature> required_language_features_;
 
+  // Configures a rewrite implementation of this function signature.
+  std::optional<FunctionSignatureRewriteOptions> rewrite_options_;
+
+  // If not nullptr, this is used to compute the result annotations after the
+  // function call return type is determined.
+  ComputeResultAnnotationsCallback compute_result_annotations_callback_ =
+      nullptr;
+
   bool is_deprecated_ = false;
 
   bool is_internal_ = false;
@@ -1394,14 +1436,6 @@ class FunctionSignatureOptions {
   // When true, an error will be returned during resolution if any argument
   // of the function has collation.
   bool rejects_collation_ = false;
-
-  // Configures a rewrite implementation of this function signature.
-  std::optional<FunctionSignatureRewriteOptions> rewrite_options_;
-
-  // If not nullptr, this is used to compute the result annotations after the
-  // function call return type is determined.
-  ComputeResultAnnotationsCallback compute_result_annotations_callback_ =
-      nullptr;
 
   // Copyable.
 };
@@ -1739,8 +1773,8 @@ class FunctionSignature {
   // we end up asking for these repeatedly.  This vector could be large if
   // functions have huge numbers of arguments, but then we probably have other
   // data structures that are proportionally large too.
-  bool is_concrete_ = false;
   FunctionArgumentTypeList concrete_arguments_;
+  bool is_concrete_ = false;
 
   friend class FunctionSerializationTests;
   // Copyable.

@@ -122,15 +122,15 @@ DefaultAnnotationSpec::PropagateThroughCompositeType(
   return visitor.Visit(annotated_type, original_kind);
 }
 
-// Returns the argument at the given index of the function call, or null if it
-// is not an expression or a lambda (e.g. if it is a SEQUENCE).
+// Returns the expression or inline lambda argument at the given index of the
+// function call, or null if it is neither (e.g. a function_ref or SEQUENCE).
 //
 // The <function_call> has exactly one of 'argument_list' or
 // 'generic_argument_list' populated. Usually 'argument_list' is used, but
 // the 'generic_argument_list' is used when there is a non-expression
 // argument (such as a lambda). This function is just a convenient helper to
 // hide the different lists when attempting to get the argument expression.
-const ResolvedNode* GetFunctionCallArgument(
+const ResolvedNode* GetFunctionCallArgumentIfExprOrLambda(
     const ResolvedFunctionCallBase& function_call, int i) {
   if (function_call.argument_list_size() > 0) {
     return function_call.argument_list(i);
@@ -188,9 +188,10 @@ absl::Status DefaultAnnotationSpec::CheckAndPropagateForFunctionCallBase(
         << "TABLE arguments with annotations are not supported.";
     if (signature.ConcreteArgument(i).IsScalar()) {
       // Propagate through any nested type to the "root" template kinds.
-      const ResolvedNode* arg_i = GetFunctionCallArgument(function_call, i);
+      const ResolvedNode* arg_i =
+          GetFunctionCallArgumentIfExprOrLambda(function_call, i);
 
-      GOOGLESQL_RET_CHECK(arg_i->IsExpression());
+      GOOGLESQL_RET_CHECK(arg_i != nullptr && arg_i->IsExpression());
       GOOGLESQL_RETURN_IF_ERROR(PropagateThroughCompositeType(
                           arg_i->GetAs<ResolvedExpr>()->annotated_type(),
                           signature.ConcreteArgument(i).original_kind(),
@@ -205,8 +206,9 @@ absl::Status DefaultAnnotationSpec::CheckAndPropagateForFunctionCallBase(
   // just like any other expression argument.
   for (int i = 0; i < signature.NumConcreteArguments(); ++i) {
     if (signature.ConcreteArgument(i).IsLambda()) {
-      const ResolvedNode* arg_i = GetFunctionCallArgument(function_call, i);
-      if (arg_i->Is<ResolvedInlineLambda>()) {
+      const ResolvedNode* arg_i =
+          GetFunctionCallArgumentIfExprOrLambda(function_call, i);
+      if (arg_i != nullptr && arg_i->Is<ResolvedInlineLambda>()) {
         GOOGLESQL_RET_CHECK(signature.ConcreteArgument(i).IsLambda());
         const auto& concrete_lambda = signature.ConcreteArgument(i).lambda();
         const auto* lambda = arg_i->GetAs<ResolvedInlineLambda>();
@@ -244,6 +246,15 @@ absl::Status DefaultAnnotationSpec::CheckAndPropagateForColumnRef(
     const ResolvedColumnRef& column_ref, AnnotationMap* result_annotation_map) {
   if (result_annotation_map == nullptr) return absl::OkStatus();
   return MergeAnnotations(column_ref.column().type_annotation_map(),
+                          *result_annotation_map);
+}
+
+absl::Status DefaultAnnotationSpec::CheckAndPropagateForParameter(
+    const ResolvedParameter& parameter, AnnotationMap* result_annotation_map) {
+  if (result_annotation_map == nullptr) {
+    return absl::OkStatus();
+  }
+  return MergeAnnotations(parameter.type_annotation_map(),
                           *result_annotation_map);
 }
 

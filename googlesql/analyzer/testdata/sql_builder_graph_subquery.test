@@ -726,7 +726,7 @@ FROM
     MATCH
       (a_2 IS Person)
     RETURN
-      NOT EXISTS {
+      NOT(EXISTS {
         GRAPH aml
         MATCH
           (a_4 IS Person)
@@ -734,7 +734,7 @@ FROM
           (a_6 IS Person)
           WHERE
             a_2 = a_6
-      } AS a_3
+      }) AS a_3
   ) AS aml_1;
 
 [SQLBUILDER_TARGET_SYNTAX_MODE pipe]
@@ -745,7 +745,7 @@ FROM
     MATCH
       (a_2 IS Person)
     RETURN
-      NOT EXISTS {
+      NOT(EXISTS {
         GRAPH aml
         MATCH
           (a_4 IS Person)
@@ -753,7 +753,7 @@ FROM
           (a_6 IS Person)
           WHERE
             a_2 = a_6
-      } AS a_3
+      }) AS a_3
   ) AS aml_1
 |> SELECT
      aml_1.a_3 AS val;
@@ -1639,7 +1639,7 @@ FROM
     MATCH
       (a_2 IS Person)
     RETURN
-      VALUE {
+      (VALUE {
         GRAPH aml
         MATCH
           (a_4 IS Person
@@ -1647,7 +1647,7 @@ FROM
             (a_4.name) = "Dana")
         RETURN
           1 AS a_5
-      } AS a_3
+      }) AS a_3
   ) AS aml_1;
 
 [SQLBUILDER_TARGET_SYNTAX_MODE pipe]
@@ -1658,7 +1658,7 @@ FROM
     MATCH
       (a_2 IS Person)
     RETURN
-      VALUE {
+      (VALUE {
         GRAPH aml
         MATCH
           (a_4 IS Person
@@ -1666,7 +1666,7 @@ FROM
             (a_4.name) = "Dana")
         RETURN
           1 AS a_5
-      } AS a_3
+      }) AS a_3
   ) AS aml_1
 |> SELECT
      aml_1.a_3 AS val;

@@ -954,6 +954,10 @@ class Unparser : public ParseTreeVisitor {
       const ASTAlterConstraintSetOptionsAction* node, void* data) override;
   void visitASTAddColumnAction(const ASTAddColumnAction* node,
                                void* data) override;
+  void visitASTAddStoredColumnAction(const ASTAddStoredColumnAction* node,
+                                     void* data) override;
+  void visitASTDropStoredColumnAction(const ASTDropStoredColumnAction* node,
+                                      void* data) override;
   void visitASTGrantToClause(const ASTGrantToClause* node, void* data) override;
   void visitASTRestrictToClause(const ASTRestrictToClause* node,
                                 void* data) override;

@@ -105,6 +105,16 @@ message ValueProto {
     repeated string column_names = 1;
   }
 
+  // Container for VARIANT datatype
+  message Variant {
+    // These fields are commented out for now and would be uncommented after
+    // the sdl files are updated and soak time is given and Variant is added to
+    // the oneof value.
+    // optional TypeProto inner_type = 1;
+    // optional ValueProto inner_value = 2;
+    // optional AnnotationMapProto annotations = 3;
+  }
+
   // Each non-null value will have exactly one of these fields specified.
   // Null values will have no fields set.
   oneof value {

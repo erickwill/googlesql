@@ -65,6 +65,7 @@ GraphPathType::GraphPathType(const TypeFactory& factory,
     : ListBackedType(factory, TYPE_GRAPH_PATH),
       node_type_(node_type),
       edge_type_(edge_type),
+      component_types_({node_type, edge_type}),
       nesting_depth_(nesting_depth) {}
 
 bool GraphPathType::IsSupportedType(

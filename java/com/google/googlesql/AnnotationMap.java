@@ -355,6 +355,8 @@ public class AnnotationMap {
         return "IsVersioned";
       case VECTOR_LENGTH:
         return "VectorLength";
+      case VECTOR_ENCODING:
+        return "VectorEncoding";
       case MAX_BUILTIN_ANNOTATION_KIND:
         return "MaxBuiltinAnnotationKind";
     }
@@ -377,6 +379,9 @@ public class AnnotationMap {
 
     /** Annotation ID for VectorLengthAnnotation. */
     VECTOR_LENGTH(5),
+
+    /** Annotation ID for VectorEncodingAnnotation. */
+    VECTOR_ENCODING(6),
 
     /** Annotation ID up to kMaxBuiltinAnnotationKind are reserved for built-in annotations. */
     MAX_BUILTIN_ANNOTATION_KIND(10000);

@@ -1,7 +1,7 @@
 # Most of these tests came from unpivot.test, with cases involving combinations
 # with JOIN, TVFs, subqueries, etc, removed as irrelevant.
-# After we remove copybara stripping, we might combine these back into the
-# main test file, with alternations on whether to add "|>".
+# We could potentially combine these back into the main test file, with
+# alternations on whether to add "|>".
 [default language_features=NONE,+PIPES]
 
 FROM t

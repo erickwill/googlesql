@@ -33,9 +33,6 @@
 
 namespace googlesql {
 
-// TODO: Code for this class is currently still under
-// development; do NOT take a dependency on it.
-//
 // This class represents values of the GoogleSQL Timestamp_pico type.
 //
 // Internally the values are stored using two 64-bit integers.

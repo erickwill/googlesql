@@ -765,10 +765,14 @@ void AnalyzerOptions::SetDdlPseudoColumns(
 }
 
 ParserOptions AnalyzerOptions::GetParserOptions() const {
+  return GetParserOptions(parser::MacroExpansionMode::kNone,
+                          /*catalog=*/nullptr);
+}
+
+ParserOptions AnalyzerOptions::GetParserOptions(
+    parser::MacroExpansionMode macro_expansion_mode, Catalog* catalog) const {
   return ParserOptions(id_string_pool(), arena(), data_->language_options,
-                       error_message_options(),
-                       parser::MacroExpansionMode::kNone,
-                       /*catalog=*/nullptr);
+                       error_message_options(), macro_expansion_mode, catalog);
 }
 
 void AnalyzerOptions::enable_rewrite(ResolvedASTRewrite rewrite, bool enable) {

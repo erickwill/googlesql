@@ -28,7 +28,6 @@
 #include <utility>
 #include <vector>
 
-#include "googlesql/base/arena.h"
 #include "googlesql/base/testing/status_matchers.h"
 #include "googlesql/parser/macros/diagnostic.h"
 #include "googlesql/parser/macros/macro_catalog.h"
@@ -54,6 +53,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "googlesql/base/arena.h"
 
 namespace googlesql {
 namespace parser {
@@ -2189,6 +2189,107 @@ TEST_P(MacroExpanderParameterizedTest,
               {Token::EOI, MakeLocation(26, 26), "", ""},
           }),
           HasWarnings(IsEmpty()))));
+}
+
+TEST_P(MacroExpanderParameterizedTest,
+       SemicolonDoesNotSpliceWithAdjacentMacroInvocation) {
+  MacroCatalog macro_catalog;
+  RegisterMacros("DEFINE MACRO x SELECT 2;\n", macro_catalog);
+
+  EXPECT_THAT(
+      ExpandMacros("SELECT 1;$x()", macro_catalog, /*is_strict=*/GetParam()),
+      IsOkAndHolds(AllOf(
+          TokensEq(std::vector<TokenWithLocation>{
+              {Token::KW_SELECT, MakeLocation(0, 6), "SELECT", ""},
+              {Token::DECIMAL_INTEGER_LITERAL, MakeLocation(7, 8), "1", " "},
+              {Token::SEMICOLON, MakeLocation(8, 9), ";", ""},
+              {Token::KW_SELECT, MakeLocation(kDefsFileName, 15, 21), "SELECT",
+               "", MakeLocation(9, 13)},
+              {Token::DECIMAL_INTEGER_LITERAL,
+               MakeLocation(kDefsFileName, 22, 23), "2", " ",
+               MakeLocation(9, 13)},
+              {Token::EOI, MakeLocation(13, 13), "", ""},
+          }),
+          HasWarnings(IsEmpty()))));
+}
+
+TEST_P(MacroExpanderParameterizedTest,
+       DefineMacroSemicolonDoesNotPreventExpandingAdjacentMacroInvocation) {
+  MacroCatalog macro_catalog;
+  RegisterMacros("DEFINE MACRO x SELECT 2;\n", macro_catalog);
+
+  EXPECT_THAT(
+      ExpandMacros("DEFINE MACRO m 1;$x()", macro_catalog,
+                   /*is_strict=*/GetParam()),
+      IsOkAndHolds(AllOf(
+          TokensEq(std::vector<TokenWithLocation>{
+              {Token::KW_DEFINE_FOR_MACROS, MakeLocation(0, 6), "DEFINE", ""},
+              {Token::KW_MACRO, MakeLocation(7, 12), "MACRO", " "},
+              {Token::IDENTIFIER, MakeLocation(13, 14), "m", " "},
+              {Token::DECIMAL_INTEGER_LITERAL, MakeLocation(15, 16), "1", " "},
+              {Token::SEMICOLON, MakeLocation(16, 17), ";", ""},
+              {Token::KW_SELECT, MakeLocation(kDefsFileName, 15, 21), "SELECT",
+               "", MakeLocation(17, 21)},
+              {Token::DECIMAL_INTEGER_LITERAL,
+               MakeLocation(kDefsFileName, 22, 23), "2", " ",
+               MakeLocation(17, 21)},
+              {Token::EOI, MakeLocation(21, 21), "", ""},
+          }),
+          HasWarnings(IsEmpty()))));
+}
+
+TEST(MacroExpanderTest, BuiltinMacroInvocationSplicesFromRightInLenientMode) {
+  MacroCatalog macro_catalog;
+
+  EXPECT_THAT(ExpandMacros("prefix_$$IDENTIFIER(bar)", macro_catalog,
+                           /*is_strict=*/false),
+              IsOkAndHolds(TokensEq(std::vector<TokenWithLocation>{
+                  {Token::IDENTIFIER, MakeLocation(7, 24), "prefix_bar", ""},
+                  {Token::EOI, MakeLocation(24, 24), "", ""},
+              })));
+}
+
+TEST(MacroExpanderTest,
+     BuiltinMacroInvocationSplicingFromRightFailsInStrictMode) {
+  MacroCatalog macro_catalog;
+
+  EXPECT_THAT(
+      ExpandMacros("prefix_$$IDENTIFIER(bar)", macro_catalog,
+                   /*is_strict=*/true),
+      StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          HasSubstr(
+              "Splicing tokens (prefix_) and (bar) [at top_file.sql:1:8]")));
+}
+
+TEST(MacroExpanderTest, BuiltinMacroInvocationSplicesFromLeftInLenientMode) {
+  MacroCatalog macro_catalog;
+
+  EXPECT_THAT(
+      ExpandMacros("$$IDENTIFIER(foo)_suffix", macro_catalog,
+                   /*is_strict=*/false),
+      IsOkAndHolds(
+          AllOf(TokensEq(std::vector<TokenWithLocation>{
+                    {Token::IDENTIFIER, MakeLocation(0, 17), "foo_suffix", ""},
+                    {Token::EOI, MakeLocation(24, 24), "", ""},
+                }),
+                HasWarnings(ElementsAre(StatusIs(
+                    absl::StatusCode::kInvalidArgument,
+                    HasSubstr("Splicing tokens (foo) and (_suffix) [at "
+                              "top_file.sql:1:18]")))))));
+}
+
+TEST(MacroExpanderTest,
+     BuiltinMacroInvocationSplicingFromLeftFailsInStrictMode) {
+  MacroCatalog macro_catalog;
+
+  EXPECT_THAT(
+      ExpandMacros("$$IDENTIFIER(foo)_suffix", macro_catalog,
+                   /*is_strict=*/true),
+      StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          HasSubstr(
+              "Splicing tokens (foo) and (_suffix) [at top_file.sql:1:18]")));
 }
 
 TEST_P(MacroExpanderParameterizedTest,

@@ -164,13 +164,32 @@ class SampleCatalogImpl {
   absl::Status LoadAmlDmlPropertyGraph();
   // `with_timestamps` is used to determine whether to include timestamps
   // columns and properties in the property graph.
-  // `includes_readonly_schema` is used to determine whether to include the
-  // read-only columns and properties in the property graph. This is needed by
-  // GQL DML analyzer tests to reject updating read-only schema.
+  // `includes_dml_schema` is used to determine whether to include the
+  // DML test tables, columns, and properties in the property graph.
   absl::Status LoadBasicAmlPropertyGraphImpl(
       std::string property_graph_name_path, bool with_timestamps,
-      bool includes_readonly_schema);
-  absl::Status LoadReadonlyAmlSchema(
+      bool includes_dml_schema);
+  struct AmlDmlNodeTables {
+    const GraphNodeTable* node_table = nullptr;
+    const GraphNodeTable* node_table_no_writable_key = nullptr;
+    const GraphNodeTable* node_table_no_key_prop = nullptr;
+  };
+  absl::StatusOr<AmlDmlNodeTables> LoadAmlDmlNodeTables(
+      const std::vector<std::string>& property_graph_name_path,
+      const GraphPropertyDeclaration* id_prop_dcl_raw,
+      std::vector<std::unique_ptr<const GraphNodeTable>>& node_tables,
+      std::vector<std::unique_ptr<const GraphElementLabel>>& labels,
+      std::vector<std::unique_ptr<const GraphPropertyDeclaration>>&
+          property_dcls);
+  absl::Status LoadAmlDmlEdgeTables(
+      const std::vector<std::string>& property_graph_name_path,
+      const GraphPropertyDeclaration* id_prop_dcl_raw,
+      const AmlDmlNodeTables& node_tables_ref,
+      std::vector<std::unique_ptr<const GraphEdgeTable>>& edge_tables,
+      std::vector<std::unique_ptr<const GraphElementLabel>>& labels,
+      std::vector<std::unique_ptr<const GraphPropertyDeclaration>>&
+          property_dcls);
+  absl::Status LoadAmlDmlSchema(
       const std::vector<std::string>& property_graph_name_path,
       const GraphPropertyDeclaration* id_prop_dcl_raw,
       std::vector<std::unique_ptr<const GraphNodeTable>>& node_tables,

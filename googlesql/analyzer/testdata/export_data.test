@@ -325,8 +325,40 @@ options (format=sstable, filename='/tmp/file.ss')
 as select * from KeyValue
 --
 ExportDataStmt
-+-connection=
-| +-Connection(connection=connection1)
++-connection_list=
+| +-ConnectionList
+|   +-connection=
+|     +-Connection(connection=connection1)
++-option_list=
+| +-format := Literal(type=STRING, value="sstable")
+| +-filename := Literal(type=STRING, value="/tmp/file.ss")
++-output_column_list=
+| +-KeyValue.Key#1 AS Key [INT64]
+| +-KeyValue.Value#2 AS Value [STRING]
++-query=
+  +-ProjectScan
+    +-column_list=KeyValue.[Key#1, Value#2]
+    +-input_scan=
+      +-TableScan(column_list=KeyValue.[Key#1, Value#2], table=KeyValue, column_index_list=[0, 1])
+==
+
+[language_features=NONE,+MULTI_CONNECTIONS]
+export data with connection (key1="connection1", key2=connection2)
+options (format=sstable, filename='/tmp/file.ss')
+as select * from KeyValue
+--
+ExportDataStmt
++-connection_list=
+| +-ConnectionList
+|   +-connection_kv_list=
+|     +-ConnectionKeyValuePair
+|     | +-key="key1"
+|     | +-connection=
+|     |   +-Connection(connection=connection1)
+|     +-ConnectionKeyValuePair
+|       +-key="key2"
+|       +-connection=
+|         +-Connection(connection=connection2)
 +-option_list=
 | +-format := Literal(type=STRING, value="sstable")
 | +-filename := Literal(type=STRING, value="/tmp/file.ss")

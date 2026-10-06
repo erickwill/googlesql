@@ -778,3 +778,101 @@ SELECT JSON '1' = JSON '1';
 ERROR: Equality is not defined for arguments of type JSON [at 1:8]
 SELECT JSON '1' = JSON '1';
        ^
+==
+
+# JSON field access records its parse location, like struct and proto
+# field access. Every node in a chain is located, not only the outermost
+# one.
+[parse_location_record_type={{PARSE_LOCATION_RECORD_FULL_NODE_SCOPE|PARSE_LOCATION_RECORD_CODE_SEARCH}}]
+SELECT json_col.field, json_col.field.field2, JsonTable.json_col.field
+FROM JsonTable
+--
+ALTERNATION GROUP: PARSE_LOCATION_RECORD_FULL_NODE_SCOPE
+--
+QueryStmt
++-output_column_list=
+| +-$query.field#2 AS field [JSON]
+| +-$query.field2#3 AS field2 [JSON]
+| +-$query.field#4 AS field [JSON]
++-query=
+  +-ProjectScan
+    +-parse_location=0-85
+    +-column_list=$query.[field#2, field2#3, field#4]
+    +-expr_list=
+    | +-field#2 :=
+    | | +-GetJsonField
+    | |   +-parse_location=7-21
+    | |   +-type=JSON
+    | |   +-expr=
+    | |   | +-ColumnRef(parse_location=7-21, type=JSON, column=JSONTable.json_col#1)
+    | |   +-field_name="field"
+    | +-field2#3 :=
+    | | +-GetJsonField
+    | |   +-parse_location=23-44
+    | |   +-type=JSON
+    | |   +-expr=
+    | |   | +-GetJsonField
+    | |   |   +-parse_location=23-37
+    | |   |   +-type=JSON
+    | |   |   +-expr=
+    | |   |   | +-ColumnRef(parse_location=23-44, type=JSON, column=JSONTable.json_col#1)
+    | |   |   +-field_name="field"
+    | |   +-field_name="field2"
+    | +-field#4 :=
+    |   +-GetJsonField
+    |     +-parse_location=46-70
+    |     +-type=JSON
+    |     +-expr=
+    |     | +-ColumnRef(parse_location=46-70, type=JSON, column=JSONTable.json_col#1)
+    |     +-field_name="field"
+    +-input_scan=
+      +-TableScan(parse_location=76-85, column_list=[JSONTable.json_col#1], table=JSONTable, column_index_list=[0])
+
+[REPLACED_LITERALS]
+SELECT json_col.field, json_col.field.field2, JsonTable.json_col.field
+FROM JsonTable
+--
+ALTERNATION GROUP: PARSE_LOCATION_RECORD_CODE_SEARCH
+--
+QueryStmt
++-output_column_list=
+| +-$query.field#2 AS field [JSON]
+| +-$query.field2#3 AS field2 [JSON]
+| +-$query.field#4 AS field [JSON]
++-query=
+  +-ProjectScan
+    +-parse_location=0-85
+    +-column_list=$query.[field#2, field2#3, field#4]
+    +-expr_list=
+    | +-field#2 :=
+    | | +-GetJsonField
+    | |   +-parse_location=16-21
+    | |   +-type=JSON
+    | |   +-expr=
+    | |   | +-ColumnRef(parse_location=7-21, type=JSON, column=JSONTable.json_col#1)
+    | |   +-field_name="field"
+    | +-field2#3 :=
+    | | +-GetJsonField
+    | |   +-parse_location=38-44
+    | |   +-type=JSON
+    | |   +-expr=
+    | |   | +-GetJsonField
+    | |   |   +-parse_location=32-37
+    | |   |   +-type=JSON
+    | |   |   +-expr=
+    | |   |   | +-ColumnRef(parse_location=23-44, type=JSON, column=JSONTable.json_col#1)
+    | |   |   +-field_name="field"
+    | |   +-field_name="field2"
+    | +-field#4 :=
+    |   +-GetJsonField
+    |     +-parse_location=65-70
+    |     +-type=JSON
+    |     +-expr=
+    |     | +-ColumnRef(parse_location=46-70, type=JSON, column=JSONTable.json_col#1)
+    |     +-field_name="field"
+    +-input_scan=
+      +-TableScan(parse_location=76-85, column_list=[JSONTable.json_col#1], table=JSONTable, column_index_list=[0])
+
+[REPLACED_LITERALS]
+SELECT json_col.field, json_col.field.field2, JsonTable.json_col.field
+FROM JsonTable

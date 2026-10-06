@@ -858,24 +858,218 @@ INSERT (p:Account {id: 1})-[:Transfer {amount: 50}]->(otherPerson:Account {id...
                             ^
 ==
 
-# Error: Source node table is not updatable
+# Source node table element key column is non-writable on the node table side,
+# but the referenced source key column is exposed as a property: success
+# (endpoint key columns only need to be writable on the edge table side).
 GRAPH aml_dml
 MATCH (src:TestLabelNoWritableKey)
 INSERT (src)-[:EdgeFromNoWritableKey]->(dst:TestLabel)
 --
-ERROR: The source node table 'InsertTestTableNoWritableKey' of the edge table 'EdgeFromNoWritableKeyTable' is not updatable because the element key column 'id' is not exposed as a writable property [at 3:15]
-INSERT (src)-[:EdgeFromNoWritableKey]->(dst:TestLabel)
-              ^
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dml
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphScan
+              | +-column_list=[$element_table.src#1]
+              | +-input_scan_list=
+              | | +-GraphPathScan
+              | |   +-column_list=[$element_table.src#1]
+              | |   +-input_scan_list=
+              | |   | +-GraphNodeScan
+              | |   |   +-column_list=[$element_table.src#1]
+              | |   |   +-label_expr=
+              | |   |   | +-GraphLabel(parse_location=25-47, label=aml_dml.TestLabelNoWritableKey)
+              | |   |   +-target_element_table_list=[aml_dml.InsertTestTableNoWritableKey]
+              | |   +-head=$element_table.src#1
+              | |   +-tail=$element_table.src#1
+              | +-input_scan=
+              |   +-SingleRowScan
+              +-GraphInsertScan
+              | +-column_list=$element_table.[src#1, dst#2]
+              | +-input_scan=
+              | | +-GraphRefScan(column_list=[$element_table.src#1])
+              | +-insert_node_list=
+              | | +-dst#2 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.TestLabel)
+              | |     +-element_table=InsertTestTable
+              | +-insert_edge_list=
+              | | +-$insert_edge#3 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_EDGE(aml_dml)<edge_dst INT64, edge_src INT64, id INT64>
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.EdgeFromNoWritableKey)
+              | |     +-source_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<id INT64>, column=$element_table.src#1)
+              | |     +-dest_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>, column=$element_table.dst#2)
+              | |     +-element_table=EdgeFromNoWritableKeyTable
+              | +-path_element_list=$element_table.[src#1, $insert_edge#3, dst#2]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan(column_list=$element_table.[src#1, dst#2])
 ==
 
-# Error: Destination node table is not updatable
+# Destination node table element key column is non-writable on the node table side,
+# but the referenced destination key column is exposed as a property: success
+# (endpoint key columns only need to be writable on the edge table side).
 GRAPH aml_dml
 MATCH (dst:TestLabelNoWritableKey)
 INSERT (src:TestLabel)-[:EdgeToNoWritableKey]->(dst)
 --
-ERROR: The destination node table 'InsertTestTableNoWritableKey' of the edge table 'EdgeToNoWritableKeyTable' is not updatable because the element key column 'id' is not exposed as a writable property [at 3:25]
-INSERT (src:TestLabel)-[:EdgeToNoWritableKey]->(dst)
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dml
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphScan
+              | +-column_list=[$element_table.dst#1]
+              | +-input_scan_list=
+              | | +-GraphPathScan
+              | |   +-column_list=[$element_table.dst#1]
+              | |   +-input_scan_list=
+              | |   | +-GraphNodeScan
+              | |   |   +-column_list=[$element_table.dst#1]
+              | |   |   +-label_expr=
+              | |   |   | +-GraphLabel(parse_location=25-47, label=aml_dml.TestLabelNoWritableKey)
+              | |   |   +-target_element_table_list=[aml_dml.InsertTestTableNoWritableKey]
+              | |   +-head=$element_table.dst#1
+              | |   +-tail=$element_table.dst#1
+              | +-input_scan=
+              |   +-SingleRowScan
+              +-GraphInsertScan
+              | +-column_list=$element_table.[dst#1, src#2]
+              | +-input_scan=
+              | | +-GraphRefScan(column_list=[$element_table.dst#1])
+              | +-insert_node_list=
+              | | +-src#2 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.TestLabel)
+              | |     +-element_table=InsertTestTable
+              | +-insert_edge_list=
+              | | +-$insert_edge#3 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_EDGE(aml_dml)<edge_dst INT64, edge_src INT64, id INT64>
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.EdgeToNoWritableKey)
+              | |     +-source_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>, column=$element_table.src#2)
+              | |     +-dest_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<id INT64>, column=$element_table.dst#1)
+              | |     +-element_table=EdgeToNoWritableKeyTable
+              | +-path_element_list=$element_table.[src#2, $insert_edge#3, dst#1]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan(column_list=$element_table.[dst#1, src#2])
+==
+
+# Error: Source node table does not expose key column as a property
+GRAPH aml_dml
+MATCH (src:TestLabelNoKeyProp)
+INSERT (src)-[:EdgeFromNoKeyProp]->(dst:TestLabel)
+--
+ERROR: The edge table 'EdgeFromNoKeyPropTable' is not updatable because the source node table 'InsertTestTableNoKeyProp' does not expose the element key column 'id' as a property [at 3:15]
+INSERT (src)-[:EdgeFromNoKeyProp]->(dst:TestLabel)
+              ^
+==
+
+# Error: Destination node table does not expose key column as a property
+GRAPH aml_dml
+MATCH (dst:TestLabelNoKeyProp)
+INSERT (src:TestLabel)-[:EdgeToNoKeyProp]->(dst)
+--
+ERROR: The edge table 'EdgeToNoKeyPropTable' is not updatable because the destination node table 'InsertTestTableNoKeyProp' does not expose the element key column 'id' as a property [at 3:25]
+INSERT (src:TestLabel)-[:EdgeToNoKeyProp]->(dst)
                         ^
+==
+
+# Error: Edge source key column is not writable on the edge table side
+GRAPH aml_dml
+MATCH (src:TestLabel), (dst:TestLabel)
+INSERT (src)-[:EdgeReadOnlyEndpointKey {id: 10}]->(dst)
+--
+ERROR: Graph element table 'EdgeReadOnlyEndpointKeyTable' is not updatable because the edge source key column 'src_id' is not writable [at 3:15]
+INSERT (src)-[:EdgeReadOnlyEndpointKey {id: 10}]->(dst)
+              ^
+==
+
+# Edge table endpoint key columns do not need to be exposed as edge properties
+GRAPH aml_dml
+MATCH (src:TestLabel), (dst:TestLabel)
+INSERT (src)-[:EdgeNoEndpointProps {id: 10}]->(dst)
+--
+GeneralizedQueryStmt
++-query=
+  +-GraphTableScan
+    +-property_graph=aml_dml
+    +-input_scan=
+      +-GraphLinearScan
+        +-scan_list=
+          +-GraphLinearScan
+            +-scan_list=
+              +-GraphScan
+              | +-column_list=$element_table.[src#1, dst#2]
+              | +-input_scan_list=
+              | | +-GraphPathScan
+              | | | +-column_list=[$element_table.src#1]
+              | | | +-input_scan_list=
+              | | | | +-GraphNodeScan
+              | | | |   +-column_list=[$element_table.src#1]
+              | | | |   +-label_expr=
+              | | | |   | +-GraphLabel(parse_location=25-34, label=aml_dml.TestLabel)
+              | | | |   +-target_element_table_list=[aml_dml.InsertTestTable]
+              | | | +-head=$element_table.src#1
+              | | | +-tail=$element_table.src#1
+              | | +-GraphPathScan
+              | |   +-column_list=[$element_table.dst#2]
+              | |   +-input_scan_list=
+              | |   | +-GraphNodeScan
+              | |   |   +-column_list=[$element_table.dst#2]
+              | |   |   +-label_expr=
+              | |   |   | +-GraphLabel(parse_location=42-51, label=aml_dml.TestLabel)
+              | |   |   +-target_element_table_list=[aml_dml.InsertTestTable]
+              | |   +-head=$element_table.dst#2
+              | |   +-tail=$element_table.dst#2
+              | +-input_scan=
+              |   +-SingleRowScan
+              +-GraphInsertScan
+              | +-column_list=$element_table.[src#1, dst#2]
+              | +-input_scan=
+              | | +-GraphRefScan(column_list=$element_table.[src#1, dst#2])
+              | +-insert_edge_list=
+              | | +-$insert_edge#3 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_EDGE(aml_dml)<id INT64>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="id"
+              | |     |   +-property=id(INT64)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=INT64, value=10)
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.EdgeNoEndpointProps)
+              | |     +-source_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>, column=$element_table.src#1)
+              | |     +-dest_node=
+              | |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<derived_func_prop STRING, derived_prop STRING, id INT64, measure_prop INT64, readonly_prop STRING, val STRING, val_alias STRING>, column=$element_table.dst#2)
+              | |     +-element_table=EdgeNoEndpointPropsTable
+              | +-path_element_list=$element_table.[src#1, $insert_edge#3, dst#2]
+              +-FinishScan
+                +-input_scan=
+                  +-GraphRefScan(column_list=$element_table.[src#1, dst#2])
 ==
 
 #######################################################
@@ -889,6 +1083,43 @@ INSERT (n:Person {name: "v1", name: "v2"})
 ERROR: Duplicate property 'name' is not allowed in INSERT property specification [at 2:31]
 INSERT (n:Person {name: "v1", name: "v2"})
                               ^
+==
+
+# Properties: Duplicate insertion into the same underlying column via aliased properties
+GRAPH aml_dml
+INSERT (n:TestLabel {val: "v1", val_alias: "v2"})
+--
+ERROR: Duplicate insertion into column 'val' [at 2:33]
+INSERT (n:TestLabel {val: "v1", val_alias: "v2"})
+                                ^
+==
+
+# Properties: Duplicate insertion into edge source endpoint key column
+GRAPH aml
+INSERT (p:Person {id: 1})-[e:PersonOwnAccount {personId: 10}]->(a:Account {id: 2})
+--
+ERROR: Cannot explicitly specify property 'personId' because it causes duplicate insertion into edge source key column 'personId' [at 2:48]
+INSERT (p:Person {id: 1})-[e:PersonOwnAccount {personId: 10}]->(a:Account {id...
+                                               ^
+==
+
+# Properties: Duplicate insertion into edge destination endpoint key column
+GRAPH aml
+INSERT (p:Person {id: 1})-[e:PersonOwnAccount {accountId: 20}]->(a:Account {id: 2})
+--
+ERROR: Cannot explicitly specify property 'accountId' because it causes duplicate insertion into edge destination key column 'accountId' [at 2:48]
+INSERT (p:Person {id: 1})-[e:PersonOwnAccount {accountId: 20}]->(a:Account {i...
+                                               ^
+==
+
+# Properties: Duplicate insertion into edge source endpoint key column
+GRAPH aml
+MATCH (p:Person {id: 1}), (a:Account {id: 2})
+INSERT (p)-[e:PersonOwnAccount {personId: 10}]->(a)
+--
+ERROR: Cannot explicitly specify property 'personId' because it causes duplicate insertion into edge source key column 'personId' [at 3:33]
+INSERT (p)-[e:PersonOwnAccount {personId: 10}]->(a)
+                                ^
 ==
 
 # Properties: Invalid type coercion
@@ -1769,6 +2000,93 @@ GeneralizedQueryStmt
               +-FinishScan
                 +-input_scan=
                   +-GraphRefScan(column_list=$element_table.[a#1, b#2])
+==
+
+# INSERT into element table with generated columns.
+GRAPH aml_dml
+INSERT (n:TestLabelWithGenCols {id: 1, c1: 10})
+RETURN n.id, n.c1, n.gen_b, n.gen_a
+--
+GeneralizedQueryStmt
++-output_schema=
+| +-OutputSchema
+|   +-output_column_list=
+|     +-$graph_table.id#2 AS id [INT64]
+|     +-$graph_table.c1#3 AS c1 [INT64]
+|     +-$graph_table.gen_b#4 AS gen_b [INT64]
+|     +-$graph_table.gen_a#5 AS gen_a [INT64]
++-query=
+  +-GraphTableScan
+    +-column_list=$graph_table.[id#2, c1#3, gen_b#4, gen_a#5]
+    +-property_graph=aml_dml
+    +-input_scan=
+      +-GraphLinearScan
+        +-column_list=$graph_table.[id#2, c1#3, gen_b#4, gen_a#5]
+        +-scan_list=
+          +-GraphLinearScan
+            +-column_list=$graph_table.[id#2, c1#3, gen_b#4, gen_a#5]
+            +-scan_list=
+              +-GraphInsertScan
+              | +-column_list=[$element_table.n#1]
+              | +-input_scan=
+              | | +-SingleRowScan
+              | +-insert_node_list=
+              | | +-n#1 :=
+              | |   +-GraphInsertElement
+              | |     +-type=GRAPH_NODE(aml_dml)<c1 INT64, gen_a INT64, gen_b INT64, id INT64>
+              | |     +-property_list=
+              | |     | +-GraphDMLPropertyItem
+              | |     | | +-property_name="id"
+              | |     | | +-property=id(INT64)
+              | |     | | +-property_value=
+              | |     | |   +-Literal(type=INT64, value=1)
+              | |     | +-GraphDMLPropertyItem
+              | |     |   +-property_name="c1"
+              | |     |   +-property=c1(INT64)
+              | |     |   +-property_value=
+              | |     |     +-Literal(type=INT64, value=10)
+              | |     +-label_list=
+              | |     | +-GraphLabel(label=aml_dml.TestLabelWithGenCols)
+              | |     +-element_table=InsertTestTableWithGenCols
+              | +-path_element_list=[$element_table.n#1]
+              +-ProjectScan
+                +-column_list=$graph_table.[id#2, c1#3, gen_b#4, gen_a#5]
+                +-expr_list=
+                | +-id#2 :=
+                | | +-GraphGetElementProperty
+                | |   +-type=INT64
+                | |   +-expr=
+                | |   | +-ColumnRef(type=GRAPH_NODE(aml_dml)<c1 INT64, gen_a INT64, gen_b INT64, id INT64>, column=$element_table.n#1)
+                | |   +-property=id(INT64)
+                | +-c1#3 :=
+                | | +-GraphGetElementProperty
+                | |   +-type=INT64
+                | |   +-expr=
+                | |   | +-ColumnRef(type=GRAPH_NODE(aml_dml)<c1 INT64, gen_a INT64, gen_b INT64, id INT64>, column=$element_table.n#1)
+                | |   +-property=c1(INT64)
+                | +-gen_b#4 :=
+                | | +-GraphGetElementProperty
+                | |   +-type=INT64
+                | |   +-expr=
+                | |   | +-ColumnRef(type=GRAPH_NODE(aml_dml)<c1 INT64, gen_a INT64, gen_b INT64, id INT64>, column=$element_table.n#1)
+                | |   +-property=gen_b(INT64)
+                | +-gen_a#5 :=
+                |   +-GraphGetElementProperty
+                |     +-type=INT64
+                |     +-expr=
+                |     | +-ColumnRef(type=GRAPH_NODE(aml_dml)<c1 INT64, gen_a INT64, gen_b INT64, id INT64>, column=$element_table.n#1)
+                |     +-property=gen_a(INT64)
+                +-input_scan=
+                  +-GraphRefScan(column_list=[$element_table.n#1])
+==
+
+# INSERT into element table with generated columns cannot explicitly insert into generated column.
+GRAPH aml_dml
+INSERT (n:TestLabelWithGenCols {id: 1, c1: 10, gen_a: 20})
+--
+ERROR: Cannot insert into property 'gen_a' mapped from a read-only column [at 2:48]
+INSERT (n:TestLabelWithGenCols {id: 1, c1: 10, gen_a: 20})
+                                               ^
 ==
 
 #######################################################

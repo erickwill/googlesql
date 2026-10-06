@@ -58,6 +58,36 @@
 namespace googlesql {
 namespace {
 
+// Collects columns referenced by a generated column expression.
+class GeneratedColumnDependencyCollector : public ResolvedASTVisitor {
+ public:
+  explicit GeneratedColumnDependencyCollector(const Table* table)
+      : table_(table) {}
+
+  absl::Status VisitResolvedExpressionColumn(
+      const ResolvedExpressionColumn* node) override {
+    const Column* column = table_->FindColumnByName(node->name());
+    GOOGLESQL_RET_CHECK(column != nullptr) << "Column " << node->name()
+                                 << " not found in table " << table_->Name();
+    referenced_columns_.insert(column);
+    return absl::OkStatus();
+  }
+
+  absl::Status VisitResolvedCatalogColumnRef(
+      const ResolvedCatalogColumnRef* node) override {
+    referenced_columns_.insert(node->column());
+    return absl::OkStatus();
+  }
+
+  const absl::flat_hash_set<const Column*>& referenced_columns() const {
+    return referenced_columns_;
+  }
+
+ private:
+  const Table* table_;
+  absl::flat_hash_set<const Column*> referenced_columns_;
+};
+
 // Builds a list of value expressions representing columns in <table> with
 // with <indices>. Column value expressions are represented by variables that
 // can be looked up by column from <variables_by_column>.
@@ -394,6 +424,18 @@ Algebrizer::AlgebrizeGraphTableScan(
   GOOGLESQL_RET_CHECK(property_graph != nullptr);
   property_graph_stack_.push(property_graph);
   auto clean_up = absl::MakeCleanup([this] { property_graph_stack_.pop(); });
+
+  // There is a terminal Graph DML scan, which produces an empty column list.
+  if (graph_table_scan->column_list().empty()) {
+    GOOGLESQL_RET_CHECK(graph_table_scan->shape_expr_list().empty());
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        std::unique_ptr<RelationalOp> input,
+        AlgebrizeScan(graph_table_scan->input_scan(), active_conjuncts));
+    GOOGLESQL_RETURN_IF_ERROR(
+        input->set_is_order_preserving(graph_table_scan->is_ordered()));
+    return input;
+  }
+
   // TODO: We should just generate a projScan on top of the graph_table_scan,
   // and not embed the expressions in it.
   return AlgebrizeProjectScanInternal(
@@ -1400,6 +1442,544 @@ Algebrizer::AlgebrizeGraphIsLabeledPredicate(
                    AlgebrizeExpression(predicate->expr()));
   return GraphIsLabeledExpr::Create(std::move(element), predicate->label_expr(),
                                     predicate->is_not());
+}
+
+absl::StatusOr<Algebrizer::TopologicallySortedColumnsInfo>
+Algebrizer::AlgebrizeBaseTableAndTopologicallySortGeneratedColumns(
+    const Table* table) {
+  std::vector<const Column*> generated_columns;
+  std::vector<VariableId> table_variables;
+  table_variables.reserve(table->NumColumns());
+  absl::flat_hash_map<const Column*, VariableId> catalog_column_vars;
+  catalog_column_vars.reserve(table->NumColumns());
+  CaseInsensitiveStringVariableMap expr_col_vars;
+  expr_col_vars.reserve(table->NumColumns());
+
+  // Collect generated columns and generate variables for all catalog columns.
+  for (int i = 0; i < table->NumColumns(); ++i) {
+    const Column* col = table->GetColumn(i);
+    if (col->HasGeneratedExpression()) {
+      generated_columns.push_back(col);
+    }
+    VariableId var = variable_gen_->GetNewVariableName(col->Name());
+    table_variables.push_back(var);
+    catalog_column_vars[col] = var;
+    expr_col_vars[col->Name()] = var;
+  }
+  if (generated_columns.empty()) {
+    return TopologicallySortedColumnsInfo{};
+  }
+
+  // Topologically sort generated columns using DFS.
+  enum class State { kUnvisited, kVisiting, kVisited };
+  absl::flat_hash_map<const Column*, State> states;
+  std::vector<const Column*> sorted_columns;
+
+  std::function<absl::Status(const Column*)> dfs =
+      [&](const Column* col) -> absl::Status {
+    auto it = states.find(col);
+    if (it != states.end()) {
+      if (it->second == State::kVisiting) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Cycle detected in generated columns of table ",
+                         table->Name(), " involving column ", col->Name()));
+      }
+      if (it->second == State::kVisited) {
+        return absl::OkStatus();
+      }
+    }
+    states[col] = State::kVisiting;
+
+    GOOGLESQL_RET_CHECK(col->HasGeneratedExpression());
+    GOOGLESQL_RET_CHECK(col->GetExpression().has_value());
+    const ResolvedExpr* resolved_expr =
+        col->GetExpression()->GetResolvedExpression();
+    GOOGLESQL_RET_CHECK(resolved_expr != nullptr);
+
+    GeneratedColumnDependencyCollector collector(table);
+    GOOGLESQL_RETURN_IF_ERROR(resolved_expr->Accept(&collector));
+
+    for (const Column* dependency_col : collector.referenced_columns()) {
+      if (dependency_col->HasGeneratedExpression()) {
+        GOOGLESQL_RETURN_IF_ERROR(dfs(dependency_col));
+      }
+    }
+
+    states[col] = State::kVisited;
+    sorted_columns.push_back(col);
+    return absl::OkStatus();
+  };
+
+  for (const Column* col : generated_columns) {
+    if (states[col] == State::kUnvisited) {
+      GOOGLESQL_RETURN_IF_ERROR(dfs(col));
+    }
+  }
+
+  // Preserves the previous state of catalog_column_ref_variables_ and
+  // expression_column_variables_.
+  auto prev_catalog_col_vars = std::move(catalog_column_ref_variables_);
+  auto prev_expr_col_vars = std::move(expression_column_variables_);
+  absl::Cleanup restore_vars = [this, &prev_catalog_col_vars,
+                                &prev_expr_col_vars]() {
+    catalog_column_ref_variables_ = std::move(prev_catalog_col_vars);
+    expression_column_variables_ = std::move(prev_expr_col_vars);
+  };
+  // Inside a generated column's expression, references to other columns in the
+  // same table can appear as either ResolvedCatalogColumnRef or
+  // ResolvedExpressionColumn. So preparing the variable map for both cases.
+  catalog_column_ref_variables_ = std::move(catalog_column_vars);
+  expression_column_variables_ = std::move(expr_col_vars);
+
+  std::vector<GraphInsertApplyOp::GeneratedColumnInfo> result;
+  result.reserve(sorted_columns.size());
+  for (const Column* col : sorted_columns) {
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        std::unique_ptr<ValueExpr> algebrized_expr,
+        AlgebrizeExpression(col->GetExpression()->GetResolvedExpression()));
+    int col_idx = GetBaseTableColumnIndex(table, col);
+    GOOGLESQL_RET_CHECK_NE(col_idx, -1);
+    result.push_back({
+        .target_column = col,
+        .target_col_idx = col_idx,
+        .expr = std::move(algebrized_expr),
+    });
+  }
+
+  return TopologicallySortedColumnsInfo{
+      .table_variables = std::move(table_variables),
+      .generated_columns = std::move(result),
+  };
+}
+
+absl::StatusOr<GraphInsertApplyOp::ElementToInsert>
+Algebrizer::AlgebrizeGraphInsertElement(
+    VariableId row_var, const ResolvedGraphInsertElement* insert_element) {
+  const GraphElementTable* element_table = insert_element->element_table();
+  const GraphElementType* element_type =
+      insert_element->type()->AsGraphElement();
+  const Table* base_table = element_table->GetTable();
+
+  std::vector<GraphInsertApplyOp::PropertyToInsert> static_properties;
+  std::vector<std::unique_ptr<ValueExpr>> dynamic_property_args;
+  // Algebrize the user-provided properties.
+  for (int i = 0; i < insert_element->property_list().size(); ++i) {
+    const auto& property_item = insert_element->property_list(i);
+    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ValueExpr> prop_expr,
+                     AlgebrizeExpression(property_item->property_value()));
+
+    const GraphPropertyDefinition* prop_def = nullptr;
+    absl::Status find_prop_status = element_table->FindPropertyDefinitionByName(
+        property_item->property_name(), prop_def);
+    if (find_prop_status.ok()) {
+      // Static properties.
+      GOOGLESQL_RET_CHECK(prop_def != nullptr)
+          << "Could not find property definition for property "
+          << property_item->property_name();
+      GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedExpr* val_expr,
+                       prop_def->GetValueExpression());
+      // The resolver guarantees that the value expression of any static
+      // property being inserted is a catalog column reference.
+      GOOGLESQL_RET_CHECK(val_expr->Is<ResolvedCatalogColumnRef>());
+      const Column* catalog_col =
+          val_expr->GetAs<ResolvedCatalogColumnRef>()->column();
+      int col_idx = GetBaseTableColumnIndex(base_table, catalog_col);
+      GOOGLESQL_RET_CHECK_NE(col_idx, -1);
+      static_properties.push_back({
+          .name = property_item->property_name(),
+          .target_column = catalog_col,
+          .target_col_idx = col_idx,
+          .expr = std::move(prop_expr),
+      });
+    } else if (absl::IsNotFound(find_prop_status)) {
+      // Dynamic properties.
+      GOOGLESQL_RET_CHECK(element_table->HasDynamicProperties())
+          << "Property " << property_item->property_name()
+          << " not found in element table " << element_table->Name();
+      // Properties not found in the element table's static definition are
+      // dynamic properties. Collect them as (property_name, property_value)
+      // argument pairs to construct the JSON_OBJECT expression below.
+      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ValueExpr> prop_name_expr,
+                       ConstExpr::Create(
+                           Value::StringValue(property_item->property_name())));
+      dynamic_property_args.push_back(std::move(prop_name_expr));
+      dynamic_property_args.push_back(std::move(prop_expr));
+    } else {
+      // Surface any other errors as that indicate some internal errors.
+      GOOGLESQL_RETURN_IF_ERROR(find_prop_status);
+    }
+  }
+
+  // Algebrize the dynamic label expression.
+  std::unique_ptr<ValueExpr> dynamic_label_expr;
+  int dynamic_label_col_idx = -1;
+  std::vector<std::unique_ptr<ValueExpr>> dynamic_labels;
+  for (const auto& label : insert_element->label_list()) {
+    if (label->label() == nullptr && label->label_name() != nullptr) {
+      GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ValueExpr> label_name_expr,
+                       AlgebrizeExpression(label->label_name()));
+      dynamic_labels.push_back(std::move(label_name_expr));
+    }
+  }
+  if (element_table->HasDynamicLabel()) {
+    const GraphDynamicLabel* dynamic_label = nullptr;
+    GOOGLESQL_RETURN_IF_ERROR(element_table->GetDynamicLabel(dynamic_label));
+    GOOGLESQL_RET_CHECK(dynamic_label != nullptr);
+    GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedExpr* backing_label_expr,
+                     dynamic_label->GetValueExpression());
+    GOOGLESQL_RET_CHECK(backing_label_expr != nullptr);
+    GOOGLESQL_RET_CHECK(backing_label_expr->Is<ResolvedCatalogColumnRef>());
+    const Column* col =
+        backing_label_expr->GetAs<ResolvedCatalogColumnRef>()->column();
+    dynamic_label_col_idx = GetBaseTableColumnIndex(base_table, col);
+    GOOGLESQL_RET_CHECK_NE(dynamic_label_col_idx, -1);
+
+    if (backing_label_expr->type()->IsString()) {
+      if (dynamic_labels.empty()) {
+        GOOGLESQL_ASSIGN_OR_RETURN(
+            dynamic_label_expr,
+            ConstExpr::Create(Value::Null(backing_label_expr->type())));
+      } else {
+        GOOGLESQL_RET_CHECK_EQ(dynamic_labels.size(), 1)
+            << "Multiple dynamic labels are not supported for a scalar string "
+               "dynamic label column";
+        dynamic_label_expr = std::move(dynamic_labels[0]);
+      }
+    } else if (backing_label_expr->type()->IsArray()) {
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          dynamic_label_expr,
+          NewArrayExpr::Create(backing_label_expr->type()->AsArray(),
+                               std::move(dynamic_labels)));
+    } else {
+      GOOGLESQL_RET_CHECK_FAIL() << "Unsupported dynamic label column type: "
+                       << backing_label_expr->type()->DebugString();
+    }
+  }
+
+  // Algebrize the dynamic properties expression.
+  std::unique_ptr<ValueExpr> dynamic_property_expr;
+  int dynamic_properties_col_idx = -1;
+  if (element_type->is_dynamic()) {
+    const GraphDynamicProperties* dynamic_properties = nullptr;
+    GOOGLESQL_RETURN_IF_ERROR(element_table->GetDynamicProperties(dynamic_properties));
+    GOOGLESQL_RET_CHECK(dynamic_properties != nullptr);
+    GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedExpr* backing_prop_expr,
+                     dynamic_properties->GetValueExpression());
+    GOOGLESQL_RET_CHECK(backing_prop_expr != nullptr);
+    GOOGLESQL_RET_CHECK(backing_prop_expr->Is<ResolvedCatalogColumnRef>());
+    const Column* col =
+        backing_prop_expr->GetAs<ResolvedCatalogColumnRef>()->column();
+    dynamic_properties_col_idx = GetBaseTableColumnIndex(base_table, col);
+    GOOGLESQL_RET_CHECK_NE(dynamic_properties_col_idx, -1);
+
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        dynamic_property_expr,
+        BuiltinScalarFunction::CreateCall(
+            FunctionKind::kJsonObject, language_options_, types::JsonType(),
+            ConvertValueExprsToAlgebraArgs(std::move(dynamic_property_args)),
+            ResolvedFunctionCallBase::DEFAULT_ERROR_MODE));
+  }
+
+  // Algebrize the base table columns and generated columns in topological
+  // order.
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      TopologicallySortedColumnsInfo gen_cols_info,
+      AlgebrizeBaseTableAndTopologicallySortGeneratedColumns(base_table));
+
+  return GraphInsertApplyOp::ElementToInsert{
+      .row_variable = row_var,
+      .table = element_table,
+      .static_properties = std::move(static_properties),
+      .dynamic_label_expr = std::move(dynamic_label_expr),
+      .dynamic_label_col_idx = dynamic_label_col_idx,
+      .dynamic_properties_expr = std::move(dynamic_property_expr),
+      .dynamic_properties_col_idx = dynamic_properties_col_idx,
+      .table_variables = std::move(gen_cols_info.table_variables),
+      .generated_columns = std::move(gen_cols_info.generated_columns),
+  };
+}
+
+absl::StatusOr<std::unique_ptr<ValueExpr>>
+Algebrizer::AlgebrizeGraphElementReturningExpr(
+    const GraphInsertApplyOp::ElementToInsert& element,
+    const GraphElementType* element_type) {
+  const GraphElementTable* element_table = element.table;
+  GOOGLESQL_RET_CHECK(element_table != nullptr);
+  const Table* base_table = element_table->GetTable();
+  GOOGLESQL_RET_CHECK(base_table != nullptr);
+
+  // Create the row struct type that strictly matches the schema of the insert
+  // graph element's base table.
+  std::vector<StructType::StructField> struct_fields;
+  struct_fields.reserve(base_table->NumColumns());
+  for (int i = 0; i < base_table->NumColumns(); ++i) {
+    struct_fields.push_back({base_table->GetColumn(i)->Name(),
+                             base_table->GetColumn(i)->GetType()});
+  }
+  const StructType* row_struct_type = nullptr;
+  GOOGLESQL_RETURN_IF_ERROR(
+      type_factory_->MakeStructType(struct_fields, &row_struct_type));
+
+  auto get_row_col =
+      [&](int col_idx) -> absl::StatusOr<std::unique_ptr<ValueExpr>> {
+    return GetRowStructFieldValueExpr(element.row_variable, row_struct_type,
+                                      col_idx);
+  };
+
+  // 1. KEY columns for the inserted element.
+  std::vector<std::unique_ptr<ValueExpr>> keys;
+  keys.reserve(element_table->GetKeyColumns().size());
+  for (int key_col_idx : element_table->GetKeyColumns()) {
+    GOOGLESQL_ASSIGN_OR_RETURN(auto key_expr, get_row_col(key_col_idx));
+    keys.push_back(std::move(key_expr));
+  }
+
+  // 2. Source and destination keys, if the inserted element is an edge.
+  std::vector<std::unique_ptr<ValueExpr>> src_node_keys;
+  std::vector<std::unique_ptr<ValueExpr>> dest_node_keys;
+  if (element_table->kind() == GraphElementTable::Kind::kEdge) {
+    const GraphEdgeTable* edge_table = element_table->AsEdgeTable();
+    for (int col_idx :
+         edge_table->GetSourceNodeTable()->GetEdgeTableColumns()) {
+      GOOGLESQL_ASSIGN_OR_RETURN(auto key_expr, get_row_col(col_idx));
+      src_node_keys.push_back(std::move(key_expr));
+    }
+    for (int col_idx : edge_table->GetDestNodeTable()->GetEdgeTableColumns()) {
+      GOOGLESQL_ASSIGN_OR_RETURN(auto key_expr, get_row_col(col_idx));
+      dest_node_keys.push_back(std::move(key_expr));
+    }
+  }
+
+  // 3. Static properties for the inserted element.
+  // This includes both properties that are supplied by the user syntax and
+  // derived properties.
+  std::vector<NewGraphElementExpr::Property> static_properties;
+  for (const PropertyType& property : element_type->property_types()) {
+    const GraphPropertyDefinition* prop_def = nullptr;
+    if (element_table->FindPropertyDefinitionByName(property.name, prop_def)
+            .ok() &&
+        prop_def != nullptr) {
+      GOOGLESQL_ASSIGN_OR_RETURN(const ResolvedExpr* val_expr,
+                       prop_def->GetValueExpression());
+      GOOGLESQL_ASSIGN_OR_RETURN(
+          std::unique_ptr<ValueExpr> prop_val,
+          AlgebrizeExpressionOverRowStruct(val_expr, element.row_variable,
+                                           row_struct_type, base_table));
+      static_properties.push_back(
+          {.name = property.name, .definition = std::move(prop_val)});
+    }
+  }
+
+  // 4. Dynamic label, if the inserted element table supports dynamic label.
+  std::unique_ptr<ValueExpr> dynamic_label_expr;
+  if (element.dynamic_label_col_idx != -1) {
+    GOOGLESQL_ASSIGN_OR_RETURN(dynamic_label_expr,
+                     get_row_col(element.dynamic_label_col_idx));
+  }
+
+  // 5. Dynamic properties, if the inserted element table supports dynamic
+  // properties.
+  std::unique_ptr<ValueExpr> dynamic_property_expr;
+  if (element.dynamic_properties_col_idx != -1) {
+    GOOGLESQL_ASSIGN_OR_RETURN(dynamic_property_expr,
+                     get_row_col(element.dynamic_properties_col_idx));
+  }
+
+  return NewGraphElementExpr::Create(
+      element_type, element_table, std::move(keys),
+      std::move(static_properties), std::move(dynamic_property_expr),
+      std::move(dynamic_label_expr),
+      std::move(src_node_keys), std::move(dest_node_keys));
+}
+
+// Returns the property names on the referenced node table corresponding to each
+// column index in `node_reference.GetNodeTableColumns()`.
+static absl::StatusOr<std::vector<std::string>>
+FindPropertyNamesForNodeReference(
+    const GraphNodeTableReference& node_reference) {
+  const GraphNodeTable* node_table = node_reference.GetReferencedNodeTable();
+  GOOGLESQL_RET_CHECK(node_table != nullptr);
+  const Table* base_table = node_table->GetTable();
+  GOOGLESQL_RET_CHECK(base_table != nullptr);
+
+  absl::flat_hash_set<const GraphPropertyDefinition*> prop_defs;
+  GOOGLESQL_RETURN_IF_ERROR(node_table->GetPropertyDefinitions(prop_defs));
+
+  // Map from Column* to property name. We ignore measure and derived properties
+  // whose definitions are not ResolvedCatalogColumnRefs because the
+  // SOURCE/DESTINATION KEY columns on the referenced node table side must be
+  // catalog columns exposed as properties.
+  absl::flat_hash_map<const Column*, std::string> col_to_prop_name;
+  for (const auto* prop_def : prop_defs) {
+    GOOGLESQL_RET_CHECK(prop_def->GetDeclaration().kind() !=
+              GraphPropertyDeclaration::Kind::kInvalid);
+    if (prop_def->GetDeclaration().kind() ==
+        GraphPropertyDeclaration::Kind::kMeasure) {
+      continue;
+    }
+    auto val_expr_or = prop_def->GetValueExpression();
+    if (val_expr_or.ok() && *val_expr_or != nullptr &&
+        (*val_expr_or)->Is<ResolvedCatalogColumnRef>()) {
+      const auto* col_ref = (*val_expr_or)->GetAs<ResolvedCatalogColumnRef>();
+      col_to_prop_name.emplace(col_ref->column(),
+                               prop_def->GetDeclaration().Name());
+    }
+  }
+
+  // Get an ordered list of property names that match the SOURCE/DESTINATION KEY
+  // columns from the referenced node table side.
+  std::vector<std::string> property_names;
+  property_names.reserve(node_reference.GetNodeTableColumns().size());
+  for (int col_idx : node_reference.GetNodeTableColumns()) {
+    GOOGLESQL_RET_CHECK_GE(col_idx, 0);
+    GOOGLESQL_RET_CHECK_LT(col_idx, base_table->NumColumns());
+    const Column* col = base_table->GetColumn(col_idx);
+    auto it = col_to_prop_name.find(col);
+    GOOGLESQL_RET_CHECK(it != col_to_prop_name.end())
+        << "Could not find property definition for column '" << col->Name()
+        << "' in node table '" << node_table->Name() << "'";
+    property_names.push_back(it->second);
+  }
+  return property_names;
+}
+
+// Returns the algebrized source/destination endpoint for an edge.
+static absl::StatusOr<GraphInsertApplyOp::NodeEndpoint>
+AlgebrizeInsertEdgeEndpoint(
+    const ResolvedColumnRef& col_ref,
+    const GraphNodeTableReference& node_reference,
+    const absl::flat_hash_map<ResolvedColumn, int>& node_col_to_index,
+    const std::unique_ptr<ColumnToVariableMapping>& column_to_variable,
+    const std::unique_ptr<const TupleSchema>& input_schema) {
+  GraphInsertApplyOp::NodeEndpoint endpoint;
+  if (auto it = node_col_to_index.find(col_ref.column());
+      it != node_col_to_index.end()) {
+    // The endpoint is a newly inserted node.
+    endpoint.source = GraphInsertApplyOp::NodeEndpoint::Source::kInsertedNode;
+    endpoint.inserted_node_index = it->second;
+  } else {
+    // The endpoint is an input node variable.
+    endpoint.source = GraphInsertApplyOp::NodeEndpoint::Source::kInputVariable;
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        VariableId var,
+        column_to_variable->LookupVariableNameForColumn(col_ref.column()));
+    std::optional<int> idx = input_schema->FindIndexForVariable(var);
+    GOOGLESQL_RET_CHECK(idx.has_value()) << "Source/dest node variable " << var.ToString()
+                               << " not found in input schema";
+    endpoint.input_slot_idx = *idx;
+    GOOGLESQL_ASSIGN_OR_RETURN(endpoint.property_names,
+                     FindPropertyNamesForNodeReference(node_reference));
+  }
+  return endpoint;
+}
+
+absl::StatusOr<std::unique_ptr<RelationalOp>>
+Algebrizer::AlgebrizeGraphInsertScan(
+    const ResolvedGraphInsertScan* graph_insert_scan,
+    std::vector<FilterConjunctInfo*>* active_conjuncts) {
+  GOOGLESQL_RET_CHECK(!graph_insert_scan->insert_node_list().empty() ||
+            !graph_insert_scan->insert_edge_list().empty());
+  // Algebrize the incoming working table.
+  GOOGLESQL_ASSIGN_OR_RETURN(
+      std::unique_ptr<RelationalOp> current_op,
+      AlgebrizeScan(graph_insert_scan->input_scan(), active_conjuncts));
+
+  std::vector<std::unique_ptr<ExprArg>> element_map;
+  element_map.reserve(graph_insert_scan->insert_node_list().size() +
+                      graph_insert_scan->insert_edge_list().size());
+
+  // Algebrize insert nodes and their returning element expressions in a single
+  // pass.
+  absl::flat_hash_map<ResolvedColumn, int> node_col_to_index;
+  std::vector<GraphInsertApplyOp::ElementToInsert> nodes_to_insert;
+  nodes_to_insert.reserve(graph_insert_scan->insert_node_list().size());
+
+  for (int i = 0; i < graph_insert_scan->insert_node_list().size(); ++i) {
+    GOOGLESQL_RET_CHECK(
+        graph_insert_scan->insert_node_list(i)->Is<ResolvedComputedColumn>());
+    const auto* computed_column =
+        graph_insert_scan->insert_node_list(i)->GetAs<ResolvedComputedColumn>();
+    node_col_to_index[computed_column->column()] = i;
+
+    const ResolvedGraphInsertElement* insert_element =
+        computed_column->expr()->GetAs<ResolvedGraphInsertElement>();
+    GOOGLESQL_RET_CHECK(insert_element != nullptr);
+    VariableId row_var = variable_gen_->GetNewVariableName(
+        absl::StrCat("node_", computed_column->column().name()));
+
+    GOOGLESQL_ASSIGN_OR_RETURN(GraphInsertApplyOp::ElementToInsert element,
+                     AlgebrizeGraphInsertElement(row_var, insert_element));
+
+    VariableId element_var = column_to_variable_->AssignNewVariableToColumn(
+        computed_column->column());
+    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ValueExpr> element_expr,
+                     AlgebrizeGraphElementReturningExpr(
+                         element, insert_element->type()->AsGraphElement()));
+    element_map.push_back(
+        std::make_unique<ExprArg>(element_var, std::move(element_expr)));
+
+    nodes_to_insert.push_back(std::move(element));
+  }
+
+  const std::unique_ptr<const TupleSchema> input_schema =
+      current_op->CreateOutputSchema();
+
+  // Algebrize insert edges and their returning element expressions in a single
+  // pass.
+  std::vector<GraphInsertApplyOp::ElementToInsert> edges_to_insert;
+  edges_to_insert.reserve(graph_insert_scan->insert_edge_list().size());
+
+  for (const auto& col : graph_insert_scan->insert_edge_list()) {
+    GOOGLESQL_RET_CHECK(col->Is<ResolvedComputedColumn>());
+    const auto* computed_column = col->GetAs<ResolvedComputedColumn>();
+    const ResolvedGraphInsertElement* insert_element =
+        computed_column->expr()->GetAs<ResolvedGraphInsertElement>();
+    GOOGLESQL_RET_CHECK(insert_element != nullptr);
+    VariableId row_var = variable_gen_->GetNewVariableName(
+        absl::StrCat("edge_", computed_column->column().name()));
+
+    GOOGLESQL_ASSIGN_OR_RETURN(GraphInsertApplyOp::ElementToInsert edge,
+                     AlgebrizeGraphInsertElement(row_var, insert_element));
+
+    const GraphEdgeTable* edge_table =
+        insert_element->element_table()->AsEdgeTable();
+    GOOGLESQL_RET_CHECK(edge_table != nullptr);
+    GOOGLESQL_RET_CHECK(insert_element->source_node() != nullptr);
+    GOOGLESQL_RET_CHECK(insert_element->dest_node() != nullptr);
+    GOOGLESQL_RET_CHECK(edge_table->GetSourceNodeTable() != nullptr);
+    GOOGLESQL_RET_CHECK(edge_table->GetDestNodeTable() != nullptr);
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        edge.source_node,
+        AlgebrizeInsertEdgeEndpoint(
+            *insert_element->source_node(), *edge_table->GetSourceNodeTable(),
+            node_col_to_index, column_to_variable_, input_schema));
+    GOOGLESQL_ASSIGN_OR_RETURN(
+        edge.dest_node,
+        AlgebrizeInsertEdgeEndpoint(
+            *insert_element->dest_node(), *edge_table->GetDestNodeTable(),
+            node_col_to_index, column_to_variable_, input_schema));
+
+    VariableId element_var = column_to_variable_->AssignNewVariableToColumn(
+        computed_column->column());
+    GOOGLESQL_ASSIGN_OR_RETURN(std::unique_ptr<ValueExpr> element_expr,
+                     AlgebrizeGraphElementReturningExpr(
+                         edge, insert_element->type()->AsGraphElement()));
+    element_map.push_back(
+        std::make_unique<ExprArg>(element_var, std::move(element_expr)));
+
+    edges_to_insert.push_back(std::move(edge));
+  }
+
+  // For each input row in `current_op`, apply insertions against the base
+  // tables of `nodes_to_insert` and `edges_to_insert` in GraphInsertApplyOp.
+  GOOGLESQL_ASSIGN_OR_RETURN(current_op,
+                   GraphInsertApplyOp::Create(std::move(nodes_to_insert),
+                                              std::move(edges_to_insert),
+                                              std::move(current_op)));
+
+  // Compute the returning graph elements based on the STRUCT typed row
+  // variables of the element tables after the insertions.
+  return ComputeOp::Create(std::move(element_map), std::move(current_op));
 }
 
 }  // namespace googlesql

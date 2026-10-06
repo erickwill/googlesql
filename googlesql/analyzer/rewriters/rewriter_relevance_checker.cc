@@ -414,7 +414,8 @@ class RewriteApplicabilityChecker : public ResolvedASTVisitor {
   absl::Status VisitResolvedGeneralizedQueryStmt(
       const ResolvedGeneralizedQueryStmt* node) override {
     std::vector<const ResolvedNode*> dml_scans;
-    node->GetDescendantsWithKinds({RESOLVED_GRAPH_INSERT_SCAN}, &dml_scans);
+    node->GetDescendantsWithKinds(
+        {RESOLVED_GRAPH_INSERT_SCAN, RESOLVED_GRAPH_UPDATE_SCAN}, &dml_scans);
     if (dml_scans.empty()) {
       applicable_rewrites_->insert(REWRITE_GENERALIZED_QUERY_STMT);
     }

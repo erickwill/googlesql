@@ -245,7 +245,7 @@ SELECT * EXCEPT (Key) FROM KeyValue |> EXTEND **COLUMNS(['Key'])
 # Null in column list
 FROM KeyValue |> EXTEND **COLUMNS(['Key', NULL])
 --
-ERROR: Column name in Column list spec cannot be NULL [at 1:35]
+ERROR: Column name in column list spec cannot be NULL [at 1:35]
 FROM KeyValue |> EXTEND **COLUMNS(['Key', NULL])
                                   ^
 ==
